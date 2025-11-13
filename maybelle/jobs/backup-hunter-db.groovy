@@ -8,16 +8,24 @@ pipelineJob('backup-hunter-db') {
                     stages {
                         stage('Pull database backup from hunter') {
                             steps {
+                                script {
+                                    // Get current block height
+                                    def blockHeight = sh(
+                                        script: 'curl -s https://eth.blockscout.com/api/v2/stats | jq -r .total_blocks',
+                                        returnStdout: true
+                                    ).trim()
+                                    env.BLOCK_HEIGHT = blockHeight
+                                }
                                 sh """
                                     # Create backup directory on maybelle
                                     mkdir -p /var/jenkins_home/hunter-db-backups
 
                                     # Pull latest backup from hunter (using non-privileged backupuser)
                                     scp backupuser@hunter.cryptograss.live:/var/backups/magenta/latest.dump \\
-                                        /var/jenkins_home/hunter-db-backups/magenta_\$(date +%Y%m%d_%H%M%S).dump
+                                        /var/jenkins_home/hunter-db-backups/magenta_auto_${BLOCK_HEIGHT}.dump
 
                                     # Create latest symlink
-                                    ln -sf /var/jenkins_home/hunter-db-backups/magenta_\$(date +%Y%m%d_%H%M%S).dump \\
+                                    ln -sf magenta_auto_${BLOCK_HEIGHT}.dump \\
                                         /var/jenkins_home/hunter-db-backups/latest.dump
 
                                     # Keep only last 30 days

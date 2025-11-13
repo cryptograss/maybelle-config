@@ -3,8 +3,16 @@
 set -e
 
 BACKUP_DIR="/var/backups/magenta"
-TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-BACKUP_FILE="magenta_memory_${TIMESTAMP}.dump"
+
+# Get current Ethereum block height for temporal anchoring
+BLOCK_HEIGHT=$(curl -s https://eth.blockscout.com/api/v2/stats | jq -r .total_blocks)
+if [ -z "$BLOCK_HEIGHT" ] || [ "$BLOCK_HEIGHT" = "null" ]; then
+    # Fallback to timestamp if block fetch fails
+    BLOCK_HEIGHT=$(date +%Y%m%d_%H%M%S)
+    echo "Warning: Could not fetch block height, using timestamp instead"
+fi
+
+BACKUP_FILE="magenta_memory_${BLOCK_HEIGHT}.dump"
 CONTAINER_NAME="magenta-postgres"
 DB_NAME="magenta_memory"
 DB_USER="magent"
