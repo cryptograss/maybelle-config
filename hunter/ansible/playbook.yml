@@ -78,6 +78,26 @@
       loop_control:
         loop_var: user
 
+    - name: Create backup directory
+      file:
+        path: /var/backups/magenta
+        state: directory
+        mode: '0755'
+
+    - name: Copy database backup script
+      copy:
+        src: "{{ playbook_dir }}/../scripts/backup-database.sh"
+        dest: /usr/local/bin/backup-magenta-db
+        mode: '0755'
+
+    - name: Install daily database backup cron job
+      cron:
+        name: "Backup magenta database"
+        hour: "2"
+        minute: "0"
+        job: "/usr/local/bin/backup-magenta-db >> /var/log/magenta-backup.log 2>&1"
+        user: root
+
     - name: Final verification - count messages in database
       shell: docker exec magenta-postgres psql -U magent -d magenta_memory -t -c "SELECT COUNT(*) FROM conversations_message;"
       register: final_message_count
