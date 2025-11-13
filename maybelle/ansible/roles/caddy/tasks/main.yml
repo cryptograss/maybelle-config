@@ -1,4 +1,25 @@
 ---
+- name: Install dependencies for Caddy repository
+  apt:
+    name:
+      - debian-keyring
+      - debian-archive-keyring
+      - apt-transport-https
+      - curl
+    state: present
+    update_cache: yes
+
+- name: Add Caddy GPG key
+  apt_key:
+    url: https://dl.cloudsmith.io/public/caddy/stable/gpg.key
+    state: present
+
+- name: Add Caddy repository
+  apt_repository:
+    repo: "deb https://dl.cloudsmith.io/public/caddy/stable/deb/debian any-version main"
+    state: present
+    filename: caddy
+
 - name: Install Caddy
   apt:
     name: caddy
