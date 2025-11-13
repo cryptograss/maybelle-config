@@ -1,7 +1,6 @@
 ---
 - name: Provision Jenkins for Cryptograss
   hosts: all
-  connection: local
 
   vars_files:
     - ../../secrets/vault-plaintext.yml
