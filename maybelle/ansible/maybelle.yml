@@ -1,0 +1,186 @@
+---
+- name: Provision Jenkins for Cryptograss
+  hosts: all
+
+  vars_files:
+    - ../../secrets/vault-plaintext.yml
+
+  vars:
+    jenkins_port: 8080
+    docker_users:
+      - jenkins
+    node_version: "23.6.1"
+    domain_name: "maybelle.cryptograss.live"
+    github_repo_url: "https://github.com/cryptograss/justinholmes.com" # TODO: make this dynamic?  Certainly it will change with the repo rename.
+    jenkins_home: "/var/jenkins_home"
+
+  tasks:
+    - name: Install required packages
+      apt:
+        name:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - software-properties-common
+          - docker.io
+        state: present
+        update_cache: yes
+
+    - name: Create Jenkins home directory
+      file:
+        path: "{{ jenkins_home }}"
+        state: directory
+        mode: '0755'
+        owner: 1000  # jenkins user in container
+        group: 1000  # jenkins group in container
+
+    - name: Copy environment file
+      copy:
+        content: "{{ maybelle_env }}"
+        dest: "{{ jenkins_home }}/.env"
+        mode: '0600'
+        owner: 1000
+        group: 1000
+
+    - name: Create Jenkins Docker build directory
+      file:
+        path: "{{ jenkins_home }}/docker-build"
+        state: directory
+        mode: '0755'
+
+    - name: Copy Dockerfile and build context
+      copy:
+        src: "{{ playbook_dir }}/../jenkins-docker/"
+        dest: "{{ jenkins_home }}/docker-build/"
+        mode: '0644'
+
+    - name: Create blank .bashrc
+      file:
+        path: "{{ jenkins_home }}/.bashrc"
+        state: touch
+        mode: '0644'
+        owner: 1000
+        group: 1000
+
+    - name: Build Jenkins Docker image
+      docker_image:
+        name: cryptograss-jenkins
+        build:
+          path: "{{ jenkins_home }}/docker-build"
+          pull: yes
+        source: build
+        force_source: yes
+
+    - name: Create Jenkins Casc Configs directory
+      file:
+        path: "{{ jenkins_home }}/casc_configs"
+        state: directory
+        mode: '0755'
+        owner: 1000
+        group: 1000
+
+    - name: Create Jenkins Docker network
+      docker_network:
+        name: jenkins-network
+        state: present
+
+    - name: Copy Jenkins configuration file
+      copy:
+        src: "{{ playbook_dir }}/../configs/jenkins.yml"
+        dest: "{{ jenkins_home }}/casc_configs/jenkins.yml"
+        mode: '0644'
+        owner: 1000
+        group: 1000
+
+    - name: Start Jenkins container
+      docker_container:
+        name: jenkins
+        image: cryptograss-jenkins:latest
+        restart_policy: unless-stopped
+        volumes:
+          - "{{ jenkins_home }}:/var/jenkins_home"
+          - /var/run/docker.sock:/var/run/docker.sock
+        env_file: "{{ jenkins_home }}/.env"
+        env:
+          CASC_JENKINS_CONFIG: "/var/jenkins_home/casc_configs/jenkins.yml"
+          JENKINS_ADMIN_ID: admin
+          JENKINS_ADMIN_PASSWORD: "{{ jenkins_admin_password }}"
+          GITHUB_TOKEN: "{{ github_token }}"
+          GITHUB_REPO_URL: "{{ github_repo_url }}"
+        ports:
+          - "8080:8080"
+        networks:
+          - name: jenkins-network
+
+    - name: Configure Caddy reverse proxy
+      include_role:
+        name: caddy
+
+    - name: Generate SSH key for root
+      openssh_keypair:
+        path: "~/.ssh/id_ed25519"
+        type: ed25519
+        state: present
+
+    - name: Ensure that known_hosts is present
+      ansible.builtin.file:
+        path: "~/.ssh/known_hosts"
+        state: touch
+
+    - name: Add known_hosts entry for nearlyfreespeech.net
+      ansible.builtin.known_hosts:
+        host: ssh.nyc1.nearlyfreespeech.net
+        hash_host: yes
+        key: "|1|kXmD+AGFcaF62DEuUeuL+47t/BA=|Ri2jtfePwmmkcsa9BerY+xC+Epw= ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAICbXE1f5S3N/flFHUm2i97tzKGJUWzxotY1HHBMIX72h"
+        state: present
+
+    - name: Add known_hosts entry for NFS
+      ansible.builtin.known_hosts:
+        host: gith.nyc1.nearlyfreespeech.net
+        hash_host: yes
+        key: "|1|kXmD+AGFcaF62DEuUeuL+47t/BA=|Ri2jtfePwmmkcsa9BerY+xC+Epw= ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAICbXE1f5S3N/flFHUm2i97tzKGJUWzxotY1HHBMIX72h"
+        state: present
+    - name: Add known_hosts entry for github.com
+      ansible.builtin.shell:
+        cmd: "ssh-keyscan -H github.com >> /var/jenkins_home/.ssh/known_hosts"
+
+    - name: Cronjob to rsync production builds to web servers
+      ansible.builtin.cron:
+        name: "push sites to prod"
+        job: "rsync -vah --progress --delete /var/jenkins_home/www/builds/production/* jmyles_justinholmescom@ssh.nyc1.nearlyfreespeech.net: >> ~/sites-rsync.log 2>&1"
+
+    - name: Create Jenkins job definitions directory
+      file:
+        path: "{{ jenkins_home }}/casc_configs/jobs"
+        state: directory
+        mode: '0755'
+        owner: 1000
+        group: 1000
+
+    - name: Copy Jenkins job definitions
+      copy:
+        src: "{{ playbook_dir }}/../jobs/"
+        dest: "{{ jenkins_home }}/jobs/"
+        mode: '0644'
+        owner: 1000
+        group: 1000
+
+    - name: Create PR builds directory
+      file:
+        path: "/var/www/builds"
+        state: directory
+        mode: '0755'
+        owner: www-data
+        group: www-data
+
+    - name: Slurp public SSH key  # TODO: This is only useful as the jenkins user, which doesn't have a key yet.  Better to custody the private key and copy it.  #230
+      ansible.builtin.slurp:
+        src: ~/.ssh/id_ed25519.pub
+      register: ssh_trinket
+
+    - name: Print SSH trinket
+      ansible.builtin.debug:
+        msg: "{{ ssh_trinket['content'] | b64decode }}"
+
+  # Handlers are now in roles (caddy role has its own handlers)
+

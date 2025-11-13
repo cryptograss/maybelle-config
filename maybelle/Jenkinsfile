@@ -1,0 +1,247 @@
+pipeline {
+    agent any
+
+    options {
+        buildDiscarder(logRotator(numToKeepStr: '50'))
+        parallelsAlwaysFailFast();
+    }
+
+    environment {
+        NVM_SILENT = 'true'
+        NODE_VERSION = '23.6.1'
+        NVM_DIR = '/var/jenkins_home/.nvm'
+        SECRETS_DIR = '/var/jenkins_home/secrets'
+        PR_BUILDS_DIR = '/var/jenkins_home/www/builds'
+        SHARED_DATA_DIR = '/var/jenkins_home/shared'
+        CHAIN_DATA_DIR = "${WORKSPACE}/output/_prebuild_chain_data"
+        COMMIT_SHA = sh(script: 'git rev-parse HEAD', returnStdout: true).trim()
+        BRANCH_NAME = sh(script: 'git rev-parse --abbrev-ref HEAD', returnStdout: true).trim()
+        IS_PRODUCTION = "${env.BRANCH_NAME == 'production' ? 'true' : 'false'}"
+    }
+
+    stages {
+        stage('Submodules') {
+            steps {
+                // Initialize and update submodules
+                sh '''
+                    git submodule init
+                    git submodule update --recursive --remote
+                '''
+            }
+        }
+
+        stage('Setup Environment') {
+            steps { // TODO: Dehydrate instead of hardcoding 40.1
+                sh '''#!/bin/bash
+                    # Install NVM if not present
+                    if [ ! -d "$NVM_DIR" ]; then
+                        curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash
+                        chmod -R 755 "$NVM_DIR"  # Add execute permissions
+                    fi
+
+                    # Ensure NVM script is executable
+                    chmod +x "$NVM_DIR/nvm.sh"
+
+                    nvm use ${NODE_VERSION} --silent
+
+                    # Copy .env file from secrets
+                    cp ${SECRETS_DIR}/0/.env .env
+                    chmod 600 .env
+                '''
+            }
+        }
+
+
+        stage('Install Dependencies') {
+            steps {
+                // Only install if node_modules doesn't exist or package.json changed
+                sh '''#!/bin/bash
+                    if [ ! -d "node_modules" ] || [ package.json -nt node_modules ]; then
+                        . "$NVM_DIR/nvm.sh" --silent
+                        nvm use ${NODE_VERSION} --silent
+                        npm install
+                    fi
+                '''
+            }
+        }
+
+        stage('Create Chain Data Directory') {
+            steps {
+                sh '''#!/bin/bash
+                    mkdir -p ${CHAIN_DATA_DIR}
+                '''
+            }
+        }
+
+        stage('Copy Chain Data') {
+            steps {
+                sh '''#!/bin/bash
+                    if [ ! -f "${SHARED_DATA_DIR}/chain_data/.last_fetch_success" ]; then
+                        echo "Chain data not found or outdated. Please ensure chain-data-fetcher job is running."
+                        exit 1
+                    fi
+
+                    # Create chain data dir
+                    mkdir -p ${CHAIN_DATA_DIR}
+
+                    # Copy shared data to workspace
+                    cp -r ${SHARED_DATA_DIR}/chain_data/* ${CHAIN_DATA_DIR}
+                    cp ${CHAIN_DATA_DIR}/time_data.json src/data/time_data.json
+                '''
+            }
+        }
+
+        stage('Fetch Blue Railroad Metadata') {
+            steps {
+                sh '''#!/bin/bash
+                    . "$NVM_DIR/nvm.sh" --silent
+                    nvm use ${NODE_VERSION} --silent
+                    npm run fetch-video-metadata
+                '''
+            }
+        }
+
+        stage('Download Blue Railroad Videos') {
+            steps {
+                sh '''#!/bin/bash
+                    . "$NVM_DIR/nvm.sh" --silent
+                    nvm use ${NODE_VERSION} --silent
+                    npm run download-videos
+                '''
+            }
+        }
+
+        stage('Run Tests') {
+            steps {
+                sh '''#!/bin/bash
+                    . "$NVM_DIR/nvm.sh" --silent
+                    nvm use ${NODE_VERSION} --silent
+                    npm test
+                    '''
+            }
+        }
+
+        stage("Build all sites in parallel") {
+            parallel {
+                stage('Build cryptograss.live') {
+                    steps {
+                        script {
+                            def branchName = getBranchName()
+                            def isPreviewBuild = !branchName.equals('origin/production')
+
+                            withEnv([
+                                "PREVIEW_BUILD=${isPreviewBuild}",
+                                "COMMIT_SHA=${COMMIT_SHA}"
+                            ]) {
+                                sh '''#!/bin/bash
+                                    export SITE=cryptograss.live
+                                    . "$NVM_DIR/nvm.sh" --silent
+                                    nvm use ${NODE_VERSION} --silent
+                                    npm run build
+                                '''
+                            }
+                       }
+                    }
+                }
+
+                stage('Build justinholmes.com') {
+                    steps {
+                        script {
+                            def branchName = getBranchName()
+                            def isPreviewBuild = !branchName.equals('origin/production')
+
+                            withEnv([
+                                "PREVIEW_BUILD=${isPreviewBuild}",
+                                "COMMIT_SHA=${COMMIT_SHA}"
+                            ]) {
+                                sh '''#!/bin/bash
+                                    export SITE=justinholmes.com
+                                    . "$NVM_DIR/nvm.sh" --silent
+                                    nvm use ${NODE_VERSION} --silent
+                                    npm run build
+                                '''
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        stage('Deploy') {
+            steps {
+                script {
+                    def branchName = getBranchName()
+
+                    if (!branchName.equals('origin/production')) {
+                        echo "Preview build for ${COMMIT_SHA} (${branchName})"
+
+                        // Preview build for any non-production branch
+                        sh "mkdir -p ${PR_BUILDS_DIR}/${COMMIT_SHA}"
+
+                        withEnv([
+                            "PREVIEW_BUILD=true",
+                            "COMMIT_SHA=${COMMIT_SHA}",
+                            "BRANCH_NAME=${branchName}"
+                        ]) {
+                            sh """
+                                export NVM_DIR="\$HOME/.nvm"
+                                [ -s "\$NVM_DIR/nvm.sh" ] && . "\$NVM_DIR/nvm.sh"
+                                nvm use ${NODE_VERSION}
+
+                                NODE_PATH=\$(npm root -g)
+                                export NODE_PATH
+
+                                node deployment/scripts/modify_build_htmls.js
+
+                                rsync -av output/dist/* ${PR_BUILDS_DIR}/${COMMIT_SHA}
+                            """
+                        }
+
+                        // Comment on the commit instead of the PR
+                        withCredentials([usernamePassword(credentialsId: 'github-token', usernameVariable: 'GITHUB_USER', passwordVariable: 'GITHUB_TOKEN')]) {
+                            def previewUrls = """🔍 [Preview URLs](https://maybelle.cryptograss.live:8081/build-previews/${COMMIT_SHA}) for ${env.COMMIT_SHA} (${env.BRANCH_NAME})"""
+                            sh """
+                                curl -X POST \
+                                -H "Authorization: token ${GITHUB_TOKEN}" \
+                                -H "Accept: application/vnd.github.v3+json" \
+                                https://api.github.com/repos/cryptograss/justinholmes.com/commits/${COMMIT_SHA}/comments \
+                                -d '{"body": "${previewUrls}"}'
+                            """
+                        }
+
+                    } else {
+                        // Production build
+
+                        echo "Production build for ${COMMIT_SHA}"
+                        sh "mkdir -p ${PR_BUILDS_DIR}/production"
+                        sh """
+                            rsync -av output/dist/* ${PR_BUILDS_DIR}/production
+                        """
+                    }
+                }
+            }
+        }
+
+    }
+    post {
+        success {
+                archiveArtifacts artifacts: 'output/**/*'
+        }
+    }
+
+}
+
+def getBranchName() {
+    def branchName = ''
+    if (env.CHANGE_BRANCH) {
+        // Pull Request
+        branchName = env.CHANGE_BRANCH
+    } else if (env.GIT_BRANCH) {
+        // Direct branch build
+        branchName = env.GIT_BRANCH
+    } else {
+        // Fallback to shell command
+        branchName = sh(script: 'git rev-parse --abbrev-ref HEAD', returnStdout: true).trim()
+    }
+    return branchName
+}
