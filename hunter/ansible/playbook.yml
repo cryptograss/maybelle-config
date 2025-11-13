@@ -5,6 +5,9 @@
   vars_files:
     - ../../secrets/vault.yml
 
+  vars:
+    caddy_config_type: "hunter"  # Use hunter-specific Caddyfile template
+
   tasks:
     - name: Validate database backup file exists (fail early)
       stat:

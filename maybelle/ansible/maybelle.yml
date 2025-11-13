@@ -13,6 +13,7 @@
     domain_name: "maybelle.cryptograss.live"
     github_repo_url: "https://github.com/cryptograss/justinholmes.com" # TODO: make this dynamic?  Certainly it will change with the repo rename.
     jenkins_home: "/var/jenkins_home"
+    caddy_config_type: "maybelle"  # Use maybelle-specific Caddyfile template
 
   tasks:
     - name: Install required packages

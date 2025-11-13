@@ -1,0 +1,25 @@
+---
+- name: Install Caddy (from Ubuntu universe repository)
+  apt:
+    name: caddy
+    state: present
+    update_cache: yes
+
+- name: Create Caddy config directory
+  file:
+    path: /etc/caddy
+    state: directory
+    mode: '0755'
+
+- name: Deploy Caddyfile
+  template:
+    src: "Caddyfile.{{ caddy_config_type | default('default') }}.j2"
+    dest: /etc/caddy/Caddyfile
+    mode: '0644'
+  notify: Reload Caddy
+
+- name: Enable and start Caddy
+  systemd:
+    name: caddy
+    enabled: yes
+    state: started
