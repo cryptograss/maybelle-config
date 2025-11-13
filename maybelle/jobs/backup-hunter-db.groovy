@@ -12,8 +12,8 @@ pipelineJob('backup-hunter-db') {
                                     # Create backup directory on maybelle
                                     mkdir -p /var/jenkins_home/hunter-db-backups
 
-                                    # Pull latest backup from hunter
-                                    scp root@hunter.cryptograss.live:/var/backups/magenta/latest.dump \\
+                                    # Pull latest backup from hunter (using non-privileged backupuser)
+                                    scp backupuser@hunter.cryptograss.live:/var/backups/magenta/latest.dump \\
                                         /var/jenkins_home/hunter-db-backups/magenta_\$(date +%Y%m%d_%H%M%S).dump
 
                                     # Create latest symlink

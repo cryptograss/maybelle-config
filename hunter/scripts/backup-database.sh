@@ -23,6 +23,12 @@ ln -sf "$BACKUP_FILE" "$BACKUP_DIR/latest.dump"
 MSG_COUNT=$(docker exec "$CONTAINER_NAME" psql -U "$DB_USER" -d "$DB_NAME" -t -c "SELECT COUNT(*) FROM conversations_message;" | tr -d ' ')
 echo "Backup complete: $MSG_COUNT messages"
 
-# Keep only last 7 days of backups
-find "$BACKUP_DIR" -name "magenta_memory_*.dump" -mtime +7 -delete
-echo "Old backups cleaned up (kept last 7 days)"
+# Keep only last 30 backups (only delete if we have more than 30)
+BACKUP_COUNT=$(ls -1 "$BACKUP_DIR"/magenta_memory_*.dump 2>/dev/null | wc -l)
+if [ "$BACKUP_COUNT" -gt 30 ]; then
+    # Delete oldest backups beyond 30
+    ls -1t "$BACKUP_DIR"/magenta_memory_*.dump | tail -n +31 | xargs rm -f
+    echo "Old backups cleaned up (kept last 30 backups)"
+else
+    echo "Backup count: $BACKUP_COUNT (keeping all - threshold is 30)"
+fi
