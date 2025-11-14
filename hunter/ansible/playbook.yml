@@ -91,7 +91,8 @@
       slurp:
         src: /var/jenkins_home/.ssh/id_ed25519_backup.pub
       register: maybelle_backup_key
-      delegate_to: maybelle.cryptograss.live
+      delegate_to: localhost
+      become: no
 
     - name: Install maybelle's backup key for backupuser
       authorized_key:
