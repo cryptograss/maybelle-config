@@ -64,10 +64,10 @@ if [ ! -f ~/.ssh/id_ed25519_hunter ]; then
     exit 1
 fi
 
-# Get Jenkins admin password from secrets directory
-JENKINS_PASSWORD=$(cat /var/jenkins_home/secrets/initialAdminPassword 2>/dev/null)
+# Get Jenkins admin password from container environment
+JENKINS_PASSWORD=$(docker exec jenkins printenv JENKINS_ADMIN_PASSWORD 2>/dev/null)
 if [ -z "$JENKINS_PASSWORD" ]; then
-    echo "Error: Could not read Jenkins admin password"
+    echo "Error: Could not read Jenkins admin password from container"
     exit 1
 fi
 
