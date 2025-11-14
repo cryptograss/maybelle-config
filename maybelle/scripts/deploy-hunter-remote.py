@@ -102,6 +102,11 @@ def deploy_hunter(backup_file):
     print("=" * 60)
     print()
 
+    # Check for vault password
+    vault_password = os.environ.get('ANSIBLE_VAULT_PASSWORD')
+    if not vault_password:
+        raise Exception("ANSIBLE_VAULT_PASSWORD environment variable not set")
+
     # First, ensure maybelle-config repo is on maybelle and up to date
     print("Updating maybelle-config repository on maybelle...")
     repo_setup = '''
@@ -125,12 +130,13 @@ def deploy_hunter(backup_file):
     print("✓ Repository updated\n")
 
     # Build ansible command - run from maybelle, targeting hunter
+    # Pass vault password via environment variable
     if backup_file:
         print(f"Using database backup: {backup_file}\n")
-        ansible_cmd = f"cd /root/maybelle-config && ansible-playbook -i hunter/ansible/inventory.yml hunter/ansible/playbook.yml -e db_backup_file=/var/jenkins_home/hunter-db-backups/{backup_file}"
+        ansible_cmd = f"ANSIBLE_VAULT_PASSWORD='{vault_password}' cd /root/maybelle-config && echo $ANSIBLE_VAULT_PASSWORD | ansible-playbook --vault-password-file=/dev/stdin -i hunter/ansible/inventory.yml hunter/ansible/playbook.yml -e db_backup_file=/var/jenkins_home/hunter-db-backups/{backup_file}"
     else:
         print("Skipping database restoration\n")
-        ansible_cmd = "cd /root/maybelle-config && ansible-playbook -i hunter/ansible/inventory.yml hunter/ansible/playbook.yml"
+        ansible_cmd = f"ANSIBLE_VAULT_PASSWORD='{vault_password}' cd /root/maybelle-config && echo $ANSIBLE_VAULT_PASSWORD | ansible-playbook --vault-password-file=/dev/stdin -i hunter/ansible/inventory.yml hunter/ansible/playbook.yml"
 
     # Run ansible FROM maybelle (ansible SSHs to hunter using our forwarded agent)
     result = subprocess.run(
