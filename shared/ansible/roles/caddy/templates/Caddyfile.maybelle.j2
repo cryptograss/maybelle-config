@@ -4,6 +4,10 @@
         # Required for Jenkins websockets
         header_up Upgrade {http.request.header.Upgrade}
         header_up Connection {http.request.header.Connection}
+
+        # Tell Jenkins about the original protocol and host
+        header_up X-Forwarded-Proto {scheme}
+        header_up X-Forwarded-Host {host}
     }
 }
 
