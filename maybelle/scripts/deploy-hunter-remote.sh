@@ -55,7 +55,7 @@ echo "Connecting to maybelle and triggering deployment..."
 echo "You will be prompted for the hunter root SSH key passphrase during deployment."
 echo ""
 
-ssh -t root@maybelle.cryptograss.live << 'EOF'
+ssh -t root@maybelle.cryptograss.live "DB_BACKUP='$DB_BACKUP' BACKUP_FILE='$BACKUP_FILE' bash -s" << 'EOF'
 # This runs on maybelle
 
 # Check hunter root SSH key exists
