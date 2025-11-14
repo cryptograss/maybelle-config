@@ -24,6 +24,7 @@
           - curl
           - software-properties-common
           - docker.io
+          - ansible
         state: present
         update_cache: yes
 
