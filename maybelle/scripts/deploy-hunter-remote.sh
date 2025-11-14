@@ -71,14 +71,17 @@ if [ -z "$JENKINS_PASSWORD" ]; then
     exit 1
 fi
 
-# Get Jenkins CSRF crumb
-CRUMB=$(curl -s "http://localhost:8080/crumbIssuer/api/xml?xpath=concat(//crumbRequestField,%22:%22,//crumb)" \
-    --user "admin:$JENKINS_PASSWORD")
-if [ -z "$CRUMB" ]; then
+# Get Jenkins CSRF crumb (field name and value separately)
+CRUMB_FIELD=$(curl -s "http://localhost:8080/crumbIssuer/api/xml?xpath=//crumbRequestField" \
+    --user "admin:$JENKINS_PASSWORD" | sed 's/<[^>]*>//g')
+CRUMB_VALUE=$(curl -s "http://localhost:8080/crumbIssuer/api/xml?xpath=//crumb" \
+    --user "admin:$JENKINS_PASSWORD" | sed 's/<[^>]*>//g')
+
+if [ -z "$CRUMB_FIELD" ] || [ -z "$CRUMB_VALUE" ]; then
     echo "Error: Could not get Jenkins CSRF crumb"
     exit 1
 fi
-echo "Got crumb: ${CRUMB:0:20}..."
+echo "Got crumb field: $CRUMB_FIELD"
 
 # Trigger Jenkins job
 echo ""
@@ -87,7 +90,7 @@ echo "Triggering Jenkins deploy-hunter job..."
 if [ "$DB_BACKUP" = "select" ]; then
     HTTP_CODE=$(curl -X POST "http://localhost:8080/job/deploy-hunter/buildWithParameters" \
         --user "admin:$JENKINS_PASSWORD" \
-        -H "$CRUMB" \
+        -H "$CRUMB_FIELD: $CRUMB_VALUE" \
         --data-urlencode "DB_BACKUP=select" \
         --data-urlencode "BACKUP_FILE=$BACKUP_FILE" \
         -w "%{http_code}" \
@@ -95,7 +98,7 @@ if [ "$DB_BACKUP" = "select" ]; then
 else
     HTTP_CODE=$(curl -X POST "http://localhost:8080/job/deploy-hunter/buildWithParameters" \
         --user "admin:$JENKINS_PASSWORD" \
-        -H "$CRUMB" \
+        -H "$CRUMB_FIELD: $CRUMB_VALUE" \
         --data-urlencode "DB_BACKUP=$DB_BACKUP" \
         -w "%{http_code}" \
         -o /tmp/jenkins_response.txt)
