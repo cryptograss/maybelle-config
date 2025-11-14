@@ -104,7 +104,9 @@ fi
 # Install maybelle backup key on hunter
 echo ""
 echo "Installing backup SSH key on hunter..."
-ssh root@hunter.cryptograss.live '
+echo "DEBUG: About to create backupuser via SSH..."
+if ssh root@hunter.cryptograss.live '
+    set -x
     # Create backupuser if doesn't exist
     id backupuser || useradd -m -s /bin/bash backupuser
 
@@ -112,18 +114,36 @@ ssh root@hunter.cryptograss.live '
     mkdir -p /home/backupuser/.ssh
     chmod 700 /home/backupuser/.ssh
     chown backupuser:backupuser /home/backupuser/.ssh
-'
+'; then
+    echo "✓ Backupuser setup complete"
+else
+    echo "✗ Failed to setup backupuser (exit code: $?)"
+    exit 1
+fi
 
 # Copy maybelle's backup public key to hunter
-scp /var/jenkins_home/.ssh/id_ed25519_backup.pub root@hunter.cryptograss.live:/tmp/maybelle_backup.pub
+echo "DEBUG: About to copy backup public key..."
+if scp /var/jenkins_home/.ssh/id_ed25519_backup.pub root@hunter.cryptograss.live:/tmp/maybelle_backup.pub; then
+    echo "✓ Public key copied"
+else
+    echo "✗ Failed to copy public key (exit code: $?)"
+    exit 1
+fi
 
-ssh root@hunter.cryptograss.live '
+echo "DEBUG: About to install public key..."
+if ssh root@hunter.cryptograss.live '
+    set -x
     # Install the key
     cat /tmp/maybelle_backup.pub >> /home/backupuser/.ssh/authorized_keys
     chmod 600 /home/backupuser/.ssh/authorized_keys
     chown backupuser:backupuser /home/backupuser/.ssh/authorized_keys
     rm /tmp/maybelle_backup.pub
-'
+'; then
+    echo "✓ Backup key installed"
+else
+    echo "✗ Failed to install key (exit code: $?)"
+    exit 1
+fi
 
 # Handle database backup if requested
 if [ "$DB_BACKUP" = "latest" ]; then
