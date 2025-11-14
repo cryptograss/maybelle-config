@@ -52,15 +52,15 @@ fi
 # Step 3: Set up SSH agent with hunter key
 echo ""
 echo "Setting up SSH agent with hunter root key..."
-read -sp "Enter passphrase for hunter root SSH key: " PASSPHRASE
-echo ""
 
-# Start ssh-agent and add key
+# Start ssh-agent
 eval $(ssh-agent -s) > /dev/null
-echo "$PASSPHRASE" | SSH_ASKPASS_REQUIRE=never ssh-add ~/.ssh/id_ed25519_hunter 2>/dev/null
+
+# Add key (will prompt for passphrase)
+ssh-add ~/.ssh/id_ed25519_hunter
 
 if [ $? -ne 0 ]; then
-    echo "Error: Failed to add SSH key to agent (wrong passphrase?)"
+    echo "Error: Failed to add SSH key to agent"
     ssh-agent -k > /dev/null
     exit 1
 fi
