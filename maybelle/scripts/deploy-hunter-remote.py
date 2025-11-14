@@ -136,12 +136,13 @@ def deploy_hunter(backup_file, vault_password):
 
     try:
         # Build ansible command using the temp vault file
+        # Run from hunter/ansible directory so ansible.cfg is found
         if backup_file:
             print(f"Using database backup: {backup_file}\n")
-            ansible_cmd = f"cd /root/maybelle-config && ansible-playbook --vault-password-file={vault_file_path} -i hunter/ansible/inventory.yml hunter/ansible/playbook.yml -e db_backup_file=/var/jenkins_home/hunter-db-backups/{backup_file}"
+            ansible_cmd = f"cd /root/maybelle-config/hunter/ansible && ansible-playbook --vault-password-file={vault_file_path} -i inventory.yml playbook.yml -e db_backup_file=/var/jenkins_home/hunter-db-backups/{backup_file}"
         else:
             print("Skipping database restoration\n")
-            ansible_cmd = f"cd /root/maybelle-config && ansible-playbook --vault-password-file={vault_file_path} -i hunter/ansible/inventory.yml hunter/ansible/playbook.yml"
+            ansible_cmd = f"cd /root/maybelle-config/hunter/ansible && ansible-playbook --vault-password-file={vault_file_path} -i inventory.yml playbook.yml"
 
         # Run ansible FROM maybelle (ansible SSHs to hunter using our forwarded agent)
         result = subprocess.run(
