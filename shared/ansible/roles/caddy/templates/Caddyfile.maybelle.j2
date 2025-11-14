@@ -6,8 +6,8 @@
         header_up Connection {http.request.header.Connection}
 
         # Tell Jenkins about the original protocol and host
-        header_up X-Forwarded-Proto {http.request.scheme}
-        header_up X-Forwarded-Host {http.request.host}
+        header_up X-Forwarded-Proto https
+        header_up X-Forwarded-Host {{ domain_name }}
     }
 }
 
