@@ -45,34 +45,6 @@ def run_scp(source, dest):
         raise DeploymentError(f"SCP failed: {source} -> {dest}")
 
 
-def select_backup_option():
-    """Prompt user for database backup option"""
-    print("Database backup options:")
-    print("  1) none - Skip database restoration")
-    print("  2) latest - Use most recent backup")
-    print("  3) select - Choose specific backup file")
-    print()
-
-    choice = input("Select option (1-3): ").strip()
-
-    if choice == "1":
-        return "none", None
-    elif choice == "2":
-        return "latest", None
-    elif choice == "3":
-        print("\nAvailable backups:")
-        result = run_ssh(
-            'root@maybelle.cryptograss.live',
-            'ls -lh /var/jenkins_home/hunter-db-backups/*.dump 2>/dev/null || echo "No backups found"',
-            capture_output=True
-        )
-        print(result.stdout)
-
-        backup_file = input("Enter backup filename (e.g., magenta_20251113_020000.dump): ").strip()
-        return "select", backup_file
-    else:
-        print("Invalid choice")
-        sys.exit(1)
 
 
 def setup_ssh_agent(key_path):
@@ -109,78 +81,14 @@ def cleanup_ssh_agent():
     print("SSH agent stopped and key cleared from memory")
 
 
-def deploy_hunter(db_backup, backup_file=None):
+def deploy_hunter():
     """Execute the actual deployment on hunter via maybelle"""
     print("\n=== Starting Hunter Deployment ===")
-    print(f"Backup option: {db_backup}")
     print(f"Deployment time: {datetime.utcnow().strftime('%c UTC')}")
     print()
 
-    # Test connection
-    print("Testing connection to hunter...")
-    try:
-        run_ssh(
-            'root@maybelle.cryptograss.live',
-            'ssh -o BatchMode=yes -o ConnectTimeout=10 root@hunter.cryptograss.live "echo Connection successful"',
-            forward_agent=True
-        )
-        print("✓ SSH connection to hunter verified")
-    except DeploymentError:
-        raise DeploymentError("Failed to connect to hunter")
-
-    # Install backup key
-    print("\nInstalling backup SSH key on hunter...")
-    install_key_script = '''
-        id backupuser || useradd -m -s /bin/bash backupuser
-        mkdir -p /home/backupuser/.ssh
-        chmod 700 /home/backupuser/.ssh
-        chown backupuser:backupuser /home/backupuser/.ssh
-    '''
-    run_ssh(
-        'root@maybelle.cryptograss.live',
-        f'ssh root@hunter.cryptograss.live "{install_key_script}"',
-        forward_agent=True
-    )
-    print("✓ Backupuser created")
-
-    # Copy and install backup public key
-    print("Copying backup public key...")
-    run_ssh(
-        'root@maybelle.cryptograss.live',
-        'scp /var/jenkins_home/.ssh/id_ed25519_backup.pub root@hunter.cryptograss.live:/tmp/maybelle_backup.pub',
-        forward_agent=True
-    )
-
-    run_ssh(
-        'root@maybelle.cryptograss.live',
-        '''ssh root@hunter.cryptograss.live "
-            cat /tmp/maybelle_backup.pub >> /home/backupuser/.ssh/authorized_keys
-            chmod 600 /home/backupuser/.ssh/authorized_keys
-            chown backupuser:backupuser /home/backupuser/.ssh/authorized_keys
-            rm /tmp/maybelle_backup.pub
-        "''',
-        forward_agent=True
-    )
-    print("✓ Backup key installed")
-
-    # Handle database backup
-    if db_backup == "latest":
-        print("\nCopying latest database backup to hunter...")
-        run_ssh(
-            'root@maybelle.cryptograss.live',
-            'scp /var/jenkins_home/hunter-db-backups/latest.dump root@hunter.cryptograss.live:/tmp/restore_db.dump',
-            forward_agent=True
-        )
-    elif db_backup == "select":
-        print(f"\nCopying selected database backup to hunter...")
-        run_ssh(
-            'root@maybelle.cryptograss.live',
-            f'scp /var/jenkins_home/hunter-db-backups/{backup_file} root@hunter.cryptograss.live:/tmp/restore_db.dump',
-            forward_agent=True
-        )
-
     # Clone/update maybelle-config on hunter
-    print("\nUpdating maybelle-config repository on hunter...")
+    print("Updating maybelle-config repository on hunter...")
     repo_script = '''
         if [ ! -d /root/maybelle-config ]; then
             git clone https://github.com/cryptograss/maybelle-config.git /root/maybelle-config
@@ -199,13 +107,11 @@ def deploy_hunter(db_backup, backup_file=None):
 
     # Execute deployment
     print("\n" + "=" * 50)
-    print("Executing hunter deployment...")
+    print("Executing hunter deployment via ansible...")
     print("=" * 50)
 
-    if db_backup == "none":
-        deploy_cmd = 'cd /root/maybelle-config/hunter && ./deploy.sh --do-not-copy-database'
-    else:
-        deploy_cmd = 'cd /root/maybelle-config/hunter && ./deploy.sh -e db_dump_file=/tmp/restore_db.dump'
+    # Just run deploy.sh - ansible handles everything
+    deploy_cmd = 'cd /root/maybelle-config/hunter && ./deploy.sh'
 
     # Run with -t to allocate PTY for ansible output
     subprocess.run(
@@ -309,14 +215,8 @@ def main():
     """Main deployment flow"""
     print("=== Deploy Hunter via Maybelle ===\n")
 
-    # Select backup option
-    db_backup, backup_file = select_backup_option()
-
     # Confirm
-    print(f"\nReady to deploy hunter with backup option: {db_backup}")
-    if backup_file:
-        print(f"Backup file: {backup_file}")
-
+    print("Ready to deploy hunter")
     confirm = input("Continue? (y/n): ").strip().lower()
     if confirm != 'y':
         print("Deployment cancelled")
@@ -335,9 +235,8 @@ def main():
     success = False
 
     try:
-        # Redirect stdout/stderr to capture logs
-        # For now, just run deployment directly
-        deploy_hunter(db_backup, backup_file)
+        # Run deployment directly - ansible output streams to terminal
+        deploy_hunter()
         success = True
         result = "success"
     except DeploymentError as e:
