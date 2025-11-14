@@ -78,6 +78,7 @@ if [ -z "$CRUMB" ]; then
     echo "Error: Could not get Jenkins CSRF crumb"
     exit 1
 fi
+echo "Got crumb: ${CRUMB:0:20}..."
 
 # Trigger Jenkins job
 echo ""
