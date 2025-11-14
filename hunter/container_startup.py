@@ -157,6 +157,13 @@ def configure_github_cli():
     logger.info("Authenticating GitHub CLI...")
     run_command(f"echo '{gh_token}' | gh auth login --with-token", user='magent')
     run_command("gh auth setup-git", user='magent')
+
+    # Configure git credential helper to use gh token for HTTPS auth
+    logger.info("Configuring git credential helper...")
+    run_command(
+        'git config --global credential.helper \'!f() { echo "username=magent-cryptograss"; echo "password=$(gh auth token)"; }; f\'',
+        user='magent'
+    )
     logger.info("✓ GitHub CLI authenticated")
 
 
