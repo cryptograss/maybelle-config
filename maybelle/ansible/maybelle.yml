@@ -16,6 +16,14 @@
     caddy_config_type: "maybelle"  # Use maybelle-specific Caddyfile template
 
   tasks:
+    - name: Update maybelle-config repository
+      git:
+        repo: https://github.com/cryptograss/maybelle-config.git
+        dest: /root/maybelle-config
+        version: production
+        force: yes
+        update: yes
+
     - name: Install required packages
       apt:
         name:
