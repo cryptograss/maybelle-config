@@ -223,6 +223,7 @@
         mode: '0644'
         owner: 1000
         group: 1000
+      notify: Restart Jenkins container
 
     - name: Create Jenkins secrets directory
       file:

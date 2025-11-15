@@ -24,6 +24,16 @@ jenkins:
           - "Job/Read"
           - "Overall/Read"
 
+  globalNodeProperties:
+    - envVars:
+        env:
+          - key: "NVM_DIR"
+            value: "/var/jenkins_home/.nvm"
+          - key: "NODE_VERSION"
+            value: "23.6.1"
+          - key: "SECRETS_DIR"
+            value: "/var/jenkins_home/secrets"
+
 jobs:
   - file: /var/jenkins_home/jobs/production.groovy
   - file: /var/jenkins_home/jobs/pull-requests.groovy
@@ -47,12 +57,3 @@ unclassified:
   location:
     adminAddress: "admin@cryptograss.live"
     url: "https://maybelle.cryptograss.live/"
-  globalNodeProperties:
-    - envVars:
-        env:
-          - key: "NVM_DIR"
-            value: "/var/jenkins_home/.nvm"
-          - key: "NODE_VERSION"
-            value: "23.6.1"
-          - key: "SECRETS_DIR"
-            value: "/var/jenkins_home/secrets"
