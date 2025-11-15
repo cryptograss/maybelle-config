@@ -194,11 +194,11 @@ def configure_mcp_server():
 
     # Add Jenkins MCP server (connects to Jenkins on maybelle)
     run_command(
-        "claude mcp add --scope user --transport sse jenkins https://maybelle.cryptograss.live/mcp/sse",
+        "claude mcp add --scope user --transport http jenkins https://maybelle.cryptograss.live/mcp-server/mcp",
         user='magent',
         check=False
     )
-    logger.info("✓ Jenkins MCP server configured: https://maybelle.cryptograss.live/mcp/sse")
+    logger.info("✓ Jenkins MCP server configured: https://maybelle.cryptograss.live/mcp-server/mcp")
 
 
 def setup_environment_variables():
