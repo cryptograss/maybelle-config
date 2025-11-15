@@ -235,9 +235,9 @@
     - name: Deploy justinholmes.com .env file from vault
       copy:
         content: |
-          ALCHEMY_API_KEY={{ alchemy_api_key }}
-          INFURA_API_KEY={{ infura_api_key }}
-          DISCORD_BOT_TOKEN={{ discord_bot_token }}
+          ALCHEMY_API_KEY={{ ALCHEMY_API_KEY }}
+          INFURA_API_KEY={{ INFURA_API_KEY }}
+          DISCORD_BOT_TOKEN={{ DISCORD_BOT_TOKEN }}
         dest: "{{ jenkins_home }}/secrets/0/.env"
         mode: '0600'
         owner: 1000
