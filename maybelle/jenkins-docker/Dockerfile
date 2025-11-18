@@ -13,6 +13,7 @@ RUN apt-get update && apt-get install -y \
     rsync \
     sudo \
     curl \
+    jq \
     docker.io \
     && rm -rf /var/lib/apt/lists/*
 
