@@ -17,7 +17,7 @@
   register: docker_gid
 
 - name: Build magenta-arthel base image
-  command: docker compose -f docker-compose-build.yml build --build-arg DOCKER_GID={{ docker_gid.stdout }}
+  command: docker compose -f docker-compose-build.yml build {{ '--no-cache' if docker_no_cache | default(false) else '' }} --build-arg DOCKER_GID={{ docker_gid.stdout }}
   args:
     chdir: "{{ base_dir }}/maybelle-config/hunter"
 

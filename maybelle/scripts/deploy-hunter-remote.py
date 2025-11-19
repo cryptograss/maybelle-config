@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import os
+import argparse
 from pathlib import Path
 from datetime import datetime
 
@@ -95,7 +96,7 @@ def cleanup_ssh_agent():
     subprocess.run(['ssh-agent', '-k'], capture_output=True)
 
 
-def deploy_hunter(backup_file, vault_password):
+def deploy_hunter(backup_file, vault_password, no_cache=False):
     """Run ansible deployment on hunter FROM maybelle"""
     print("\n" + "=" * 60)
     print("DEPLOYING HUNTER")
@@ -138,12 +139,22 @@ def deploy_hunter(backup_file, vault_password):
     try:
         # Build ansible command using the temp vault file
         # Run from hunter/ansible directory so ansible.cfg is found
+        extra_vars = []
         if backup_file:
             print(f"Using database backup: {backup_file}\n")
-            ansible_cmd = f"cd /root/maybelle-config/hunter/ansible && ansible-playbook --vault-password-file={vault_file_path} -i inventory.yml playbook.yml -e db_backup_file=/var/jenkins_home/hunter-db-backups/{backup_file}"
+            extra_vars.append(f"db_backup_file=/var/jenkins_home/hunter-db-backups/{backup_file}")
         else:
             print("Skipping database restoration\n")
-            ansible_cmd = f"cd /root/maybelle-config/hunter/ansible && ansible-playbook --vault-password-file={vault_file_path} -i inventory.yml playbook.yml"
+
+        if no_cache:
+            print("Docker build cache disabled\n")
+            extra_vars.append("docker_no_cache=true")
+
+        extra_vars_str = " -e ".join(extra_vars)
+        if extra_vars_str:
+            extra_vars_str = f" -e {extra_vars_str}"
+
+        ansible_cmd = f"cd /root/maybelle-config/hunter/ansible && ansible-playbook --vault-password-file={vault_file_path} -i inventory.yml playbook.yml{extra_vars_str}"
 
         # Run ansible FROM maybelle (ansible SSHs to hunter using our forwarded agent)
         result = subprocess.run(
@@ -183,6 +194,11 @@ def get_vault_password():
 
 
 def main():
+    parser = argparse.ArgumentParser(description='Deploy hunter via maybelle')
+    parser.add_argument('--no-cache', action='store_true',
+                        help='Disable Docker build cache (use when magenta code has changed)')
+    args = parser.parse_args()
+
     print("=" * 60)
     print("DEPLOY HUNTER VIA MAYBELLE")
     print("=" * 60)
@@ -220,7 +236,7 @@ def main():
 
     try:
         # Deploy
-        deploy_hunter(backup_file, vault_password)
+        deploy_hunter(backup_file, vault_password, no_cache=args.no_cache)
         print("\n✓ SUCCESS")
 
     except Exception as e:
