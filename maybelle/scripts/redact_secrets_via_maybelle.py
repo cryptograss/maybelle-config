@@ -95,8 +95,8 @@ def main():
         fi
         cd /root/maybelle-config
         git fetch origin
-        git checkout redact-secrets-script
-        git reset --hard origin/redact-secrets-script
+        git checkout production || git checkout -b production origin/production
+        git reset --hard origin/production
     '''
     run_ssh('root@maybelle.cryptograss.live', repo_setup)
     print("✓ Repository updated")
