@@ -132,7 +132,7 @@ def main():
             cd /root/maybelle-config
 
             # Install dependencies if needed
-            pip3 install -q psycopg2-binary pyyaml 2>/dev/null || true
+            pip3 install psycopg2-binary pyyaml
 
             # Get DB password from vault
             export MAGENTA_DB_PASSWORD=$(ansible-vault view --vault-password-file={vault_file_path} /root/maybelle-config/secrets/vault.yml 2>/dev/null | grep memory_lane_postgres_password | awk '{{print $2}}')
