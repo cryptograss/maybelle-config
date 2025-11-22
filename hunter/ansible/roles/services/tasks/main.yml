@@ -1,10 +1,24 @@
 ---
+- name: Clone or update magenta repository for services
+  git:
+    repo: https://github.com/magent-cryptograss/magenta.git
+    dest: "{{ base_dir }}/magenta-source"
+    version: production
+    force: yes
+    update: yes
+
 - name: Create .env file with secrets for services
   copy:
     dest: "{{ base_dir }}/magenta-source/.env"
     content: |
       POSTGRES_PASSWORD={{ postgres_password }}
     mode: '0600'
+
+- name: Build shared services images
+  command: docker compose -f docker-compose.services.yml build {{ '--no-cache' if docker_no_cache | default(false) else '' }}
+  args:
+    chdir: "{{ base_dir }}/magenta-source"
+  when: docker_no_cache | default(false)
 
 - name: Start shared services (MCP server, Memory Lane, Watcher)
   command: docker compose -f docker-compose.services.yml up -d --build --force-recreate
