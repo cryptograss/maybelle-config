@@ -12,3 +12,8 @@
     root * {{ jenkins_home }}/www/builds
     file_server browse
 }
+
+# Memory Lane web UI
+memory-lane.{{ domain_name }} {
+    reverse_proxy localhost:3000
+}
