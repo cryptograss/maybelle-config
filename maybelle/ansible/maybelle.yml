@@ -1,6 +1,7 @@
 ---
 - name: Provision Jenkins for Cryptograss
   hosts: all
+  connection: local
 
   vars_files:
     - ../../secrets/vault.yml
@@ -15,15 +16,14 @@
     jenkins_home: "/var/jenkins_home"
     caddy_config_type: "maybelle"  # Use maybelle-specific Caddyfile template
 
+  pre_tasks:
+    - name: Install community.docker collection
+      command: ansible-galaxy collection install community.docker
+      changed_when: false
+
   tasks:
-    - name: Update maybelle-config repository
-      git:
-        repo: https://github.com/cryptograss/maybelle-config.git
-        dest: /root/maybelle-config
-        version: production
-        force: yes
-        update: yes
-        depth: 1
+    # Note: maybelle-config repo is managed by the chapter scripts on the persistent volume
+    # No need to clone it here - we're already running from it
 
     - name: Install required packages
       apt:
@@ -33,6 +33,8 @@
           - curl
           - software-properties-common
           - docker.io
+          - docker-compose-v2
+          - docker-buildx
           - ansible
         state: present
         update_cache: yes
@@ -271,12 +273,14 @@
 
     - name: Clone or update magenta repository
       git:
-        repo: https://github.com/cryptograss/magenta.git
+        repo: https://github.com/magent-cryptograss/magenta.git
         dest: /opt/magenta/source
         version: main
         force: yes
         update: yes
         depth: 1
+      environment:
+        GIT_TERMINAL_PROMPT: "0"
 
     - name: Create Memory Lane .env file
       copy:
@@ -287,6 +291,7 @@
           POSTGRES_DB=magenta_memory
           POSTGRES_USER=magent
           POSTGRES_PASSWORD={{ memory_lane_postgres_password }}
+          DJANGO_ALLOWED_HOSTS=memory-lane.maybelle.cryptograss.live,localhost
         mode: '0600'
 
     - name: Create docker network for memory lane
@@ -298,8 +303,6 @@
       copy:
         dest: /opt/magenta/source/docker-compose.maybelle.yml
         content: |
-          version: '3.8'
-
           services:
             memory-lane:
               build:
@@ -340,17 +343,12 @@
         mode: '0644'
 
     - name: Start Memory Lane services
-      command: docker compose -f docker-compose.maybelle.yml up -d --build
-      args:
-        chdir: /opt/magenta/source
-
-    - name: Verify Memory Lane services are running
-      command: docker ps --filter "name={{ item }}" --format "{% raw %}{{.Names}}{% endraw %}"
-      register: service_check
-      failed_when: "item not in service_check.stdout"
-      loop:
-        - memory-lane
-        - mcp-server
+      community.docker.docker_compose_v2:
+        project_src: /opt/magenta/source
+        files:
+          - docker-compose.maybelle.yml
+        build: always
+        state: present
 
   handlers:
     - name: Restart Jenkins container
