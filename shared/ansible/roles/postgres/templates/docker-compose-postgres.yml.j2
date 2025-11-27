@@ -1,0 +1,26 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: magenta-postgres
+    environment:
+      POSTGRES_PASSWORD: "{{ postgres_password }}"
+      POSTGRES_DB: "{{ postgres_db }}"
+      POSTGRES_USER: magent
+    volumes:
+      - {{ base_dir }}/postgres-data:/var/lib/postgresql/data
+{% if postgres_bind_address is defined %}
+    ports:
+      - "{{ postgres_bind_address }}:5432:5432"
+{% endif %}
+    networks:
+      - {{ postgres_network | default('magenta-net') }}
+    restart: unless-stopped
+
+networks:
+  {{ postgres_network | default('magenta-net') }}:
+    name: {{ postgres_network | default('magenta-net') }}
+{% if postgres_network_external | default(false) %}
+    external: true
+{% else %}
+    driver: bridge
+{% endif %}

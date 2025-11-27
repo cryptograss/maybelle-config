@@ -286,7 +286,7 @@
       copy:
         dest: /opt/magenta/source/.env
         content: |
-          POSTGRES_HOST=10.0.0.3
+          POSTGRES_HOST=magenta-postgres
           POSTGRES_PORT=5432
           POSTGRES_DB=magenta_memory
           POSTGRES_USER=magent
@@ -298,6 +298,17 @@
       docker_network:
         name: memory-lane-net
         state: present
+
+    # PostgreSQL for Memory Lane
+    - name: Include postgres role
+      include_role:
+        name: postgres
+      vars:
+        base_dir: /opt/magenta
+        postgres_password: "{{ memory_lane_postgres_password }}"
+        postgres_db: magenta_memory
+        postgres_network: memory-lane-net
+        postgres_network_external: true
 
     - name: Create Memory Lane docker-compose file
       copy:
