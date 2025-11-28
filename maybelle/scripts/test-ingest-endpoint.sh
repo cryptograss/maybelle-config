@@ -9,9 +9,13 @@ ENDPOINT="https://memory-lane.maybelle.cryptograss.live/api/ingest/"
 echo "Testing ingest endpoint: $ENDPOINT"
 echo ""
 
+# Generate a proper UUID
+TEST_UUID=$(python3 -c "import uuid; print(uuid.uuid4())")
+SESSION_UUID=$(python3 -c "import uuid; print(uuid.uuid4())")
+
 # Create a valid test JSONL line
-TEST_LINE=$(cat <<'EOF'
-{"parentUuid":null,"type":"user","message":{"role":"user","content":"Test message from ingest script"},"uuid":"test-0000-1111-2222-333344445555","timestamp":"2025-11-28T20:00:00.000Z","sessionId":"test-session-001"}
+TEST_LINE=$(cat <<EOF
+{"parentUuid":null,"type":"user","message":{"role":"user","content":"Test message from ingest script"},"uuid":"${TEST_UUID}","timestamp":"2025-11-28T20:00:00.000Z","sessionId":"${SESSION_UUID}"}
 EOF
 )
 
