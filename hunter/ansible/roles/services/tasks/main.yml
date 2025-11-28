@@ -4,6 +4,7 @@
     dest: "{{ base_dir }}/magenta-source/.env"
     content: |
       POSTGRES_PASSWORD={{ postgres_password }}
+      WATCHER_REMOTE_ENDPOINT=https://memory-lane.maybelle.cryptograss.live/api/ingest/
     mode: '0600'
 
 - name: Start shared services (MCP server, Memory Lane, Watcher)
