@@ -175,14 +175,14 @@ def configure_mcp_server():
     """Configure MCP servers for Claude Code."""
     logger.info("=== Configuring MCP servers ===")
 
-    # The MCP memory server runs in a separate container (mcp-server) on the magenta-net network
-    # Connect to it via the service name
+    # The MCP memory server runs on maybelle, accessible via private network
+    # maybelle's MCP server listens on 10.0.0.2:8000
     run_command(
-        "claude mcp add --scope user --transport http magenta-memory-v2 http://mcp-server:8000",
+        "claude mcp add --scope user --transport http magenta-memory-v2 http://10.0.0.2:8000",
         user='magent',
         check=False  # Don't fail if already configured
     )
-    logger.info("✓ MCP memory server configured: http://mcp-server:8000")
+    logger.info("✓ MCP memory server configured: http://10.0.0.2:8000 (maybelle)")
 
     # Add Playwright MCP server for browser automation via Docker
     run_command(

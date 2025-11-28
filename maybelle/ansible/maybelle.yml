@@ -292,6 +292,7 @@
           POSTGRES_USER=magent
           POSTGRES_PASSWORD={{ memory_lane_postgres_password }}
           DJANGO_ALLOWED_HOSTS=memory-lane.maybelle.cryptograss.live,localhost
+          DJANGO_DEBUG=False
         mode: '0600'
 
     - name: Create docker network for memory lane
