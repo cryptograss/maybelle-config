@@ -1,15 +1,18 @@
 #!/bin/bash
-# Migrate postgres data from hunter to maybelle with secrets filtering
+# Migrate postgres data from hunter to maybelle
 #
 # Uses SSH agent forwarding so your local SSH key is used to reach hunter
 # through maybelle.
 #
 # Data flows: hunter → maybelle (over private network, not through your laptop)
 #
+# Uses pg_dump custom format (-Fc) which:
+#   - Is already compressed
+#   - Avoids psql \restrict issues on restore
+#   - Works reliably with pg_restore
+#
 # Prerequisites:
 #   - SSH access to both maybelle and hunter (uses your default SSH key)
-#   - ANSIBLE_VAULT_PASSWORD_FILE or ANSIBLE_VAULT_PASSWORD set
-#   - Vault file accessible locally (for decrypting secrets list)
 #
 # Usage:
 #   ./maybelle/scripts/migrate-postgres-from-hunter.sh
@@ -17,9 +20,7 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 CONFIG_FILE="$SCRIPT_DIR/../config.yml"
-VAULT_FILE="$REPO_DIR/secrets/vault.yml"
 
 # Parse config.yml
 get_config() {
@@ -32,84 +33,26 @@ MAYBELLE_USER=$(get_config user)
 echo "=== Migrate Postgres from Hunter to Maybelle ==="
 echo ""
 echo "Data flow: hunter → maybelle (via private network)"
+echo "Format: pg_dump custom format (-Fc)"
 echo ""
 
-# Get vault password from file or env var
-if [ -n "$ANSIBLE_VAULT_PASSWORD_FILE" ] && [ -f "$ANSIBLE_VAULT_PASSWORD_FILE" ]; then
-    ANSIBLE_VAULT_PASSWORD=$(cat "$ANSIBLE_VAULT_PASSWORD_FILE")
-    export ANSIBLE_VAULT_PASSWORD
-    echo "Using vault password from $ANSIBLE_VAULT_PASSWORD_FILE"
-elif [ -z "$ANSIBLE_VAULT_PASSWORD" ]; then
-    echo "ERROR: Neither ANSIBLE_VAULT_PASSWORD_FILE nor ANSIBLE_VAULT_PASSWORD is set"
-    echo "This is needed to decrypt the vault for secrets filtering"
-    exit 1
-fi
-
-# Step 1: Extract secrets from vault and upload to maybelle
-echo "Step 1: Extracting secrets from vault..."
-SECRETS_JSON=$(ansible-vault view "$VAULT_FILE" | python3 -c '
-import sys, yaml, json
-
-data = yaml.safe_load(sys.stdin)
-secrets = []
-
-def extract(d):
-    if isinstance(d, dict):
-        for v in d.values():
-            extract(v)
-    elif isinstance(d, str) and len(d) > 3:
-        secrets.append(d)
-    elif isinstance(d, list):
-        for item in d:
-            extract(item)
-
-extract(data)
-print(json.dumps(secrets))
-')
-SECRET_COUNT=$(echo "$SECRETS_JSON" | python3 -c 'import sys,json; print(len(json.load(sys.stdin)))')
-echo "  Found $SECRET_COUNT secrets to filter"
-
-# Upload secrets to temp file on maybelle (avoids shell escaping issues)
-SECRETS_TEMPFILE="/tmp/migrate_secrets_$$.json"
-echo "$SECRETS_JSON" | ssh "${MAYBELLE_USER}@${MAYBELLE_HOST}" "cat > $SECRETS_TEMPFILE && chmod 600 $SECRETS_TEMPFILE"
-echo "  Uploaded secrets list to maybelle"
-
-# Step 2: Run the migration FROM maybelle (with agent forwarding)
-echo ""
-echo "Step 2: SSHing to maybelle to run migration..."
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-BACKUP_FILENAME="magenta_memory_${TIMESTAMP}.sql.gz"
+BACKUP_FILENAME="magenta_memory_${TIMESTAMP}.dump"
 
 # SSH to maybelle with agent forwarding (-A), which then SSHs to hunter
-ssh -A "${MAYBELLE_USER}@${MAYBELLE_HOST}" bash -s "$BACKUP_FILENAME" "$SECRETS_TEMPFILE" << 'REMOTE_SCRIPT'
+echo "SSHing to maybelle to pull database from hunter..."
+ssh -A "${MAYBELLE_USER}@${MAYBELLE_HOST}" bash -s "$BACKUP_FILENAME" << 'REMOTE_SCRIPT'
 set -e
 BACKUP_FILENAME="$1"
-SECRETS_FILE="$2"
 
-echo "  Pulling database from hunter and filtering secrets..."
+echo "  Pulling database from hunter..."
 
 # Ensure backup directory exists
 mkdir -p /mnt/persist/magenta/backups
 
-# Pull from hunter (using forwarded agent), filter secrets, compress, save
-# Strip \restrict line (pg16 security token that prevents cross-server restore)
-ssh root@hunter.cryptograss.live "docker exec magenta-postgres pg_dump -U magent magenta_memory" | \
-    python3 -c "
-import sys, json
-with open('$SECRETS_FILE') as f:
-    secrets = json.load(f)
-for line in sys.stdin:
-    # Skip pg_dump restrict line (security token that won't match on restore)
-    if line.startswith(r'\restrict '):
-        continue
-    for secret in secrets:
-        if secret in line:
-            line = line.replace(secret, '[REDACTED:VAULT_SECRET]')
-    sys.stdout.write(line)
-" | gzip > "/mnt/persist/magenta/backups/${BACKUP_FILENAME}"
-
-# Clean up secrets file
-rm -f "$SECRETS_FILE"
+# Pull from hunter (using forwarded agent) in custom format
+ssh root@hunter.cryptograss.live "docker exec magenta-postgres pg_dump -Fc -U magent magenta_memory" \
+    > "/mnt/persist/magenta/backups/${BACKUP_FILENAME}"
 
 # Report size
 SIZE=$(stat -c%s "/mnt/persist/magenta/backups/${BACKUP_FILENAME}")
@@ -119,10 +62,10 @@ REMOTE_SCRIPT
 echo ""
 echo "=== Migration complete ==="
 echo ""
-echo "The filtered backup is at: /mnt/persist/magenta/backups/${BACKUP_FILENAME}"
+echo "Backup saved to: /mnt/persist/magenta/backups/${BACKUP_FILENAME}"
 echo ""
 echo "To restore:"
 echo "  1. If database is empty: Run chapter-1 (auto-restores from latest backup)"
 echo "  2. Manual restore on maybelle:"
-echo "     gunzip -c /mnt/persist/magenta/backups/${BACKUP_FILENAME} | docker exec -i magenta-postgres psql -U magent -d magenta_memory"
+echo "     docker exec -i magenta-postgres pg_restore -U magent -d magenta_memory --no-owner < /mnt/persist/magenta/backups/${BACKUP_FILENAME}"
 echo ""

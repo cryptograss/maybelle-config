@@ -377,20 +377,36 @@
       command: docker exec memory-lane python manage.py migrate --noinput
 
     # Restore from backup if database is empty
+    # Uses pg_dump custom format (.dump) which avoids psql \restrict issues
     - name: Check if database has data
       shell: docker exec magenta-postgres psql -U magent -d magenta_memory -t -c "SELECT COUNT(*) FROM conversations_message;" 2>/dev/null || echo "0"
       register: db_message_count
       changed_when: false
 
-    - name: Find latest backup file
-      shell: ls -t /mnt/persist/magenta/backups/magenta_memory_*.sql.gz 2>/dev/null | head -1
+    - name: Find latest backup file (prefer .dump, fall back to .sql.gz)
+      shell: |
+        # Prefer custom format (.dump) files
+        DUMP=$(ls -t /mnt/persist/magenta/backups/magenta_memory_*.dump 2>/dev/null | head -1)
+        if [ -n "$DUMP" ]; then
+          echo "$DUMP"
+        else
+          # Fall back to legacy .sql.gz format
+          ls -t /mnt/persist/magenta/backups/magenta_memory_*.sql.gz 2>/dev/null | head -1
+        fi
       register: latest_backup
       changed_when: false
       when: db_message_count.stdout | trim | int == 0
 
     - name: Restore from latest backup if database is empty
       shell: |
-        gunzip -c "{{ latest_backup.stdout }}" | sed '/^\\restrict /d' | docker exec -i magenta-postgres psql -U magent -d magenta_memory
+        BACKUP_FILE="{{ latest_backup.stdout }}"
+        if [[ "$BACKUP_FILE" == *.dump ]]; then
+          # Custom format: use pg_restore
+          docker exec -i magenta-postgres pg_restore -U magent -d magenta_memory --no-owner --no-privileges < "$BACKUP_FILE"
+        else
+          # Legacy plain-text format: use psql (strip \restrict line for pg16+ compatibility)
+          gunzip -c "$BACKUP_FILE" | grep -v '^\\restrict ' | docker exec -i magenta-postgres psql -U magent -d magenta_memory
+        fi
       when:
         - db_message_count.stdout | trim | int == 0
         - latest_backup.stdout | default('') | length > 0
@@ -402,6 +418,7 @@
       when: restore_result is defined and restore_result.changed | default(false)
 
     # PostgreSQL backups (backup directory already created above)
+    # Uses custom format (-Fc) which is compressed and avoids psql \restrict issues
     - name: Create postgres backup script
       copy:
         dest: /mnt/persist/magenta/backup-postgres.sh
@@ -409,17 +426,19 @@
         content: |
           #!/bin/bash
           # Daily postgres backup with 7-day retention
+          # Uses pg_dump custom format (-Fc) for reliable cross-server restores
           BACKUP_DIR="/mnt/persist/magenta/backups"
           TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-          BACKUP_FILE="$BACKUP_DIR/magenta_memory_$TIMESTAMP.sql.gz"
+          BACKUP_FILE="$BACKUP_DIR/magenta_memory_$TIMESTAMP.dump"
 
-          # Dump and compress
-          docker exec magenta-postgres pg_dump -U magent magenta_memory | gzip > "$BACKUP_FILE"
+          # Dump in custom format (already compressed)
+          docker exec magenta-postgres pg_dump -Fc -U magent magenta_memory > "$BACKUP_FILE"
 
           # Log
           echo "$(date): Backup created: $BACKUP_FILE ($(stat -c%s "$BACKUP_FILE") bytes)" >> "$BACKUP_DIR/backup.log"
 
           # Cleanup old backups (keep last 7 days)
+          find "$BACKUP_DIR" -name "magenta_memory_*.dump" -mtime +7 -delete
           find "$BACKUP_DIR" -name "magenta_memory_*.sql.gz" -mtime +7 -delete
 
     - name: Schedule daily postgres backup
