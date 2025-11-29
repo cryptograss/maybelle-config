@@ -398,7 +398,7 @@
 
     - name: Prompt for backup selection
       pause:
-        prompt: "Enter number to restore (1, 2, etc) or press Enter to skip"
+        prompt: "Enter number to restore (1, 2, etc) or 's' to skip"
       register: backup_selection
       when:
         - db_message_count.stdout | trim | int == 0
@@ -410,7 +410,7 @@
       register: selected_backup
       when:
         - db_message_count.stdout | trim | int == 0
-        - backup_selection.user_input | default('') | length > 0
+        - backup_selection.user_input | default('s') != 's'
         - backup_selection.user_input | int > 0
 
     - name: Restore from selected backup
