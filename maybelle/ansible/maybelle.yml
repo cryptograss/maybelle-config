@@ -390,7 +390,7 @@
 
     - name: Restore from latest backup if database is empty
       shell: |
-        gunzip -c "{{ latest_backup.stdout }}" | docker exec -i magenta-postgres psql -U magent -d magenta_memory
+        gunzip -c "{{ latest_backup.stdout }}" | grep -v '^\\restrict ' | docker exec -i magenta-postgres psql -U magent -d magenta_memory
       when:
         - db_message_count.stdout | trim | int == 0
         - latest_backup.stdout | default('') | length > 0

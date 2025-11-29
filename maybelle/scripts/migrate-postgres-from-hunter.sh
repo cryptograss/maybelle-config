@@ -91,13 +91,16 @@ echo "  Pulling database from hunter and filtering secrets..."
 # Ensure backup directory exists
 mkdir -p /mnt/persist/magenta/backups
 
-# Pull from hunter (using forwarded agent), filter, compress, save
+# Pull from hunter (using forwarded agent), filter secrets, strip \restrict line, compress, save
 ssh root@hunter.cryptograss.live "docker exec magenta-postgres pg_dump -U magent magenta_memory" | \
     python3 -c "
 import sys, json
 with open('$SECRETS_FILE') as f:
     secrets = json.load(f)
 for line in sys.stdin:
+    # Skip pg_dump's restrict line (security token that won't match on restore)
+    if line.startswith('\\\\\\\\restrict '):
+        continue
     for secret in secrets:
         if secret in line:
             line = line.replace(secret, '[REDACTED:VAULT_SECRET]')
