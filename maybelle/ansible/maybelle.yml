@@ -378,7 +378,7 @@
 
     # Restore from backup if database is empty
     - name: Check if database has data
-      shell: docker exec magenta-postgres psql -U magent -d magenta_memory -t -c "SELECT COUNT(*) FROM messages;" 2>/dev/null || echo "0"
+      shell: docker exec magenta-postgres psql -U magent -d magenta_memory -t -c "SELECT COUNT(*) FROM conversations_message;" 2>/dev/null || echo "0"
       register: db_message_count
       changed_when: false
 
