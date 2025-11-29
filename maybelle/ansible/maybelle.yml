@@ -416,9 +416,11 @@
     - name: Restore from selected backup
       shell: |
         BACKUP_FILE="{{ selected_backup.stdout }}"
+        # Convert host path to container path (/mnt/persist/magenta/backups -> /backups)
+        CONTAINER_PATH="/backups/$(basename "$BACKUP_FILE")"
         if [[ "$BACKUP_FILE" == *.dump ]]; then
-          # Custom format: use pg_restore
-          docker exec -i magenta-postgres pg_restore -U magent -d magenta_memory --no-owner --no-privileges < "$BACKUP_FILE"
+          # Custom format: use pg_restore with file inside container
+          docker exec magenta-postgres pg_restore -U magent -d magenta_memory --no-owner --no-privileges "$CONTAINER_PATH"
         else
           # Legacy plain-text format: use psql (strip \restrict line for pg16+ compatibility)
           gunzip -c "$BACKUP_FILE" | grep -v '^\\restrict ' | docker exec -i magenta-postgres psql -U magent -d magenta_memory
