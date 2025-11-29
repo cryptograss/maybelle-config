@@ -330,6 +330,7 @@
                 - DJANGO_SETTINGS_MODULE=memory_viewer.settings
               ports:
                 - "127.0.0.1:3000:3000"
+                - "10.0.0.2:3000:3000"
               networks:
                 - memory-lane-net
               restart: unless-stopped
