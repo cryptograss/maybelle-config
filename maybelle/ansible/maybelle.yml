@@ -433,6 +433,9 @@
     - name: Run Django migrations
       command: docker exec memory-lane python manage.py migrate --noinput
 
+    - name: Copy secrets check script into memory-lane container
+      shell: docker cp {{ playbook_dir }}/../../scripts/check_db_for_secrets.py memory-lane:/app/check_db_for_secrets.py
+
     # Restore from backup if database is empty
     # Uses pg_dump custom format (.dump) which avoids psql \restrict issues
     - name: Check if database has data
