@@ -286,9 +286,9 @@
         - /mnt/persist/magenta
         - /mnt/persist/magenta/backups
 
-    - name: Clone or update magenta repository
+    - name: Clone or update memory-lane repository
       git:
-        repo: https://github.com/magent-cryptograss/magenta.git
+        repo: https://github.com/jMyles/memory-lane.git
         dest: /mnt/persist/magenta/source
         version: main
         force: yes
