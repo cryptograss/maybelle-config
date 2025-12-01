@@ -56,7 +56,7 @@ fi
 echo ""
 echo "Updating maybelle-config repository..."
 cd "$REPO_DIR"
-git fetch origin
+git fetch origin main production
 
 # Hard reset to production (handles force pushes/rebases)
 git checkout production 2>/dev/null || git checkout -b production origin/production
