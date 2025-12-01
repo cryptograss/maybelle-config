@@ -56,7 +56,10 @@ fi
 echo ""
 echo "Updating maybelle-config repository..."
 cd "$REPO_DIR"
-git fetch origin
+
+# Ensure we can fetch all branches (fixes shallow single-branch clones)
+git remote set-branches origin '*'
+git fetch origin main production
 
 # Hard reset to production (handles force pushes/rebases)
 git checkout production 2>/dev/null || git checkout -b production origin/production
@@ -105,23 +108,36 @@ if [ -n "$REPORTER_PASS" ]; then
     # Read log, truncate if huge
     LOG_CONTENT=$(tail -c 50000 "$LOG_FILE" 2>/dev/null || echo "(no log)")
 
-    AUTH=$(echo -n "reporter:$REPORTER_PASS" | base64)
+    COOKIE_JAR="/tmp/jenkins_cookies_$$"
 
-    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
-        -X POST \
-        -H "Authorization: Basic $AUTH" \
-        --data-urlencode "DEPLOY_USER=$DEPLOY_USER" \
-        --data-urlencode "DEPLOY_STATUS=$DEPLOY_STATUS" \
-        --data-urlencode "DEPLOY_DURATION=$DURATION" \
-        --data-urlencode "DEPLOY_LOG=$LOG_CONTENT" \
-        "http://localhost:8080/job/deploy-hunter/buildWithParameters" \
-        2>/dev/null || echo "000")
+    # Get CSRF crumb (and session cookie - crumb is tied to session)
+    CRUMB=$(curl -s -c "$COOKIE_JAR" -u "reporter:$REPORTER_PASS" \
+        "http://localhost:8080/crumbIssuer/api/json" \
+        | python3 -c "import sys,json; print(json.load(sys.stdin)['crumb'])" 2>/dev/null)
 
-    if [ "$HTTP_CODE" = "201" ] || [ "$HTTP_CODE" = "200" ]; then
-        echo "✓ Reported to Jenkins"
+    if [ -z "$CRUMB" ]; then
+        echo "⚠ Could not get Jenkins crumb"
     else
-        echo "⚠ Could not report to Jenkins (HTTP $HTTP_CODE)"
+        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+            -b "$COOKIE_JAR" \
+            -X POST \
+            -u "reporter:$REPORTER_PASS" \
+            -H "Jenkins-Crumb: $CRUMB" \
+            --data-urlencode "DEPLOY_USER=$DEPLOY_USER" \
+            --data-urlencode "DEPLOY_STATUS=$DEPLOY_STATUS" \
+            --data-urlencode "DEPLOY_DURATION=$DURATION" \
+            --data-urlencode "DEPLOY_LOG=$LOG_CONTENT" \
+            "http://localhost:8080/job/deploy-hunter/buildWithParameters" \
+            2>/dev/null || echo "000")
+
+        if [ "$HTTP_CODE" = "201" ] || [ "$HTTP_CODE" = "200" ]; then
+            echo "✓ Reported to Jenkins"
+        else
+            echo "⚠ Could not report to Jenkins (HTTP $HTTP_CODE)"
+        fi
     fi
+
+    rm -f "$COOKIE_JAR"
 fi
 
 echo ""
