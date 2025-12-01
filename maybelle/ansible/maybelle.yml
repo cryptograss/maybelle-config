@@ -508,9 +508,18 @@
           #!/bin/bash
           # Daily postgres backup with 7-day retention
           # Uses pg_dump custom format (-Fc) for reliable cross-server restores
+          # Backups named by Ethereum block height for temporal anchoring
           BACKUP_DIR="/mnt/persist/magenta/backups"
-          TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-          BACKUP_FILE="$BACKUP_DIR/magenta_memory_$TIMESTAMP.dump"
+
+          # Get current Ethereum block height
+          BLOCK_HEIGHT=$(curl -s https://eth.blockscout.com/api/v2/stats | jq -r .total_blocks)
+          if [ -z "$BLOCK_HEIGHT" ] || [ "$BLOCK_HEIGHT" = "null" ]; then
+              # Fallback to timestamp if block fetch fails
+              BLOCK_HEIGHT="ts_$(date +%Y%m%d_%H%M%S)"
+              echo "$(date): WARNING - Could not fetch block height, using timestamp" >> "$BACKUP_DIR/backup.log"
+          fi
+
+          BACKUP_FILE="$BACKUP_DIR/magenta_memory_${BLOCK_HEIGHT}.dump"
 
           # Dump in custom format (already compressed)
           docker exec magenta-postgres pg_dump -Fc -U magent magenta_memory > "$BACKUP_FILE"
