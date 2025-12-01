@@ -1,8 +1,12 @@
 pipelineJob('deploy-hunter') {
-    description('Hunter deployment job - triggered externally via deploy-hunter-remote.sh')
+    description('Hunter deployment log - triggered externally via deploy-hunter-remote.py')
 
-    // Disable this job from being run directly in Jenkins UI
-    disabled(true)
+    parameters {
+        stringParam('DEPLOY_USER', '', 'User who initiated the deploy')
+        stringParam('DEPLOY_STATUS', '', 'success or failure')
+        stringParam('DEPLOY_DURATION', '', 'Duration in seconds')
+        textParam('DEPLOY_LOG', '', 'Ansible output log')
+    }
 
     definition {
         cps {
@@ -10,11 +14,26 @@ pipelineJob('deploy-hunter') {
                 pipeline {
                     agent any
                     stages {
-                        stage('Info') {
+                        stage('Deploy Report') {
                             steps {
-                                echo "This job is triggered externally via deploy-hunter-remote.sh"
-                                echo "Logs and history are recorded via Jenkins API"
-                                echo "Do not run this job directly - use the deployment script instead"
+                                script {
+                                    def status = params.DEPLOY_STATUS ?: 'unknown'
+                                    def user = params.DEPLOY_USER ?: 'unknown'
+                                    def duration = params.DEPLOY_DURATION ?: 'unknown'
+
+                                    echo "=== Hunter Deployment Report ==="
+                                    echo ""
+                                    echo "User: ${user}"
+                                    echo "Status: ${status}"
+                                    echo "Duration: ${duration} seconds"
+                                    echo ""
+                                    echo "=== Ansible Output ==="
+                                    echo params.DEPLOY_LOG ?: '(no log provided)'
+
+                                    if (status == 'failure') {
+                                        error("Deployment failed")
+                                    }
+                                }
                             }
                         }
                     }

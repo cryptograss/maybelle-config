@@ -16,6 +16,10 @@ Prerequisites:
 import subprocess
 import sys
 import os
+import time
+import urllib.request
+import urllib.parse
+import getpass
 
 
 def run_ssh(host, command, capture_output=False, check=True, allocate_tty=False):
@@ -34,6 +38,27 @@ def run_ssh(host, command, capture_output=False, check=True, allocate_tty=False)
     return result
 
 
+def report_to_jenkins(user, status, duration, log_output):
+    """Report deployment result to Jenkins for logging"""
+    try:
+        jenkins_url = "http://maybelle.cryptograss.live:8080/job/deploy-hunter/buildWithParameters"
+
+        params = {
+            'DEPLOY_USER': user,
+            'DEPLOY_STATUS': status,
+            'DEPLOY_DURATION': str(int(duration)),
+            'DEPLOY_LOG': log_output[-50000:] if log_output else '(no log captured)'  # Truncate if huge
+        }
+
+        data = urllib.parse.urlencode(params).encode('utf-8')
+        req = urllib.request.Request(jenkins_url, data=data, method='POST')
+
+        urllib.request.urlopen(req, timeout=10)
+        print("✓ Reported to Jenkins")
+    except Exception as e:
+        print(f"⚠ Could not report to Jenkins: {e}")
+
+
 def deploy_hunter(vault_password):
     """Run ansible deployment on hunter FROM maybelle"""
     print("\n" + "=" * 60)
@@ -42,6 +67,9 @@ def deploy_hunter(vault_password):
     print()
 
     maybelle = 'root@maybelle.cryptograss.live'
+    start_time = time.time()
+    log_output = []
+    deploy_user = getpass.getuser()
 
     # First, ensure maybelle-config repo is on maybelle and up to date
     print("Updating maybelle-config repository on maybelle...")
@@ -85,21 +113,36 @@ def deploy_hunter(vault_password):
         print()
 
         # Run ansible FROM maybelle - maybelle SSHs to hunter using its own key
+        # Capture output for Jenkins report
         result = subprocess.run(
             ['ssh', '-t', maybelle, ansible_cmd],
+            capture_output=True,
+            text=True,
             check=False
         )
+
+        # Print output to console
+        if result.stdout:
+            print(result.stdout)
+            log_output.append(result.stdout)
+        if result.stderr:
+            print(result.stderr, file=sys.stderr)
+            log_output.append(result.stderr)
+
     finally:
         # Clean up vault password file
         run_ssh(maybelle, f'rm -f {vault_file_path}', check=False)
 
+    duration = time.time() - start_time
     print()
     print("=" * 60)
 
     if result.returncode != 0:
+        report_to_jenkins(deploy_user, 'failure', duration, '\n'.join(log_output))
         raise Exception(f"Deployment failed with exit code {result.returncode}")
 
     print("✓ Deployment complete")
+    report_to_jenkins(deploy_user, 'success', duration, '\n'.join(log_output))
 
 
 def get_vault_password():
