@@ -5,6 +5,7 @@
 - name: Setup Magenta Multi-User Development Environment
   hosts: hunter
   become: yes
+  any_errors_fatal: true
   vars_files:
     - ../../secrets/vault.yml
 
