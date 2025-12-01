@@ -113,6 +113,7 @@
         restart_policy: unless-stopped
         volumes:
           - "{{ jenkins_home }}:/var/jenkins_home"
+          - "/mnt/persist/magenta/backups:/mnt/persist/magenta/backups:ro"
           # Docker socket removed - Jenkins doesn't need it and it's a security risk
         env_file: "{{ jenkins_home }}/.env"
         env:
