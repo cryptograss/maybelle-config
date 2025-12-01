@@ -11,6 +11,7 @@
 #
 
 set -e
+set -o pipefail
 
 DEPLOY_USER="${1:-remote}"
 FRESH_HOST=false
