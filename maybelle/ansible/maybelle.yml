@@ -160,6 +160,14 @@
         owner: root
         group: root
 
+    - name: Deploy Jenkins reporter password for deploy scripts
+      copy:
+        content: "{{ jenkins_reporter_password }}"
+        dest: "/root/.jenkins_reporter_password"
+        mode: '0600'
+        owner: root
+        group: root
+
     - name: Create .ssh directory for jenkins user
       file:
         path: "{{ jenkins_home }}/.ssh"
