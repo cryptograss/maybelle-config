@@ -21,9 +21,9 @@
     group: 1000
     mode: '0755'
 
-- name: Create .claude directory for user
+- name: Create .claude directory for user (in persistent home directory)
   file:
-    path: "{{ base_dir }}/{{ user.name }}/.claude"
+    path: "{{ base_dir }}/{{ user.name }}/home/.claude"
     state: directory
     owner: 1000  # magent user ID in container
     group: 1000
@@ -40,14 +40,46 @@
 - name: Copy shared CLAUDE.md to user .claude directory
   copy:
     src: "/opt/magenta/magenta-source/CLAUDE.md"
-    dest: "{{ base_dir }}/{{ user.name }}/.claude/CLAUDE.md"
+    dest: "{{ base_dir }}/{{ user.name }}/home/.claude/CLAUDE.md"
     owner: 1000
     group: 1000
     remote_src: yes
 
+- name: Create Claude Code local settings
+  copy:
+    dest: "{{ base_dir }}/{{ user.name }}/home/.claude/settings.local.json"
+    owner: 1000
+    group: 1000
+    mode: '0644'
+    content: |
+      {
+        "includeCoAuthoredBy": false,
+        "permissions": {
+          "allow": [
+            "Read(*)",
+            "Bash(git:*)",
+            "Bash(ls:*)",
+            "Bash(cat:*)",
+            "Bash(head:*)",
+            "Bash(tail:*)",
+            "Bash(wc:*)",
+            "Bash(netstat:*)",
+            "Bash(ss:*)",
+            "Bash(ps:*)",
+            "Bash(hostname:*)",
+            "Bash(which:*)",
+            "Bash(find:*)",
+            "Bash(grep:*)",
+            "Bash(docker:*)",
+            "Bash(docker-compose:*)",
+            "mcp__magenta-memory-v2"
+          ]
+        }
+      }
+
 - name: Create user context file
   copy:
-    dest: "{{ base_dir }}/{{ user.name }}/.claude/USER_CONTEXT.md"
+    dest: "{{ base_dir }}/{{ user.name }}/home/.claude/USER_CONTEXT.md"
     owner: 1000
     group: 1000
     content: |
