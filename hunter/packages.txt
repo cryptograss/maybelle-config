@@ -39,3 +39,6 @@ tmux
 screen
 mosh
 imagemagick
+jp2a
+caca-utils
+libaa-bin
