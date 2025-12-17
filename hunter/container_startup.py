@@ -131,6 +131,92 @@ def setup_workspace():
         run_install=False
     )
 
+    # Clone pickipedia (MediaWiki knowledge base)
+    ensure_repo_cloned(
+        "https://github.com/cryptograss/pickipedia.git",
+        workspace / "pickipedia",
+        user='magent',
+        run_install=False
+    )
+
+    # Create pickipedia config for local preview if it doesn't exist
+    pickipedia_dir = workspace / "pickipedia"
+    if pickipedia_dir.exists():
+        # Create .env with user-specific settings
+        pickipedia_env = pickipedia_dir / ".env"
+        dev_name = os.environ.get('DEVELOPER_NAME', 'dev')
+        if not pickipedia_env.exists():
+            pickipedia_env.write_text(f"""# PickiPedia local preview settings for {dev_name}
+MEDIAWIKI_VERSION=1.43.0
+WIKI_PORT=4005
+COMPOSE_PROJECT_NAME=pickipedia-{dev_name}
+DB_NAME=pickipedia
+DB_USER=pickipedia
+DB_PASSWORD=pickipedia_dev
+DB_ROOT_PASSWORD=root_dev
+""")
+            run_command(f"chown magent:magent {pickipedia_env}")
+            logger.info("✓ Created pickipedia .env for local preview")
+
+        # Create LocalSettings.local.php for docker-compose preview
+        local_settings = pickipedia_dir / "LocalSettings.local.php"
+        if not local_settings.exists():
+            local_settings.write_text("""<?php
+// Local preview settings - connects to docker-compose MySQL
+$wgSecretKey = "dev-secret-key-not-for-production-use-only";
+$wgUpgradeKey = "dev-upgrade-key";
+$wgDBtype = "mysql";
+$wgDBserver = "db";  // docker-compose service name
+$wgDBname = "pickipedia";
+$wgDBuser = "pickipedia";
+$wgDBpassword = "pickipedia_dev";
+""")
+            run_command(f"chown magent:magent {local_settings}")
+            logger.info("✓ Created pickipedia LocalSettings.local.php for preview")
+
+        # Create helper script to load production backup into preview
+        load_backup_script = pickipedia_dir / "load-backup.sh"
+        if not load_backup_script.exists():
+            load_backup_script.write_text("""#!/bin/bash
+# Load latest PickiPedia backup into preview MySQL
+# Run this after 'docker-compose up -d' to populate with production data
+
+set -e
+
+BACKUP_DIR="/opt/magenta/pickipedia-backups"  # Synced from maybelle daily
+LATEST_BACKUP=$(ls -t ${BACKUP_DIR}/pickipedia_*.sql.gz 2>/dev/null | head -1)
+
+if [ -z "$LATEST_BACKUP" ]; then
+    echo "No backup found in $BACKUP_DIR"
+    echo "Backups are created daily at 3:30am on maybelle"
+    exit 1
+fi
+
+echo "Loading backup: $LATEST_BACKUP"
+
+# Get container name from compose project
+CONTAINER=$(docker ps --filter "name=pickipedia.*db" --format "{{.Names}}" | head -1)
+if [ -z "$CONTAINER" ]; then
+    echo "MySQL container not running. Start with: docker-compose up -d"
+    exit 1
+fi
+
+# Wait for MySQL to be ready
+echo "Waiting for MySQL..."
+until docker exec "$CONTAINER" mysqladmin ping -h localhost --silent 2>/dev/null; do
+    sleep 1
+done
+
+# Load the backup
+echo "Loading data (this may take a moment)..."
+gunzip -c "$LATEST_BACKUP" | docker exec -i "$CONTAINER" mysql -u pickipedia -ppickipedia_dev pickipedia
+
+echo "Done! PickiPedia preview now has production data."
+""")
+            run_command(f"chown magent:magent {load_backup_script}")
+            run_command(f"chmod +x {load_backup_script}")
+            logger.info("✓ Created pickipedia load-backup.sh script")
+
 
 def setup_host_files():
     """Set up SSH keys and other host-provided config."""
