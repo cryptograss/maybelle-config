@@ -142,12 +142,14 @@ def setup_workspace():
     # Create pickipedia config for local preview if it doesn't exist
     pickipedia_dir = workspace / "pickipedia"
     if pickipedia_dir.exists():
-        # Create .env
+        # Create .env with user-specific settings
         pickipedia_env = pickipedia_dir / ".env"
+        dev_name = os.environ.get('DEVELOPER_NAME', 'dev')
         if not pickipedia_env.exists():
-            pickipedia_env.write_text("""# PickiPedia local preview settings
+            pickipedia_env.write_text(f"""# PickiPedia local preview settings for {dev_name}
 MEDIAWIKI_VERSION=1.43.0
 WIKI_PORT=4005
+COMPOSE_PROJECT_NAME=pickipedia-{dev_name}
 DB_NAME=pickipedia
 DB_USER=pickipedia
 DB_PASSWORD=pickipedia_dev
