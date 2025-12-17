@@ -131,6 +131,47 @@ def setup_workspace():
         run_install=False
     )
 
+    # Clone pickipedia (MediaWiki knowledge base)
+    ensure_repo_cloned(
+        "https://github.com/cryptograss/pickipedia.git",
+        workspace / "pickipedia",
+        user='magent',
+        run_install=False
+    )
+
+    # Create pickipedia config for local preview if it doesn't exist
+    pickipedia_dir = workspace / "pickipedia"
+    if pickipedia_dir.exists():
+        # Create .env
+        pickipedia_env = pickipedia_dir / ".env"
+        if not pickipedia_env.exists():
+            pickipedia_env.write_text("""# PickiPedia local preview settings
+MEDIAWIKI_VERSION=1.43.0
+WIKI_PORT=4005
+DB_NAME=pickipedia
+DB_USER=pickipedia
+DB_PASSWORD=pickipedia_dev
+DB_ROOT_PASSWORD=root_dev
+""")
+            run_command(f"chown magent:magent {pickipedia_env}")
+            logger.info("✓ Created pickipedia .env for local preview")
+
+        # Create LocalSettings.local.php for docker-compose preview
+        local_settings = pickipedia_dir / "LocalSettings.local.php"
+        if not local_settings.exists():
+            local_settings.write_text("""<?php
+// Local preview settings - connects to docker-compose MySQL
+$wgSecretKey = "dev-secret-key-not-for-production-use-only";
+$wgUpgradeKey = "dev-upgrade-key";
+$wgDBtype = "mysql";
+$wgDBserver = "db";  // docker-compose service name
+$wgDBname = "pickipedia";
+$wgDBuser = "pickipedia";
+$wgDBpassword = "pickipedia_dev";
+""")
+            run_command(f"chown magent:magent {local_settings}")
+            logger.info("✓ Created pickipedia LocalSettings.local.php for preview")
+
 
 def setup_host_files():
     """Set up SSH keys and other host-provided config."""
