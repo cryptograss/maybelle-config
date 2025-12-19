@@ -425,12 +425,40 @@ def start_pickipedia_preview():
         check=False
     )
 
-    if result.returncode == 0:
-        logger.info("✓ PickiPedia preview started on port 4005")
-        logger.info(f"  Access at: https://pickipedia.{dev_name}.hunter.cryptograss.live")
-    else:
+    if result.returncode != 0:
         logger.warning("PickiPedia preview failed to start (non-fatal)")
         logger.warning(f"  Error: {result.stderr if hasattr(result, 'stderr') else 'unknown'}")
+        return
+
+    logger.info("✓ PickiPedia containers started")
+
+    # Wait for DB to be ready, then check if it needs initialization
+    import time
+    time.sleep(10)  # Give MariaDB time to start
+
+    # Check if database has data (Main_Page exists)
+    db_container = f"pickipedia-{dev_name}-db-1"
+    check_result = run_command(
+        f"docker exec {db_container} mysql -u pickipedia -ppickipedia_dev pickipedia -e \"SELECT COUNT(*) FROM page WHERE page_title='Main_Page'\" 2>/dev/null",
+        check=False
+    )
+
+    needs_init = check_result.returncode != 0 or "0" in (check_result.stdout or "")
+
+    if needs_init:
+        logger.info("Database empty, loading backup...")
+        load_script = pickipedia_dir / "load-backup.sh"
+        if load_script.exists():
+            run_command(f"bash {load_script}", cwd=pickipedia_dir, check=False)
+            logger.info("Running MediaWiki update.php...")
+            wiki_container = f"pickipedia-{dev_name}-wiki-1"
+            run_command(
+                f"docker exec {wiki_container} php /var/www/html/maintenance/update.php --quick",
+                check=False
+            )
+            logger.info("✓ Database initialized")
+
+    logger.info(f"✓ PickiPedia preview ready at: https://pickipedia.{dev_name}.hunter.cryptograss.live")
 
 
 def start_services():
