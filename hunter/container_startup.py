@@ -418,9 +418,11 @@ def start_pickipedia_preview():
     host_pickipedia_dir = f"/opt/magenta/{dev_name}/home/workspace/pickipedia"
 
     # Pull latest pickipedia config from production branch
+    # Use -f to force checkout - local load-backup.sh may conflict with tracked version
     logger.info("Pulling latest pickipedia config...")
     run_command(f"git config --global --add safe.directory {pickipedia_dir}", check=False)
-    run_command("git checkout production", cwd=pickipedia_dir, user='magent', check=False)
+    run_command("git fetch origin", cwd=pickipedia_dir, user='magent', check=False)
+    run_command("git checkout -f production", cwd=pickipedia_dir, user='magent', check=False)
     run_command("git pull --ff-only origin production", cwd=pickipedia_dir, user='magent', check=False)
 
     # Start docker-compose with host path for volumes
