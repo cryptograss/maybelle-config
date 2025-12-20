@@ -45,6 +45,17 @@ if ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no "${NFS_USER}@${NFS_HOST}" \
     else
         log "WARNING - sync to hunter failed"
     fi
+
+    # Backup images from NFS
+    log "Backing up images from NFS..."
+    IMAGES_BACKUP_DIR="$BACKUP_DIR/images"
+    mkdir -p "$IMAGES_BACKUP_DIR"
+    if rsync -avz -e "ssh -i $SSH_KEY -o StrictHostKeyChecking=no" \
+        "${NFS_USER}@${NFS_HOST}:images/" "$IMAGES_BACKUP_DIR/" >> "$LOG_FILE" 2>&1; then
+        log "Images backup complete: $(find "$IMAGES_BACKUP_DIR" -type f | wc -l) files"
+    else
+        log "WARNING - images backup failed"
+    fi
 else
     log "Backup FAILED"
     rm -f "$BACKUP_FILE"  # Remove partial file
