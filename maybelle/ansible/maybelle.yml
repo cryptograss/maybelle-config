@@ -429,15 +429,6 @@
         owner: www-data
         group: www-data
 
-    - name: Slurp public SSH key  # TODO: This is only useful as the jenkins user, which doesn't have a key yet.  Better to custody the private key and copy it.  #230
-      ansible.builtin.slurp:
-        src: ~/.ssh/id_ed25519.pub
-      register: ssh_trinket
-
-    - name: Print SSH trinket
-      ansible.builtin.debug:
-        msg: "{{ ssh_trinket['content'] | b64decode }}"
-
     # Memory Lane services (Django web UI and MCP server)
     # Using persistent volume for all magenta data
     - name: Create magenta directories on persistent volume
