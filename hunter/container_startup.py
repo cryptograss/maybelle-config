@@ -139,17 +139,17 @@ def setup_workspace():
         run_install=False
     )
 
-    # Create pickipedia config for local preview if it doesn't exist
+    # Create/update pickipedia config for local preview
+    # Always regenerate .env to ensure correct port assignment
     pickipedia_dir = workspace / "pickipedia"
     if pickipedia_dir.exists():
-        # Create .env with user-specific settings
         pickipedia_env = pickipedia_dir / ".env"
         dev_name = os.environ.get('DEVELOPER_NAME', 'dev')
         # Calculate port based on SSH port offset (justin=4005, rj=4006, skyler=4007)
         ssh_port = int(os.environ.get('SSH_PORT', '2222'))
         wiki_port = 4005 + (ssh_port - 2222)
-        if not pickipedia_env.exists():
-            pickipedia_env.write_text(f"""# PickiPedia local preview settings for {dev_name}
+        # Always write .env to ensure port is correct (may have been created with wrong port)
+        pickipedia_env.write_text(f"""# PickiPedia local preview settings for {dev_name}
 MEDIAWIKI_VERSION=1.43.0
 WIKI_PORT={wiki_port}
 COMPOSE_PROJECT_NAME=pickipedia-{dev_name}
@@ -159,8 +159,8 @@ DB_PASSWORD=pickipedia_dev
 DB_ROOT_PASSWORD=root_dev
 WIKI_URL=https://pickipedia.{dev_name}.hunter.cryptograss.live
 """)
-            run_command(f"chown magent:magent {pickipedia_env}")
-            logger.info("✓ Created pickipedia .env for local preview")
+        run_command(f"chown magent:magent {pickipedia_env}")
+        logger.info(f"✓ Pickipedia .env configured (port {wiki_port})")
 
         # Create LocalSettings.local.php for docker-compose preview
         local_settings = pickipedia_dir / "LocalSettings.local.php"
@@ -417,13 +417,12 @@ def start_pickipedia_preview():
     dev_name = os.environ.get('DEVELOPER_NAME', 'dev')
     host_pickipedia_dir = f"/opt/magenta/{dev_name}/home/workspace/pickipedia"
 
-    # Pull latest pickipedia config from production branch
-    # Use -f to force checkout - local load-backup.sh may conflict with tracked version
-    logger.info("Pulling latest pickipedia config...")
+    # Reset to latest production branch - ensures we have the shared image config
+    # Using hard reset because local branch may be stale or have conflicts
+    logger.info("Syncing pickipedia to production branch...")
     run_command(f"git config --global --add safe.directory {pickipedia_dir}", check=False)
     run_command("git fetch origin", cwd=pickipedia_dir, user='magent', check=False)
-    run_command("git checkout -f production", cwd=pickipedia_dir, user='magent', check=False)
-    run_command("git pull --ff-only origin production", cwd=pickipedia_dir, user='magent', check=False)
+    run_command("git checkout -B production origin/production", cwd=pickipedia_dir, user='magent', check=False)
 
     # Start docker-compose with host path for volumes
     logger.info(f"Starting PickiPedia containers for {dev_name}...")
