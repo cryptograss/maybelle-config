@@ -228,19 +228,13 @@
         path: "~/.ssh/known_hosts"
         state: touch
 
-    - name: Add known_hosts entry for nearlyfreespeech.net
-      ansible.builtin.known_hosts:
-        host: ssh.nyc1.nearlyfreespeech.net
-        hash_host: yes
-        key: "|1|kXmD+AGFcaF62DEuUeuL+47t/BA=|Ri2jtfePwmmkcsa9BerY+xC+Epw= ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAICbXE1f5S3N/flFHUm2i97tzKGJUWzxotY1HHBMIX72h"
-        state: present
+    - name: Remove stale NFS host key from root known_hosts
+      ansible.builtin.shell:
+        cmd: "ssh-keygen -f /root/.ssh/known_hosts -R ssh.nyc1.nearlyfreespeech.net 2>/dev/null || true"
 
-    - name: Add known_hosts entry for NFS
-      ansible.builtin.known_hosts:
-        host: gith.nyc1.nearlyfreespeech.net
-        hash_host: yes
-        key: "|1|kXmD+AGFcaF62DEuUeuL+47t/BA=|Ri2jtfePwmmkcsa9BerY+xC+Epw= ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAICbXE1f5S3N/flFHUm2i97tzKGJUWzxotY1HHBMIX72h"
-        state: present
+    - name: Add current NFS host key to root known_hosts
+      ansible.builtin.shell:
+        cmd: "ssh-keyscan -H ssh.nyc1.nearlyfreespeech.net >> /root/.ssh/known_hosts 2>/dev/null"
     - name: Add known_hosts entry for github.com
       ansible.builtin.shell:
         cmd: "ssh-keyscan -H github.com >> /var/jenkins_home/.ssh/known_hosts"
