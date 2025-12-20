@@ -1,19 +1,20 @@
-pipelineJob('fetch-chain-data') {
+pipelineJob('pickipedia-build') {
     definition {
         cpsScm {
             scm {
                 git {
                     remote {
-                        url('https://github.com/cryptograss/justinholmes.com.git')
+                        url('https://github.com/cryptograss/pickipedia.git')
                         credentials('github-token')
                     }
                     branch('*/production')
                 }
             }
-            scriptPath('integration/Jenkinsfile-fetch-chain-data')
+            scriptPath('Jenkinsfile')
         }
     }
     triggers {
-        cron('1-59/2 * * * *')  // Run every odd minute
+        // Poll every 5 minutes for changes
+        cron('*/5 * * * *')
     }
 }

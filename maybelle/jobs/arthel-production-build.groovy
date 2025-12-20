@@ -1,4 +1,4 @@
-pipelineJob('production') {
+pipelineJob('arthel-production-build') {
     definition {
         cpsScm {
             scm {

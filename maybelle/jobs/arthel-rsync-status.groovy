@@ -1,4 +1,4 @@
-pipelineJob('deploy-status') {
+pipelineJob('arthel-rsync-status') {
     description('Status check for production deployments to NearlyFreeSpeech')
     definition {
         cps {

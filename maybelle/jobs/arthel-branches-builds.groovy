@@ -1,4 +1,4 @@
-multibranchPipelineJob('branches') {
+multibranchPipelineJob('arthel-branches-builds') {
     branchSources {
         github {
             id('cryptograss-repo-branches')
