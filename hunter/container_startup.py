@@ -419,6 +419,7 @@ def start_pickipedia_preview():
 
     # Pull latest pickipedia config (ensures shared image reference, etc.)
     logger.info("Pulling latest pickipedia config...")
+    run_command(f"git config --global --add safe.directory {pickipedia_dir}", check=False)
     run_command("git pull --ff-only", cwd=pickipedia_dir, user='magent', check=False)
 
     # Start docker-compose with host path for volumes
