@@ -63,7 +63,9 @@ pipelineJob('pickipedia-rsync-status') {
                                             exit 1
                                         fi
                                     else
-                                        echo "(no deploy log found - may be first run after setup)"
+                                        echo "(no deploy log found)"
+                                        echo "ERROR: Deploy log file missing!"
+                                        exit 1
                                     fi
                                 """
                             }
