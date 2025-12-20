@@ -301,6 +301,17 @@
         job: "/usr/local/bin/deploy-to-nfs.sh"
         minute: "*/2"
 
+    - name: Check if pickipedia deploy log is a directory
+      stat:
+        path: /var/log/pickipedia-deploy.log
+      register: pickipedia_log_stat
+
+    - name: Remove pickipedia deploy log if it's a directory
+      file:
+        path: /var/log/pickipedia-deploy.log
+        state: absent
+      when: pickipedia_log_stat.stat.exists and pickipedia_log_stat.stat.isdir
+
     - name: Create PickiPedia deploy log file
       file:
         path: /var/log/pickipedia-deploy.log
