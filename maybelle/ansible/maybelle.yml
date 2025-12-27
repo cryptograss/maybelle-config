@@ -324,9 +324,16 @@
           # Only deploys if Jenkins has marked a successful build
 
           MARKER_FILE="/var/jenkins_home/pickipedia_stage/.deploy-ready"
+          PAUSE_FILE="/var/jenkins_home/pickipedia_stage/.deploy-paused"
           BUILD_DIR="/var/jenkins_home/pickipedia_stage"
           LOG_FILE="/var/log/pickipedia-deploy.log"
           NFS_TARGET="nfs-pickipedia:"
+
+          # Check if deploys are paused
+          if [ -f "$PAUSE_FILE" ]; then
+              echo "$(date): Deploy paused - $(cat "$PAUSE_FILE")" >> "$LOG_FILE"
+              exit 0
+          fi
 
           # Check if marker exists
           if [ ! -f "$MARKER_FILE" ]; then
@@ -345,6 +352,7 @@
               --chmod=F644,D755 \
               --exclude='.deploy-ready' \
               --exclude='images/' \
+              --exclude='extensions/SemanticMediaWiki/.smw.json' \
               "$BUILD_DIR"/ \
               "$NFS_TARGET" >> "$LOG_FILE" 2>&1; then
 
