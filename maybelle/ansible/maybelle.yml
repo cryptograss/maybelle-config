@@ -871,7 +871,8 @@
                 SECRET_KEY: {{ glitchtip_secret_key }}
                 GLITCHTIP_DOMAIN: https://glitchtip.maybelle.cryptograss.live
                 DEFAULT_FROM_EMAIL: glitchtip@cryptograss.live
-                ENABLE_OPEN_USER_REGISTRATION: "False"
+                EMAIL_URL: "consolemail://"
+                ENABLE_OPEN_USER_REGISTRATION: "True"
               networks:
                 - glitchtip-net
               restart: unless-stopped
