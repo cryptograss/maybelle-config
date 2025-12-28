@@ -26,3 +26,8 @@ memory-lane.{{ domain_name }} {
 mcp.{{ domain_name }} {
     reverse_proxy 10.0.0.2:8000
 }
+
+# GlitchTip error tracking (open source Sentry alternative)
+glitchtip.{{ domain_name }} {
+    reverse_proxy localhost:8800
+}

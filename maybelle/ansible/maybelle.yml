@@ -813,6 +813,113 @@
         path: /mnt/persist/scrubber-secrets
         state: absent
 
+    # GlitchTip - open source Sentry alternative for error tracking
+    - name: Create GlitchTip directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0755'
+      loop:
+        - /mnt/persist/glitchtip
+        - /mnt/persist/glitchtip/postgres-data
+
+    - name: Create GlitchTip docker network
+      docker_network:
+        name: glitchtip-net
+        state: present
+
+    - name: Create GlitchTip docker-compose file
+      copy:
+        dest: /mnt/persist/glitchtip/docker-compose.yml
+        mode: '0644'
+        content: |
+          services:
+            postgres:
+              image: postgres:15
+              container_name: glitchtip-postgres
+              environment:
+                POSTGRES_DB: glitchtip
+                POSTGRES_USER: glitchtip
+                POSTGRES_PASSWORD: {{ glitchtip_postgres_password }}
+              volumes:
+                - /mnt/persist/glitchtip/postgres-data:/var/lib/postgresql/data
+              networks:
+                - glitchtip-net
+              restart: unless-stopped
+
+            redis:
+              image: redis:7-alpine
+              container_name: glitchtip-redis
+              networks:
+                - glitchtip-net
+              restart: unless-stopped
+
+            web:
+              image: glitchtip/glitchtip:latest
+              container_name: glitchtip-web
+              depends_on:
+                - postgres
+                - redis
+              ports:
+                - "127.0.0.1:8800:8000"
+              environment:
+                DATABASE_URL: postgres://glitchtip:{{ glitchtip_postgres_password }}@postgres:5432/glitchtip
+                REDIS_URL: redis://redis:6379/0
+                SECRET_KEY: {{ glitchtip_secret_key }}
+                GLITCHTIP_DOMAIN: https://glitchtip.maybelle.cryptograss.live
+                DEFAULT_FROM_EMAIL: glitchtip@cryptograss.live
+                ENABLE_OPEN_USER_REGISTRATION: "False"
+              networks:
+                - glitchtip-net
+              restart: unless-stopped
+
+            worker:
+              image: glitchtip/glitchtip:latest
+              container_name: glitchtip-worker
+              depends_on:
+                - postgres
+                - redis
+              command: celery -A glitchtip worker -B -l INFO --concurrency 2
+              environment:
+                DATABASE_URL: postgres://glitchtip:{{ glitchtip_postgres_password }}@postgres:5432/glitchtip
+                REDIS_URL: redis://redis:6379/0
+                SECRET_KEY: {{ glitchtip_secret_key }}
+                GLITCHTIP_DOMAIN: https://glitchtip.maybelle.cryptograss.live
+              networks:
+                - glitchtip-net
+              restart: unless-stopped
+
+            migrate:
+              image: glitchtip/glitchtip:latest
+              depends_on:
+                - postgres
+              command: ./manage.py migrate
+              environment:
+                DATABASE_URL: postgres://glitchtip:{{ glitchtip_postgres_password }}@postgres:5432/glitchtip
+                SECRET_KEY: {{ glitchtip_secret_key }}
+              networks:
+                - glitchtip-net
+
+          networks:
+            glitchtip-net:
+              external: true
+              name: glitchtip-net
+
+    - name: Start GlitchTip services
+      community.docker.docker_compose_v2:
+        project_src: /mnt/persist/glitchtip
+        state: present
+      register: glitchtip_compose
+
+    - name: Wait for GlitchTip to be ready
+      uri:
+        url: http://127.0.0.1:8800/
+        status_code: [200, 302]
+      register: glitchtip_health
+      until: glitchtip_health.status in [200, 302]
+      retries: 30
+      delay: 2
+
   handlers:
     - name: Restart Jenkins container
       docker_container:
