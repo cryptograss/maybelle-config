@@ -166,6 +166,7 @@ WIKI_URL=https://pickipedia.{dev_name}.hunter.cryptograss.live
         # Always regenerate to ensure banner and correct URL are present
         local_settings = pickipedia_dir / "LocalSettings.local.php"
         wiki_url = f"https://pickipedia.{dev_name}.hunter.cryptograss.live"
+        sentry_dsn = os.environ.get('PICKIPEDIA_DEV_SENTRY_DSN', '')
         local_settings.write_text(f"""<?php
 // Local preview settings - connects to docker-compose MySQL
 $wgSecretKey = "dev-secret-key-not-for-production-use-only";
@@ -178,6 +179,9 @@ $wgDBpassword = "pickipedia_dev";
 
 // Override server URL for preview
 $wgServer = "{wiki_url}";
+
+// Sentry/GlitchTip error tracking for dev
+$wgSentryDsn = "{sentry_dsn}";
 
 // Preview environment banner
 $wgSiteNotice = '<div style="background: #ffcc00; color: #000; padding: 10px; text-align: center; font-weight: bold; border: 2px solid #cc9900; margin-bottom: 10px;">
