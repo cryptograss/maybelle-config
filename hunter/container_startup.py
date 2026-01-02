@@ -334,13 +334,9 @@ def configure_mcp_server():
     )
     logger.info("✓ Playwright MCP server configured (via Docker on magenta-net)")
 
-    # Add Jenkins MCP server (connects to Jenkins on maybelle)
-    run_command(
-        "claude mcp add --scope user --transport http jenkins https://maybelle.cryptograss.live/mcp-server/mcp",
-        user='magent',
-        check=False
-    )
-    logger.info("✓ Jenkins MCP server configured: https://maybelle.cryptograss.live/mcp-server/mcp")
+    # NOTE: Jenkins MCP server removed - it returns massive responses that bust context
+    # Use the public Jenkins API directly instead: https://maybelle.cryptograss.live/api/
+    # See GitHub issue for details on the problem
 
     # Add MediaWiki MCP server for PickiPedia
     pickipedia_bot_password = os.environ.get('PICKIPEDIA_BOT_PASSWORD', '')
