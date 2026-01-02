@@ -18,4 +18,9 @@ pickipedia.{{ user.name }}.{{ base_domain }} {
     reverse_proxy localhost:{{ 4005 + (user.ssh_port - 2222) }}
 }
 
+# {{ user.full_name }} - Arthel (Eleventy dev server on port 4000 inside container, mapped to first port in range)
+arthel.{{ user.name }}.{{ base_domain }} {
+    reverse_proxy localhost:{{ user.port_range_start }}
+}
+
 {% endfor %}
