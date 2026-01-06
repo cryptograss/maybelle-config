@@ -25,6 +25,12 @@
     # Note: maybelle-config repo is managed by the chapter scripts on the persistent volume
     # No need to clone it here - we're already running from it
 
+    - name: Deploy maybelle SSH login banner
+      copy:
+        src: "{{ playbook_dir }}/../../ascii-art/maybelle-ascii.txt"
+        dest: /etc/motd
+        mode: '0644'
+
     - name: Install required packages
       apt:
         name:
