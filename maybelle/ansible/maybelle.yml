@@ -934,6 +934,134 @@
       retries: 30
       delay: 2
 
+    # IPFS node for Blue Railroad video pinning
+    # Provides local redundancy alongside Pinata cloud pinning
+    - name: Create IPFS directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0755'
+      loop:
+        - /mnt/persist/ipfs
+        - /mnt/persist/ipfs/data
+        - /mnt/persist/ipfs/staging
+
+    - name: Create IPFS docker network
+      docker_network:
+        name: ipfs-net
+        state: present
+
+    - name: Start IPFS container
+      docker_container:
+        name: ipfs
+        image: ipfs/kubo:latest
+        restart_policy: unless-stopped
+        volumes:
+          - /mnt/persist/ipfs/data:/data/ipfs
+          - /mnt/persist/ipfs/staging:/export
+        ports:
+          - "127.0.0.1:5001:5001"  # API (local only)
+          - "4001:4001"            # Swarm TCP (public, for peering)
+          - "4001:4001/udp"        # Swarm UDP
+          # Gateway deliberately not exposed - access via Pinata gateway
+        networks:
+          - name: ipfs-net
+        env:
+          IPFS_PROFILE: "server"   # Optimized for always-on server
+
+    - name: Wait for IPFS to initialize
+      uri:
+        url: http://127.0.0.1:5001/api/v0/id
+        method: POST
+        status_code: [200]
+      register: ipfs_health
+      until: ipfs_health.status == 200
+      retries: 30
+      delay: 2
+
+    # Blue Railroad Pinning Service
+    # Downloads videos via yt-dlp, pins to Pinata + local IPFS
+    - name: Create pinning service directory
+      file:
+        path: /mnt/persist/pinning-service
+        state: directory
+        mode: '0755'
+
+    - name: Copy pinning service files
+      copy:
+        src: "{{ playbook_dir }}/../pinning-service/"
+        dest: /mnt/persist/pinning-service/
+        mode: '0644'
+
+    - name: Create pinning service docker-compose file
+      copy:
+        dest: /mnt/persist/pinning-service/docker-compose.yml
+        mode: '0644'
+        content: |
+          services:
+            pinning:
+              build:
+                context: .
+              container_name: pinning-service
+              environment:
+                - PORT=3001
+                - PINATA_API_KEY={{ pinata_api_key }}
+                - PINATA_SECRET_KEY={{ pinata_secret_key }}
+                - PINNING_API_KEY={{ pinning_service_api_key }}
+                - IPFS_API_URL=http://ipfs:5001
+                - STAGING_DIR=/staging
+              volumes:
+                - /mnt/persist/ipfs/staging:/staging
+              ports:
+                - "127.0.0.1:3001:3001"
+              networks:
+                - ipfs-net
+              restart: unless-stopped
+              depends_on:
+                - ipfs
+
+            ipfs:
+              image: ipfs/kubo:latest
+              container_name: ipfs
+              volumes:
+                - /mnt/persist/ipfs/data:/data/ipfs
+                - /mnt/persist/ipfs/staging:/export
+              ports:
+                - "127.0.0.1:5001:5001"
+                - "4001:4001"
+                - "4001:4001/udp"
+              networks:
+                - ipfs-net
+              environment:
+                - IPFS_PROFILE=server
+              restart: unless-stopped
+
+          networks:
+            ipfs-net:
+              external: true
+              name: ipfs-net
+
+    - name: Stop standalone IPFS container (now managed by compose)
+      docker_container:
+        name: ipfs
+        state: absent
+      ignore_errors: yes
+
+    - name: Start pinning services
+      community.docker.docker_compose_v2:
+        project_src: /mnt/persist/pinning-service
+        build: always
+        state: present
+
+    - name: Wait for pinning service to be ready
+      uri:
+        url: http://127.0.0.1:3001/health
+        status_code: [200]
+      register: pinning_health
+      until: pinning_health.status == 200
+      retries: 30
+      delay: 2
+
   handlers:
     - name: Restart Jenkins container
       docker_container:

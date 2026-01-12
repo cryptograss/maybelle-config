@@ -31,3 +31,8 @@ mcp.{{ domain_name }} {
 glitchtip.{{ domain_name }} {
     reverse_proxy localhost:8800
 }
+
+# Blue Railroad pinning service (video download + IPFS pinning)
+pinning.{{ domain_name }} {
+    reverse_proxy localhost:3001
+}
