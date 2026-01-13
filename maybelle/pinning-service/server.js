@@ -226,10 +226,13 @@ async function uploadToPinata(filePath, filename) {
   return result.data.cid;
 }
 
-// Pin CID to local IPFS node
+// Pin CID to local IPFS node with progress logging
 async function pinToLocalIPFS(cid) {
-  // Use the IPFS HTTP API to pin
-  const response = await fetch(`${IPFS_API_URL}/api/v0/pin/add?arg=${cid}`, {
+  console.log(`Local IPFS: Starting pin for ${cid}`);
+  const startTime = Date.now();
+
+  // Use the IPFS HTTP API to pin with progress reporting
+  const response = await fetch(`${IPFS_API_URL}/api/v0/pin/add?arg=${cid}&progress=true`, {
     method: 'POST'
   });
 
@@ -238,7 +241,27 @@ async function pinToLocalIPFS(cid) {
     throw new Error(`Local IPFS pin failed: ${response.status} ${errorText}`);
   }
 
-  return await response.json();
+  // With progress=true, IPFS streams newline-delimited JSON progress updates
+  const text = await response.text();
+  const lines = text.trim().split('\n');
+
+  for (const line of lines) {
+    try {
+      const progress = JSON.parse(line);
+      if (progress.Progress) {
+        console.log(`Local IPFS: ${progress.Progress}`);
+      }
+    } catch (e) {
+      // Not JSON, just log it
+      if (line.trim()) console.log(`Local IPFS: ${line}`);
+    }
+  }
+
+  const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+  console.log(`Local IPFS: Pin complete in ${elapsed}s`);
+
+  // Return the last line which should be the final result
+  return JSON.parse(lines[lines.length - 1]);
 }
 
 app.listen(PORT, '0.0.0.0', () => {
