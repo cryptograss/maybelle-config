@@ -172,16 +172,12 @@ async function pinFile(filePath, filename) {
   const pinataCid = await uploadToPinata(filePath, filename);
   console.log(`Pinata CID: ${pinataCid}`);
 
-  // Step 2: Pin to local IPFS node for redundancy
-  let locallyPinned = false;
-  try {
-    await pinToLocalIPFS(pinataCid);
-    locallyPinned = true;
-    console.log(`Locally pinned: ${pinataCid}`);
-  } catch (error) {
-    console.warn(`Warning: Failed to pin locally: ${error.message}`);
-    // Don't fail the whole request if local pinning fails
-  }
+  // Step 2: Pin to local IPFS node for redundancy (fire and forget)
+  // Local pinning can take a long time for large files, so we don't block on it
+  console.log(`Starting local IPFS pin (background)...`);
+  pinToLocalIPFS(pinataCid)
+    .then(() => console.log(`Local pin complete: ${pinataCid}`))
+    .catch(error => console.warn(`Local pin failed: ${error.message}`));
 
   return {
     cid: pinataCid,
@@ -189,7 +185,7 @@ async function pinFile(filePath, filename) {
     gatewayUrl: `https://gateway.pinata.cloud/ipfs/${pinataCid}`,
     filename,
     size: stats.size,
-    locallyPinned
+    locallyPinned: 'pending'  // Now async, so we don't know yet
   };
 }
 
