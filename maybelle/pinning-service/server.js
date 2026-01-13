@@ -198,6 +198,9 @@ async function uploadToPinata(filePath, filename) {
   const form = new FormData();
   form.append('file', createReadStream(filePath), filename);
 
+  // v3 API defaults to private - we need public for IPFS accessibility
+  form.append('network', 'public');
+
   // v3 API uses 'name' field for the file name in metadata
   form.append('name', filename);
 
