@@ -387,7 +387,7 @@
               echo "$(date): Running Blue Railroad import..." >> "$LOG_FILE"
               if ssh -i /root/.ssh/id_ed25519_nfs -o StrictHostKeyChecking=no \
                   jmyles_pickipedia@ssh.nyc1.nearlyfreespeech.net \
-                  'cd ~/public && php extensions/BlueRailroadIntegration/maintenance/importBlueRailroads.php' >> "$LOG_FILE" 2>&1; then
+                  'cd ~ && php extensions/BlueRailroadIntegration/maintenance/importBlueRailroads.php' >> "$LOG_FILE" 2>&1; then
                   echo "$(date): Blue Railroad import completed" >> "$LOG_FILE"
               else
                   echo "$(date): Blue Railroad import failed (non-fatal)" >> "$LOG_FILE"
