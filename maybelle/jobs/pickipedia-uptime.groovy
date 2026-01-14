@@ -71,16 +71,7 @@ pipelineJob('pickipedia-uptime') {
                                     echo "=== ALERT THRESHOLD REACHED ==="
                                     echo "PickiPedia has been down for ${failureCount} consecutive checks."
                                     echo "Alert emails would go to: ${env.ALERT_EMAILS}"
-
-                                    // Send email alert via msmtp if configured
-                                    sh(script: """
-                                        if command -v msmtp >/dev/null 2>&1 && [ -f /var/jenkins_home/.msmtprc ]; then
-                                            echo -e "Subject: ALERT: PickiPedia is DOWN\\n\\nPickiPedia has been down for ${failureCount} consecutive health checks.\\n\\nCheck: https://maybelle.cryptograss.live/job/pickipedia-uptime/\\n\\nTimestamp: \$(date)" | msmtp -a default ${env.ALERT_EMAILS.replace(',', ' ')}
-                                            echo "Alert email sent!"
-                                        else
-                                            echo "Email not configured - would send alert to: ${env.ALERT_EMAILS}"
-                                        fi
-                                    """, returnStatus: true)
+                                    echo "Email sending not yet configured - see GitHub issue #35"
                                 } else if (failureCount > env.ALERT_THRESHOLD.toInteger()) {
                                     echo "Still down (${failureCount} failures). Alert already sent at threshold."
                                 }
@@ -98,20 +89,10 @@ pipelineJob('pickipedia-uptime') {
                                     if (prevFailures >= env.ALERT_THRESHOLD.toInteger()) {
                                         echo "=== RECOVERY ==="
                                         echo "PickiPedia is back UP after ${prevFailures} failures"
-
-                                        // Send recovery email
-                                        sh(script: """
-                                            if command -v msmtp >/dev/null 2>&1 && [ -f /var/jenkins_home/.msmtprc ]; then
-                                                echo -e "Subject: RECOVERED: PickiPedia is back UP\\n\\nPickiPedia has recovered after ${prevFailures} consecutive failures.\\n\\nTimestamp: \$(date)" | msmtp -a default ${env.ALERT_EMAILS.replace(',', ' ')}
-                                                echo "Recovery email sent!"
-                                            else
-                                                echo "Email not configured - would send recovery notice"
-                                            fi
-                                        """, returnStatus: true)
                                     }
 
                                     // Reset failure count
-                                    sh "rm -f ${env.FAILURE_COUNT_FILE}"
+                                    sh 'rm -f /var/jenkins_home/pickipedia-uptime-failures.txt'
                                 }
                             }
                         }
