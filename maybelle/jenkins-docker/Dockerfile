@@ -21,6 +21,8 @@ RUN apt-get update && apt-get install -y \
     php-intl \
     php-curl \
     unzip \
+    msmtp \
+    msmtp-mta \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Composer

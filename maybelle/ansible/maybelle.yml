@@ -369,6 +369,14 @@
               # Success - remove marker and log
               rm -f "$MARKER_FILE"
               echo "$(date): PickiPedia deploy successful" >> "$LOG_FILE"
+
+              # Trigger Blue Railroad import job in Jenkins
+              REPORTER_PASS=$(cat /root/.jenkins_reporter_password 2>/dev/null || echo "")
+              if [ -n "$REPORTER_PASS" ]; then
+                  curl -s -X POST "http://localhost:8080/job/pickipedia-import-bluerailroad/build" \
+                      --user "reporter:${REPORTER_PASS}" || true
+                  echo "$(date): Triggered Blue Railroad import job" >> "$LOG_FILE"
+              fi
           else
               echo "$(date): PickiPedia deploy FAILED" >> "$LOG_FILE"
               exit 1
@@ -428,6 +436,30 @@
         mode: '0755'
         owner: 1000
         group: 1000
+
+    # SMTP configuration for Jenkins email alerts (uptime monitoring)
+    # Requires smtp_host, smtp_port, smtp_user, smtp_password in vault
+    - name: Deploy msmtp configuration for email alerts
+      copy:
+        content: |
+          # msmtp configuration for Jenkins uptime alerts
+          defaults
+          auth           on
+          tls            on
+          tls_trust_file /etc/ssl/certs/ca-certificates.crt
+          logfile        /var/jenkins_home/msmtp.log
+
+          account        default
+          host           {{ smtp_host | default('smtp.gmail.com') }}
+          port           {{ smtp_port | default('587') }}
+          from           {{ smtp_from | default('alerts@cryptograss.live') }}
+          user           {{ smtp_user | default('') }}
+          password       {{ smtp_password | default('') }}
+        dest: "{{ jenkins_home }}/.msmtprc"
+        mode: '0600'
+        owner: 1000
+        group: 1000
+      when: smtp_user is defined and smtp_user != ''
 
     - name: Deploy PickiPedia LocalSettings.local.php from vault
       copy:
