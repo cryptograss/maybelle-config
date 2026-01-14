@@ -164,21 +164,30 @@ app.post('/pin-cid', requireWalletAuth, async (req, res) => {
   }
 });
 
-// Check if a CID is already accessible on IPFS via gateway
-async function checkCidExists(cid) {
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000);
+// Check if a CID is already pinned on our Pinata account (fast database lookup)
+async function checkCidPinned(cid) {
+  if (!PINATA_JWT) {
+    return false;
+  }
 
-    const response = await fetch(`https://gateway.pinata.cloud/ipfs/${cid}`, {
-      method: 'HEAD',
-      signal: controller.signal
+  try {
+    const response = await fetch(`https://api.pinata.cloud/data/pinList?cid=${cid}`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${PINATA_JWT}`
+      }
     });
 
-    clearTimeout(timeoutId);
-    return response.ok;
+    if (!response.ok) {
+      console.warn(`Pinata pinList check failed: ${response.status}`);
+      return false;
+    }
+
+    const result = await response.json();
+    // If rows array has entries, the CID is already pinned
+    return result.rows && result.rows.length > 0;
   } catch (e) {
-    // Timeout or network error - assume not pinned
+    console.warn(`Pinata pinList check error: ${e.message}`);
     return false;
   }
 }
@@ -193,8 +202,8 @@ async function pinFile(filePath, filename) {
   const computedCid = await Hash.of(fileBuffer);
   console.log(`Computed CID: ${computedCid}`);
 
-  // Step 2: Check if this CID already exists on IPFS
-  const alreadyPinned = await checkCidExists(computedCid);
+  // Step 2: Check if this CID is already pinned on our Pinata account
+  const alreadyPinned = await checkCidPinned(computedCid);
   if (alreadyPinned) {
     console.log(`CID already exists on IPFS, skipping upload`);
     return {
