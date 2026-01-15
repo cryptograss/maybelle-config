@@ -21,6 +21,8 @@ RUN apt-get update && apt-get install -y \
     php-intl \
     php-curl \
     unzip \
+    msmtp \
+    msmtp-mta \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Composer
@@ -28,7 +30,7 @@ RUN curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local
 
 USER jenkins
 
-# Install required plugins
+# Install required plugins (mcp-server installed separately from custom build)
 RUN jenkins-plugin-cli --plugins \
     configuration-as-code \
     workflow-aggregator \
@@ -46,8 +48,12 @@ RUN jenkins-plugin-cli --plugins \
     github-branch-source \
     mask-passwords \
     build-name-setter \
-    pipeline-github \
-    mcp-server
+    pipeline-github
+
+# Install custom mcp-server plugin with reduced response sizes
+# See: https://github.com/jenkinsci/mcp-server-plugin/pull/113
+# Downloaded from magent-cryptograss fork until PR is merged upstream
+ADD --chown=jenkins:jenkins https://github.com/magent-cryptograss/mcp-server-plugin/releases/download/v0.87-reduced-context/mcp-server.hpi /usr/share/jenkins/ref/plugins/mcp-server.hpi
 
 # Create directory for Configuration as Code
 RUN mkdir -p /var/jenkins_home/casc_configs
