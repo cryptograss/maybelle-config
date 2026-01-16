@@ -353,10 +353,11 @@
 
           # Perform the rsync
           # --chmod ensures files are world-readable on NFS
+          # --delay-updates stages files in temp location, then moves at end (more atomic)
           # Exclude images/ so uploads persist and remain writable
           # Exclude stats/ for GoAccess-generated analytics reports
           # Exclude .git directories - no need for version control metadata in prod
-          if rsync -vah --delete \
+          if rsync -vah --delete --delay-updates \
               --chmod=F644,D755 \
               --exclude='.deploy-ready' \
               --exclude='images/' \
