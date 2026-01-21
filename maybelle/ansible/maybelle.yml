@@ -353,10 +353,11 @@
 
           # Perform the rsync
           # --chmod ensures files are world-readable on NFS
+          # --delay-updates stages files in temp location, then moves at end (more atomic)
           # Exclude images/ so uploads persist and remain writable
           # Exclude stats/ for GoAccess-generated analytics reports
           # Exclude .git directories - no need for version control metadata in prod
-          if rsync -vah --delete \
+          if rsync -vah --delete --delay-updates \
               --chmod=F644,D755 \
               --exclude='.deploy-ready' \
               --exclude='images/' \
@@ -369,6 +370,29 @@
               # Success - remove marker and log
               rm -f "$MARKER_FILE"
               echo "$(date): PickiPedia deploy successful" >> "$LOG_FILE"
+
+              # Sync chain data to NFS for Blue Railroad import
+              CHAIN_DATA_SRC="/var/jenkins_home/shared/chain_data"
+              if [ -f "$CHAIN_DATA_SRC/chainData.json" ]; then
+                  echo "$(date): Syncing chain data to NFS..." >> "$LOG_FILE"
+                  rsync -avz \
+                      -e "ssh -i /root/.ssh/id_ed25519_nfs -o StrictHostKeyChecking=no" \
+                      "$CHAIN_DATA_SRC/chainData.json" \
+                      "jmyles_pickipedia@ssh.nyc1.nearlyfreespeech.net:/home/public/chain-data/" >> "$LOG_FILE" 2>&1 || \
+                      echo "$(date): Chain data sync failed (continuing anyway)" >> "$LOG_FILE"
+              else
+                  echo "$(date): No chain data found at $CHAIN_DATA_SRC/chainData.json" >> "$LOG_FILE"
+              fi
+
+              # Run Blue Railroad import on NFS
+              echo "$(date): Running Blue Railroad import..." >> "$LOG_FILE"
+              if ssh -i /root/.ssh/id_ed25519_nfs -o StrictHostKeyChecking=no \
+                  jmyles_pickipedia@ssh.nyc1.nearlyfreespeech.net \
+                  'cd /home/public && php extensions/BlueRailroadIntegration/maintenance/importBlueRailroads.php' >> "$LOG_FILE" 2>&1; then
+                  echo "$(date): Blue Railroad import completed" >> "$LOG_FILE"
+              else
+                  echo "$(date): Blue Railroad import failed (non-fatal)" >> "$LOG_FILE"
+              fi
           else
               echo "$(date): PickiPedia deploy FAILED" >> "$LOG_FILE"
               exit 1
@@ -428,6 +452,30 @@
         mode: '0755'
         owner: 1000
         group: 1000
+
+    # SMTP configuration for Jenkins email alerts (uptime monitoring)
+    # Requires smtp_host, smtp_port, smtp_user, smtp_password in vault
+    - name: Deploy msmtp configuration for email alerts
+      copy:
+        content: |
+          # msmtp configuration for Jenkins uptime alerts
+          defaults
+          auth           on
+          tls            on
+          tls_trust_file /etc/ssl/certs/ca-certificates.crt
+          logfile        /var/jenkins_home/msmtp.log
+
+          account        default
+          host           {{ smtp_host | default('smtp.gmail.com') }}
+          port           {{ smtp_port | default('587') }}
+          from           {{ smtp_from | default('alerts@cryptograss.live') }}
+          user           {{ smtp_user | default('') }}
+          password       {{ smtp_password | default('') }}
+        dest: "{{ jenkins_home }}/.msmtprc"
+        mode: '0600'
+        owner: 1000
+        group: 1000
+      when: smtp_user is defined and smtp_user != ''
 
     - name: Deploy PickiPedia LocalSettings.local.php from vault
       copy:
@@ -931,6 +979,133 @@
         status_code: [200, 302]
       register: glitchtip_health
       until: glitchtip_health.status in [200, 302]
+      retries: 30
+      delay: 2
+
+    # IPFS node for Blue Railroad video pinning
+    # Provides local redundancy alongside Pinata cloud pinning
+    - name: Create IPFS directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0755'
+      loop:
+        - /mnt/persist/ipfs
+        - /mnt/persist/ipfs/data
+        - /mnt/persist/ipfs/staging
+
+    - name: Create IPFS docker network
+      docker_network:
+        name: ipfs-net
+        state: present
+
+    - name: Start IPFS container
+      docker_container:
+        name: ipfs
+        image: ipfs/kubo:latest
+        restart_policy: unless-stopped
+        volumes:
+          - /mnt/persist/ipfs/data:/data/ipfs
+          - /mnt/persist/ipfs/staging:/export
+        ports:
+          - "127.0.0.1:5001:5001"  # API (local only)
+          - "4001:4001"            # Swarm TCP (public, for peering)
+          - "4001:4001/udp"        # Swarm UDP
+          # Gateway deliberately not exposed - access via Pinata gateway
+        networks:
+          - name: ipfs-net
+        env:
+          IPFS_PROFILE: "server"   # Optimized for always-on server
+
+    - name: Wait for IPFS to initialize
+      uri:
+        url: http://127.0.0.1:5001/api/v0/id
+        method: POST
+        status_code: [200]
+      register: ipfs_health
+      until: ipfs_health.status == 200
+      retries: 30
+      delay: 2
+
+    # Blue Railroad Pinning Service
+    # Downloads videos via yt-dlp, pins to Pinata + local IPFS
+    - name: Create pinning service directory
+      file:
+        path: /mnt/persist/pinning-service
+        state: directory
+        mode: '0755'
+
+    - name: Copy pinning service files
+      copy:
+        src: "{{ playbook_dir }}/../pinning-service/"
+        dest: /mnt/persist/pinning-service/
+        mode: '0644'
+
+    - name: Create pinning service docker-compose file
+      copy:
+        dest: /mnt/persist/pinning-service/docker-compose.yml
+        mode: '0644'
+        content: |
+          services:
+            pinning:
+              build:
+                context: .
+              container_name: pinning-service
+              environment:
+                - PORT=3001
+                - PINATA_JWT={{ pinata_jwt }}
+                - AUTHORIZED_WALLETS={{ pinning_authorized_wallets }}
+                - IPFS_API_URL=http://ipfs:5001
+                - STAGING_DIR=/staging
+              volumes:
+                - /mnt/persist/ipfs/staging:/staging
+              ports:
+                - "127.0.0.1:3001:3001"
+              networks:
+                - ipfs-net
+              restart: unless-stopped
+              depends_on:
+                - ipfs
+
+            ipfs:
+              image: ipfs/kubo:latest
+              container_name: ipfs
+              volumes:
+                - /mnt/persist/ipfs/data:/data/ipfs
+                - /mnt/persist/ipfs/staging:/export
+              ports:
+                - "127.0.0.1:5001:5001"
+                - "4001:4001"
+                - "4001:4001/udp"
+              networks:
+                - ipfs-net
+              environment:
+                - IPFS_PROFILE=server
+              restart: unless-stopped
+
+          networks:
+            ipfs-net:
+              external: true
+              name: ipfs-net
+
+    - name: Stop standalone IPFS container (now managed by compose)
+      docker_container:
+        name: ipfs
+        state: absent
+      ignore_errors: yes
+
+    - name: Start pinning services
+      community.docker.docker_compose_v2:
+        project_src: /mnt/persist/pinning-service
+        build: always
+        state: present
+
+    - name: Wait for pinning service to be ready
+      uri:
+        url: http://127.0.0.1:3001/health
+        status_code: [200]
+      register: pinning_health
+      until: pinning_health.status == 200
       retries: 30
       delay: 2
 
