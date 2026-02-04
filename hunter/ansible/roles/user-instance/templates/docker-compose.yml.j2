@@ -43,6 +43,9 @@ services:
       - MCP_MEMORY_URL=http://10.0.0.2:8000
       # PickiPedia bot credentials for MediaWiki MCP server
       - PICKIPEDIA_BOT_PASSWORD={{ PICKIPEDIA_BOT_PASSWORD }}
+      # Blue Railroad import bot credentials
+      - BLUERAILROAD_BOT_USERNAME={{ BLUERAILROAD_BOT_USERNAME | default('') }}
+      - BLUERAILROAD_BOT_PASSWORD={{ BLUERAILROAD_BOT_PASSWORD | default('') }}
       # Sentry/GlitchTip DSN for PickiPedia dev error tracking
       - PICKIPEDIA_DEV_SENTRY_DSN={{ pickipedia_dev_sentry_dsn | default('') }}
     restart: unless-stopped
