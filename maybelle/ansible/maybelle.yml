@@ -15,6 +15,9 @@
     github_repo_url: "https://github.com/cryptograss/justinholmes.com" # TODO: make this dynamic?  Certainly it will change with the repo rename.
     jenkins_home: "/var/jenkins_home"
     caddy_config_type: "maybelle"  # Use maybelle-specific Caddyfile template
+    # Pinning service authorized wallets - loaded from JSON config (not vault)
+    authorized_wallets_config: "{{ lookup('file', playbook_dir + '/../pinning-service/authorized-wallets.json') | from_json }}"
+    pinning_authorized_wallets: "{{ authorized_wallets_config.wallets | map(attribute='address') | join(',') }}"
 
   pre_tasks:
     - name: Install community.docker collection
@@ -163,6 +166,8 @@
           JENKINS_REPORTER_PASSWORD: "{{ jenkins_reporter_password }}"
           GITHUB_TOKEN: "{{ maybelle_github_token }}"
           GITHUB_REPO_URL: "{{ github_repo_url }}"
+          BLUERAILROAD_BOT_USERNAME: "{{ BLUERAILROAD_BOT_USERNAME }}"
+          BLUERAILROAD_BOT_PASSWORD: "{{ BLUERAILROAD_BOT_PASSWORD }}"
         ports:
           - "8080:8080"
         networks:
@@ -371,28 +376,8 @@
               rm -f "$MARKER_FILE"
               echo "$(date): PickiPedia deploy successful" >> "$LOG_FILE"
 
-              # Sync chain data to NFS for Blue Railroad import
-              CHAIN_DATA_SRC="/var/jenkins_home/shared/chain_data"
-              if [ -f "$CHAIN_DATA_SRC/chainData.json" ]; then
-                  echo "$(date): Syncing chain data to NFS..." >> "$LOG_FILE"
-                  rsync -avz \
-                      -e "ssh -i /root/.ssh/id_ed25519_nfs -o StrictHostKeyChecking=no" \
-                      "$CHAIN_DATA_SRC/chainData.json" \
-                      "jmyles_pickipedia@ssh.nyc1.nearlyfreespeech.net:/home/public/chain-data/" >> "$LOG_FILE" 2>&1 || \
-                      echo "$(date): Chain data sync failed (continuing anyway)" >> "$LOG_FILE"
-              else
-                  echo "$(date): No chain data found at $CHAIN_DATA_SRC/chainData.json" >> "$LOG_FILE"
-              fi
-
-              # Run Blue Railroad import on NFS
-              echo "$(date): Running Blue Railroad import..." >> "$LOG_FILE"
-              if ssh -i /root/.ssh/id_ed25519_nfs -o StrictHostKeyChecking=no \
-                  jmyles_pickipedia@ssh.nyc1.nearlyfreespeech.net \
-                  'cd /home/public && php extensions/BlueRailroadIntegration/maintenance/importBlueRailroads.php' >> "$LOG_FILE" 2>&1; then
-                  echo "$(date): Blue Railroad import completed" >> "$LOG_FILE"
-              else
-                  echo "$(date): Blue Railroad import failed (non-fatal)" >> "$LOG_FILE"
-              fi
+              # Blue Railroad import now handled by Jenkins job (pickipedia-import-bluerailroad)
+              # running every even minute via the Python bot
           else
               echo "$(date): PickiPedia deploy FAILED" >> "$LOG_FILE"
               exit 1
