@@ -23,7 +23,16 @@ RUN apt-get update && apt-get install -y \
     unzip \
     msmtp \
     msmtp-mta \
+    python3 \
+    python3-pip \
+    python3-venv \
+    git \
     && rm -rf /var/lib/apt/lists/*
+
+# Install Blue Railroad import bot
+RUN python3 -m venv /opt/blue-railroad-import && \
+    /opt/blue-railroad-import/bin/pip install --no-cache-dir \
+    git+https://github.com/cryptograss/blue-railroad-import.git
 
 # Install Composer
 RUN curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
