@@ -112,17 +112,17 @@ class TestAggregateTokensFromSources:
         tokens = aggregate_tokens_from_sources(chain_data, sources)
 
         assert len(tokens) == 2
-        assert 'blueRailroads_1' in tokens
-        assert 'blueRailroadV2s_5' in tokens
+        assert '1' in tokens
+        assert '5' in tokens
 
-    def test_prefixes_keys_to_avoid_collisions(self):
-        """V1 and V2 might have same token IDs, keys prevent collision."""
+    def test_v2_takes_precedence_over_v1_with_same_id(self):
+        """V2 tokens replace V1 tokens with the same ID (migration model)."""
         chain_data = {
             'blueRailroads': {
-                '1': {'owner': '0x111'},
+                '1': {'owner': '0x111'},  # V1 token
             },
             'blueRailroadV2s': {
-                '1': {'owner': '0x222', 'blockheight': 123},  # Same ID!
+                '1': {'owner': '0x222', 'blockheight': 123},  # V2 migrated token
             },
         }
         sources = [
@@ -132,6 +132,7 @@ class TestAggregateTokensFromSources:
 
         tokens = aggregate_tokens_from_sources(chain_data, sources)
 
-        assert len(tokens) == 2  # Both preserved, not overwritten
-        assert tokens['blueRailroads_1'].owner == '0x111'
-        assert tokens['blueRailroadV2s_1'].owner == '0x222'
+        # V2 version wins - only one token for ID 1
+        assert len(tokens) == 1
+        assert tokens['1'].owner == '0x222'
+        assert tokens['1'].is_v2 is True

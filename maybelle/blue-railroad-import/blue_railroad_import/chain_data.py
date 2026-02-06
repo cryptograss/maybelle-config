@@ -48,15 +48,24 @@ def aggregate_tokens_from_sources(chain_data: dict, sources: list[Source]) -> di
     """
     Aggregate all tokens from all sources into a single dict.
 
-    Keys are prefixed with source key to avoid collisions between
-    V1 and V2 tokens with the same ID.
+    Keys are just token IDs (not source-prefixed) since each token ID
+    should map to exactly one wiki page. V2 tokens take precedence over
+    V1 tokens with the same ID, reflecting the migration model where
+    a migrated token's V2 version is canonical.
     """
     all_tokens = {}
 
     for source in sources:
         for token in iter_tokens_from_source(chain_data, source):
-            # Use source-prefixed key to avoid collisions
-            aggregate_key = f"{token.source_key}_{token.token_id}"
-            all_tokens[aggregate_key] = token
+            token_key = token.token_id
+            existing = all_tokens.get(token_key)
+
+            # V2 tokens take precedence over V1
+            if existing is None:
+                all_tokens[token_key] = token
+            elif token.is_v2 and not existing.is_v2:
+                # New token is V2, existing is V1 - replace with V2
+                all_tokens[token_key] = token
+            # else: keep existing (either same version or existing is V2)
 
     return all_tokens
