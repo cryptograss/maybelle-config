@@ -14,6 +14,23 @@ EXERCISE_MAP = {
 }
 
 
+def get_recent_tokens_with_video(tokens: dict[str, Token], limit: int = 10) -> list[Token]:
+    """Get the most recent tokens that have video (IPFS CID)."""
+    # Filter to only tokens with video
+    with_video = [t for t in tokens.values() if t.ipfs_cid]
+
+    # Sort by blockheight (V2) or date (V1), newest first
+    def sort_key(token: Token) -> int:
+        if token.blockheight:
+            return token.blockheight
+        if token.date:
+            return token.date
+        return 0
+
+    sorted_tokens = sorted(with_video, key=sort_key, reverse=True)
+    return sorted_tokens[:limit]
+
+
 def filter_tokens(
     tokens: dict[str, Token],
     filter_song_id: Optional[str] = None,
@@ -133,7 +150,25 @@ def generate_leaderboard_content(
 
     lines.extend([
         "|}",
-        "",
+    ])
+
+    # Add recent videos gallery (last 10 tokens with videos)
+    gallery_tokens = get_recent_tokens_with_video(filtered, limit=10)
+    if gallery_tokens:
+        lines.extend([
+            "",
+            "== Recent Workouts ==",
+            "",
+        ])
+        for token in gallery_tokens:
+            video_url = f"https://gateway.pinata.cloud/ipfs/{token.ipfs_cid}"
+            lines.append(f"=== [[Blue Railroad Token {token.token_id}|Token #{token.token_id}]] ===")
+            lines.append(f"'''{token.owner_display}'''")
+            lines.append("")
+            lines.append(f"{{{{#ev:videolink|{video_url}|320}}}}")
+            lines.append("")
+
+    lines.extend([
         "[[Category:Blue Railroad]]",
         "[[Category:Leaderboards]]",
     ])
