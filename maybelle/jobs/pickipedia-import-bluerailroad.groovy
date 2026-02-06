@@ -34,14 +34,15 @@ pipelineJob('pickipedia-import-bluerailroad') {
                         stage('Run import') {
                             steps {
                                 script {
-                                    sh """
-                                        /opt/blue-railroad-import/bin/python -m blue_railroad_import.cli \\
-                                            --chain-data ${env.CHAIN_DATA} \\
-                                            --wiki-url ${env.WIKI_URL} \\
-                                            --username "\${BLUERAILROAD_BOT_USERNAME}" \\
-                                            --password "\${BLUERAILROAD_BOT_PASSWORD}" \\
+                                    sh '''#!/bin/bash
+                                        set +x
+                                        /opt/blue-railroad-import/bin/python -m blue_railroad_import.cli \
+                                            --chain-data "$CHAIN_DATA" \
+                                            --wiki-url "$WIKI_URL" \
+                                            --username "$BLUERAILROAD_BOT_USERNAME" \
+                                            --password "$BLUERAILROAD_BOT_PASSWORD" \
                                             -v
-                                    """
+                                    '''
                                 }
                             }
                         }
