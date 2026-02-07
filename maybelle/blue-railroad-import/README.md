@@ -91,6 +91,31 @@ blue_railroad_import/
 └── wiki_client.py   # MediaWiki API client
 ```
 
+## Deployment (Maybelle)
+
+The bot runs on maybelle via a Jenkins scheduled job (every even minute).
+
+**How it's installed**: The bot is pip-installed into the Jenkins Docker image at build time:
+
+```dockerfile
+# In maybelle-config/maybelle/jenkins-docker/Dockerfile
+RUN python3 -m venv /opt/blue-railroad-import && \
+    /opt/blue-railroad-import/bin/pip install --no-cache-dir \
+    git+https://github.com/cryptograss/blue-railroad-import.git
+```
+
+**To deploy new code**:
+1. Push changes to `main` branch of this repo
+2. **Rebuild the Jenkins Docker image** on maybelle (container restart is NOT enough)
+3. The next scheduled run will use the new code
+
+**Verifying the version**: The bot logs its git commit hash at startup:
+```
+Blue Railroad Import Bot (commit: abc1234)
+```
+
+Check this in the Jenkins console output to confirm which version is running.
+
 ## License
 
 MIT
