@@ -149,12 +149,14 @@ class OwnerStats:
     display_name: str
     token_count: int = 0
     token_ids: list = field(default_factory=list)
+    token_versions: dict = field(default_factory=dict)  # token_id -> is_v2
     newest_date: int = 0
     oldest_date: int = 0
 
-    def add_token(self, token_id: str, date: Optional[int]):
+    def add_token(self, token_id: str, date: Optional[int], is_v2: bool = False):
         self.token_count += 1
         self.token_ids.append(token_id)
+        self.token_versions[token_id] = is_v2
 
         if date:
             if date > self.newest_date:

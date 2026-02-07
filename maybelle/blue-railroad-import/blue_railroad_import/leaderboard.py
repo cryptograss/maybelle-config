@@ -73,7 +73,7 @@ def calculate_owner_stats(tokens: dict[str, Token]) -> dict[str, OwnerStats]:
 
         # Use date or blockheight for sorting
         date_val = token.date if token.date else (token.blockheight or 0)
-        stats[owner_addr].add_token(token.token_id, date_val)
+        stats[owner_addr].add_token(token.token_id, date_val, is_v2=token.is_v2)
 
     return stats
 
@@ -137,9 +137,12 @@ def generate_leaderboard_content(
     for rank, owner_addr in enumerate(sorted_owners, 1):
         stats = owner_stats[owner_addr]
 
-        # Format token links
+        # Format token links with version
         sorted_ids = sorted(stats.token_ids, key=lambda x: int(x) if x.isdigit() else 0)
-        token_links = [f"[[Blue Railroad Token {tid}|#{tid}]]" for tid in sorted_ids]
+        token_links = []
+        for tid in sorted_ids:
+            version = "V2" if stats.token_versions.get(tid, False) else "V1"
+            token_links.append(f"[[Blue Railroad Token {tid}|#{tid}]] ({version})")
         token_links_str = ", ".join(token_links)
 
         # Format holder (just display name for now, could add SMW lookup later)

@@ -182,13 +182,13 @@ class TestLeaderboardAggregation:
         assert '| 1 || alice.eth || 3 ||' in content
 
     def test_token_ids_sorted_numerically(self, sample_tokens):
-        """Token IDs in leaderboard are sorted numerically."""
+        """Token IDs in leaderboard are sorted numerically with version indicators."""
         config = LeaderboardConfig(page='Test')
         content = generate_leaderboard_content(sample_tokens, config)
 
-        # Alice's tokens listed as 1, 2, 5 in numeric order
+        # Alice's tokens listed as 1, 2, 5 in numeric order with version indicators
         alice_row = [line for line in content.split('\n') if 'alice.eth' in line][0]
-        assert '#1]], [[Blue Railroad Token 2|#2]], [[Blue Railroad Token 5|#5]]' in alice_row
+        assert '#1]] (V1), [[Blue Railroad Token 2|#2]] (V1), [[Blue Railroad Token 5|#5]] (V2)' in alice_row
 
     def test_idempotent_content_generation(self, sample_tokens):
         """Same input always produces same output."""
