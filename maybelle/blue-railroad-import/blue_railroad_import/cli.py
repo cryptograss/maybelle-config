@@ -1,6 +1,7 @@
 """Command-line interface for the Blue Railroad import bot."""
 
 import argparse
+import subprocess
 import sys
 from pathlib import Path
 
@@ -8,7 +9,25 @@ from .importer import BlueRailroadImporter
 from .wiki_client import MWClientWrapper, DryRunClient
 
 
+def get_version() -> str:
+    """Get the current git commit hash, or 'unknown' if not available."""
+    try:
+        result = subprocess.run(
+            ['git', 'rev-parse', '--short', 'HEAD'],
+            capture_output=True,
+            text=True,
+            cwd=Path(__file__).parent,
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+    except Exception:
+        pass
+    return 'unknown'
+
+
 def main():
+    version = get_version()
+    print(f"Blue Railroad Import Bot (commit: {version})")
     parser = argparse.ArgumentParser(
         description='Import Blue Railroad tokens from chain data to PickiPedia'
     )
