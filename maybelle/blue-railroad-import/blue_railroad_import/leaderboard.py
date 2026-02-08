@@ -5,6 +5,9 @@ from typing import Optional
 from .models import Token, LeaderboardConfig, OwnerStats
 
 
+# Burn address - tokens sent here are considered destroyed
+BURN_ADDRESS = '0x000000000000000000000000000000000000dead'
+
 # Map song IDs to exercise names
 EXERCISE_MAP = {
     '5': 'Squats ([[Blue Railroad Train]])',
@@ -35,11 +38,16 @@ def filter_tokens(
     tokens: dict[str, Token],
     filter_song_id: Optional[str] = None,
     filter_owner: Optional[str] = None,
+    exclude_burned: bool = True,
 ) -> dict[str, Token]:
     """Filter tokens by song ID and/or owner."""
     result = {}
 
     for key, token in tokens.items():
+        # Skip burned tokens by default
+        if exclude_burned and token.owner and token.owner.lower() == BURN_ADDRESS:
+            continue
+
         # Apply song filter
         if filter_song_id:
             if token.song_id != filter_song_id:
@@ -61,6 +69,10 @@ def calculate_owner_stats(tokens: dict[str, Token]) -> dict[str, OwnerStats]:
 
     for key, token in tokens.items():
         if not token.owner:
+            continue
+
+        # Skip burned tokens
+        if token.owner.lower() == BURN_ADDRESS:
             continue
 
         owner_addr = token.owner
