@@ -1,0 +1,96 @@
+---
+# Caddy for automatic SSL and reverse proxy
+# Much simpler than certbot + nginx SSL config
+
+- name: Install Caddy dependencies
+  apt:
+    name:
+      - debian-keyring
+      - debian-archive-keyring
+      - apt-transport-https
+    state: present
+
+- name: Add Caddy GPG key
+  apt_key:
+    url: https://dl.cloudsmith.io/public/caddy/stable/gpg.key
+    state: present
+
+- name: Add Caddy repository
+  apt_repository:
+    repo: "deb https://dl.cloudsmith.io/public/caddy/stable/deb/debian any-version main"
+    state: present
+    filename: caddy-stable
+
+- name: Install Caddy
+  apt:
+    name: caddy
+    state: present
+    update_cache: yes
+
+- name: Create Caddyfile
+  copy:
+    dest: /etc/caddy/Caddyfile
+    content: |
+      # PickiPedia - SSL termination and reverse proxy
+      # Caddy automatically handles Let's Encrypt certificates
+
+      {{ domain_name }}, {{ www_domain }} {
+          # Reverse proxy to Nginx (which handles PHP-FPM)
+          reverse_proxy 127.0.0.1:8080
+
+          # Logging
+          log {
+              output file /var/log/caddy/pickipedia-access.log {
+                  roll_size 100mb
+                  roll_keep 5
+              }
+          }
+
+          # Security headers
+          header {
+              X-Content-Type-Options nosniff
+              X-Frame-Options SAMEORIGIN
+              Referrer-Policy strict-origin-when-cross-origin
+              # Remove server header
+              -Server
+          }
+
+          # Compression
+          encode gzip zstd
+
+          # Handle www redirect
+          @www host {{ www_domain }}
+          redir @www https://{{ domain_name }}{uri} permanent
+      }
+
+      # Health check endpoint (for monitoring from maybelle)
+      :8081 {
+          respond /health "OK" 200
+      }
+    mode: '0644'
+  notify: Restart Caddy
+
+- name: Create Caddy log directory
+  file:
+    path: /var/log/caddy
+    state: directory
+    owner: caddy
+    group: caddy
+    mode: '0755'
+
+- name: Start and enable Caddy
+  systemd:
+    name: caddy
+    state: started
+    enabled: yes
+
+- name: Wait for Caddy to obtain SSL certificate
+  uri:
+    url: "https://{{ domain_name }}/wiki/Main_Page"
+    status_code: [200, 302, 404]
+    validate_certs: yes
+  register: ssl_check
+  retries: 30
+  delay: 10
+  until: ssl_check.status in [200, 302, 404]
+  ignore_errors: yes

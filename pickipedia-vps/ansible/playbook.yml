@@ -1,0 +1,96 @@
+---
+# PickiPedia VPS Provisioning Playbook
+# MediaWiki wiki on dedicated Hetzner VPS
+#
+# Pre-requisites:
+# 1. Create Hetzner CX32 VPS with Ubuntu 24.04
+# 2. Add SSH key during creation
+# 3. Point pickipedia.xyz A record to new server IP
+# 4. Run: ansible-playbook -i inventory.yml playbook.yml
+#
+# Migration steps:
+# 1. Run this playbook (creates empty MediaWiki)
+# 2. Import database from backup
+# 3. Import images from backup
+# 4. Update LocalSettings.php with production secrets
+# 5. Switch DNS to new server
+
+- name: Provision PickiPedia MediaWiki Server
+  hosts: pickipedia
+  become: yes
+
+  vars_files:
+    - ../../secrets/vault.yml  # Relative to pickipedia-vps/ansible/
+
+  vars:
+    # Packages needed for MediaWiki
+    system_packages:
+      - apt-transport-https
+      - ca-certificates
+      - curl
+      - software-properties-common
+      - git
+      - unzip
+      - imagemagick
+      - ffmpeg
+      - lua5.4
+      - liblua5.4-dev
+
+  pre_tasks:
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Install system packages
+      apt:
+        name: "{{ system_packages }}"
+        state: present
+
+    - name: Set timezone
+      timezone:
+        name: UTC
+
+    - name: Deploy SSH login banner
+      copy:
+        content: |
+
+           ____  _      _    _ ____           _ _
+          |  _ \(_) ___| | _(_)  _ \ ___  __| (_) __ _
+          | |_) | |/ __| |/ / | |_) / _ \/ _` | |/ _` |
+          |  __/| | (__|   <| |  __/  __/ (_| | | (_| |
+          |_|   |_|\___|_|\_\_|_|   \___|\__,_|_|\__,_|
+
+          MediaWiki Encyclopedia for Traditional Music
+          https://pickipedia.xyz
+
+        dest: /etc/motd
+        mode: '0644'
+
+  roles:
+    - mariadb
+    - php-fpm
+    - nginx
+    - caddy  # For SSL termination
+    - mediawiki
+
+  post_tasks:
+    - name: Display post-installation notes
+      debug:
+        msg: |
+          PickiPedia VPS provisioned successfully!
+
+          Next steps:
+          1. Import database:
+             scp maybelle:/mnt/persist/pickipedia/backups/pickipedia_latest.sql.gz /tmp/
+             gunzip -c /tmp/pickipedia_*.sql.gz | mysql -u wiki -p pickipedia
+
+          2. Import images:
+             rsync -avz maybelle:/mnt/persist/pickipedia/backups/images/ {{ mediawiki_root }}/images/
+
+          3. Update LocalSettings.php with production secrets
+
+          4. Run MediaWiki update:
+             cd {{ mediawiki_root }} && php maintenance/update.php
+
+          5. Update DNS A record for pickipedia.xyz to point to this server

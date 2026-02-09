@@ -1,0 +1,132 @@
+---
+# PHP-FPM installation for MediaWiki
+# MediaWiki 1.43 requires PHP 8.1+, we use 8.2
+
+- name: Add PHP repository (ondrej/php PPA)
+  apt_repository:
+    repo: ppa:ondrej/php
+    state: present
+  when: ansible_distribution == 'Ubuntu'
+
+- name: Install PHP and extensions for MediaWiki
+  apt:
+    name:
+      # Core PHP
+      - php{{ php_version }}-fpm
+      - php{{ php_version }}-cli
+      # Required extensions
+      - php{{ php_version }}-mysql
+      - php{{ php_version }}-xml
+      - php{{ php_version }}-mbstring
+      - php{{ php_version }}-intl
+      - php{{ php_version }}-curl
+      - php{{ php_version }}-gd
+      - php{{ php_version }}-zip
+      # Recommended extensions
+      - php{{ php_version }}-apcu
+      - php{{ php_version }}-opcache
+      - php{{ php_version }}-redis
+      # For various extensions
+      - php{{ php_version }}-bcmath
+      - php{{ php_version }}-soap
+      - php{{ php_version }}-imagick
+      - php{{ php_version }}-lua
+    state: present
+    update_cache: yes
+
+- name: Configure PHP for MediaWiki
+  copy:
+    dest: /etc/php/{{ php_version }}/fpm/conf.d/99-mediawiki.ini
+    content: |
+      ; MediaWiki optimized PHP settings
+
+      ; Memory and execution
+      memory_limit = 256M
+      max_execution_time = 60
+      max_input_time = 60
+      max_input_vars = 5000
+
+      ; Upload settings (for media files)
+      upload_max_filesize = 100M
+      post_max_size = 105M
+      file_uploads = On
+
+      ; Sessions
+      session.save_handler = files
+      session.gc_maxlifetime = 86400
+
+      ; OPcache settings
+      opcache.enable = 1
+      opcache.memory_consumption = 256
+      opcache.max_accelerated_files = 10000
+      opcache.validate_timestamps = 1
+      opcache.revalidate_freq = 60
+
+      ; APCu settings
+      apc.enabled = 1
+      apc.shm_size = 128M
+      apc.enable_cli = 0
+
+      ; Error handling
+      display_errors = Off
+      log_errors = On
+      error_log = /var/log/php{{ php_version }}-fpm-errors.log
+
+      ; Date/time
+      date.timezone = UTC
+    mode: '0644'
+  notify: Restart PHP-FPM
+
+- name: Configure PHP-FPM pool for MediaWiki
+  copy:
+    dest: /etc/php/{{ php_version }}/fpm/pool.d/mediawiki.conf
+    content: |
+      [mediawiki]
+      user = www-data
+      group = www-data
+      listen = /run/php/php{{ php_version }}-fpm-mediawiki.sock
+      listen.owner = www-data
+      listen.group = www-data
+      listen.mode = 0660
+
+      ; Process management
+      pm = dynamic
+      pm.max_children = 50
+      pm.start_servers = 5
+      pm.min_spare_servers = 5
+      pm.max_spare_servers = 35
+      pm.max_requests = 500
+
+      ; Status page (useful for monitoring)
+      pm.status_path = /fpm-status
+      ping.path = /fpm-ping
+
+      ; Slow log
+      slowlog = /var/log/php{{ php_version }}-fpm-slow.log
+      request_slowlog_timeout = 5s
+
+      ; Security
+      php_admin_flag[allow_url_fopen] = on
+      php_admin_value[disable_functions] = exec,passthru,shell_exec,system,proc_open,popen
+      php_admin_value[open_basedir] = /var/www/pickipedia:/tmp:/var/lib/php/sessions
+
+      ; Environment
+      env[HOSTNAME] = $HOSTNAME
+      env[PATH] = /usr/local/bin:/usr/bin:/bin
+      env[TMP] = /tmp
+      env[TMPDIR] = /tmp
+      env[TEMP] = /tmp
+    mode: '0644'
+  notify: Restart PHP-FPM
+
+- name: Remove default www pool
+  file:
+    path: /etc/php/{{ php_version }}/fpm/pool.d/www.conf
+    state: absent
+  notify: Restart PHP-FPM
+
+- name: Start and enable PHP-FPM
+  systemd:
+    name: php{{ php_version }}-fpm
+    state: started
+    enabled: yes

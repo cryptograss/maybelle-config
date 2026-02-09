@@ -1,0 +1,137 @@
+---
+# Nginx as local PHP-FPM handler
+# Caddy handles SSL termination and proxies to nginx
+
+- name: Install Nginx
+  apt:
+    name: nginx
+    state: present
+
+- name: Create Nginx config for MediaWiki
+  copy:
+    dest: /etc/nginx/sites-available/mediawiki
+    content: |
+      # MediaWiki Nginx configuration
+      # SSL handled by Caddy - this listens on localhost only
+
+      server {
+          listen 127.0.0.1:8080;
+          server_name _;
+
+          root {{ mediawiki_root }};
+          index index.php;
+
+          # Logs
+          access_log /var/log/nginx/mediawiki-access.log;
+          error_log /var/log/nginx/mediawiki-error.log;
+
+          # Client body size (for file uploads)
+          client_max_body_size 100M;
+
+          # MediaWiki short URLs
+          location / {
+              try_files $uri $uri/ @rewrite;
+          }
+
+          location @rewrite {
+              rewrite ^/(.*)$ /index.php?title=$1&$args last;
+          }
+
+          # PHP handling
+          location ~ \.php$ {
+              include fastcgi_params;
+              fastcgi_pass unix:/run/php/php{{ php_version }}-fpm-mediawiki.sock;
+              fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+              fastcgi_param PATH_INFO $fastcgi_path_info;
+
+              # Increase timeouts for long-running scripts
+              fastcgi_read_timeout 300;
+              fastcgi_send_timeout 300;
+          }
+
+          # MediaWiki API
+          location /api.php {
+              include fastcgi_params;
+              fastcgi_pass unix:/run/php/php{{ php_version }}-fpm-mediawiki.sock;
+              fastcgi_param SCRIPT_FILENAME $document_root/api.php;
+          }
+
+          # REST API
+          location /rest.php {
+              include fastcgi_params;
+              fastcgi_pass unix:/run/php/php{{ php_version }}-fpm-mediawiki.sock;
+              fastcgi_param SCRIPT_FILENAME $document_root/rest.php;
+          }
+
+          # Images
+          location /images {
+              # Serve uploaded files directly
+              # Disable PHP execution in images directory
+              location ~ \.php$ {
+                  deny all;
+              }
+          }
+
+          # Serve static assets directly
+          location /skins {
+              expires 30d;
+          }
+
+          location /resources {
+              expires 30d;
+          }
+
+          location /extensions {
+              # Allow serving static files from extensions
+              # But deny PHP execution to prevent exploits
+              location ~ \.php$ {
+                  deny all;
+              }
+          }
+
+          # Security: deny access to sensitive files
+          location ~ ^/(cache|includes|languages|maintenance|tests|vendor)/ {
+              deny all;
+          }
+
+          location ~ /\. {
+              deny all;
+          }
+
+          # Favicon and robots
+          location = /favicon.ico {
+              log_not_found off;
+              access_log off;
+          }
+
+          location = /robots.txt {
+              allow all;
+              log_not_found off;
+              access_log off;
+          }
+      }
+    mode: '0644'
+  notify: Restart Nginx
+
+- name: Enable MediaWiki site
+  file:
+    src: /etc/nginx/sites-available/mediawiki
+    dest: /etc/nginx/sites-enabled/mediawiki
+    state: link
+  notify: Restart Nginx
+
+- name: Remove default site
+  file:
+    path: /etc/nginx/sites-enabled/default
+    state: absent
+  notify: Restart Nginx
+
+- name: Test Nginx configuration
+  command: nginx -t
+  changed_when: false
+
+- name: Start and enable Nginx
+  systemd:
+    name: nginx
+    state: started
+    enabled: yes

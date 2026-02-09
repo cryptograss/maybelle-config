@@ -1,0 +1,284 @@
+---
+# MediaWiki installation and configuration
+# Downloads MediaWiki, installs composer dependencies, configures for migration
+
+- name: Create web root directory
+  file:
+    path: "{{ mediawiki_root }}"
+    state: directory
+    owner: www-data
+    group: www-data
+    mode: '0755'
+
+- name: Download MediaWiki
+  get_url:
+    url: "https://releases.wikimedia.org/mediawiki/1.43/mediawiki-{{ mediawiki_version }}.tar.gz"
+    dest: /tmp/mediawiki-{{ mediawiki_version }}.tar.gz
+    mode: '0644'
+  register: mediawiki_download
+
+- name: Extract MediaWiki
+  unarchive:
+    src: /tmp/mediawiki-{{ mediawiki_version }}.tar.gz
+    dest: "{{ mediawiki_root }}"
+    remote_src: yes
+    extra_opts:
+      - --strip-components=1
+    owner: www-data
+    group: www-data
+  when: mediawiki_download.changed
+
+- name: Install Composer
+  get_url:
+    url: https://getcomposer.org/download/latest-stable/composer.phar
+    dest: /usr/local/bin/composer
+    mode: '0755'
+
+- name: Create images directory
+  file:
+    path: "{{ mediawiki_root }}/images"
+    state: directory
+    owner: www-data
+    group: www-data
+    mode: '0755'
+
+- name: Create cache directory
+  file:
+    path: "{{ mediawiki_root }}/cache"
+    state: directory
+    owner: www-data
+    group: www-data
+    mode: '0755'
+
+# Base LocalSettings.php - will need to be updated with secrets after migration
+- name: Create base LocalSettings.php
+  copy:
+    dest: "{{ mediawiki_root }}/LocalSettings.php"
+    content: |
+      <?php
+      # PickiPedia MediaWiki Configuration
+      # Base configuration - secrets loaded from LocalSettings.local.php
+
+      # Protect against web entry
+      if ( !defined( 'MEDIAWIKI' ) ) {
+          exit;
+      }
+
+      ## Site basics
+      $wgSitename = "PickiPedia";
+      $wgMetaNamespace = "PickiPedia";
+
+      ## The URL base path to the directory containing the wiki
+      $wgScriptPath = "";
+      $wgArticlePath = "/wiki/$1";
+      $wgUsePathInfo = true;
+
+      ## Server URLs
+      $wgServer = "https://{{ domain_name }}";
+
+      ## Resource paths
+      $wgResourceBasePath = $wgScriptPath;
+
+      ## Logo
+      $wgLogos = [
+          '1x' => "$wgResourceBasePath/resources/assets/pickipedia.png",
+          'icon' => "$wgResourceBasePath/resources/assets/pickipedia.png",
+      ];
+
+      ## Contact info
+      $wgEmergencyContact = "justin@cryptograss.live";
+      $wgPasswordSender = "wiki@pickipedia.xyz";
+
+      ## Database settings
+      # Loaded from LocalSettings.local.php
+
+      ## Shared memory settings
+      $wgMainCacheType = CACHE_ACCEL;
+      $wgMemCachedServers = [];
+
+      ## File uploads
+      $wgEnableUploads = true;
+      $wgUseImageMagick = true;
+      $wgImageMagickConvertCommand = "/usr/bin/convert";
+      $wgMaxUploadSize = 104857600; # 100MB
+      $wgFileExtensions = array_merge(
+          $wgFileExtensions,
+          [ 'pdf', 'mp3', 'mp4', 'ogg', 'webm', 'svg' ]
+      );
+
+      ## InstantCommons allows wiki to use images from commons.wikimedia.org
+      $wgUseInstantCommons = true;
+
+      ## Skin
+      $wgDefaultSkin = "timeless";
+      wfLoadSkin( 'Timeless' );
+      wfLoadSkin( 'Vector' );
+      wfLoadSkin( 'MinervaNeue' );
+
+      ## License
+      $wgRightsPage = "";
+      $wgRightsUrl = "https://creativecommons.org/licenses/by-sa/4.0/";
+      $wgRightsText = "Creative Commons Attribution-ShareAlike";
+      $wgRightsIcon = "$wgResourceBasePath/resources/assets/licenses/cc-by-sa.png";
+
+      ## Path to the GNU diff3 utility
+      $wgDiff3 = "/usr/bin/diff3";
+
+      ## Jobs
+      $wgJobRunRate = 0; # Disable job queue on web requests
+      # Run jobs via cron instead
+
+      ## Caching
+      $wgCacheDirectory = "$IP/cache";
+
+      ## Email
+      $wgEnableEmail = true;
+      $wgEnableUserEmail = true;
+      $wgEmailAuthentication = true;
+
+      ## Namespaces
+      define("NS_MUSICIAN", 100);
+      define("NS_MUSICIAN_TALK", 101);
+      define("NS_SHOW", 102);
+      define("NS_SHOW_TALK", 103);
+      $wgExtraNamespaces[NS_MUSICIAN] = "Musician";
+      $wgExtraNamespaces[NS_MUSICIAN_TALK] = "Musician_talk";
+      $wgExtraNamespaces[NS_SHOW] = "Show";
+      $wgExtraNamespaces[NS_SHOW_TALK] = "Show_talk";
+
+      ## User rights
+      $wgGroupPermissions['*']['createaccount'] = false;
+      $wgGroupPermissions['*']['edit'] = false;
+      $wgGroupPermissions['user']['edit'] = true;
+      $wgGroupPermissions['sysop']['createaccount'] = true;
+
+      ## Load extensions
+      wfLoadExtension( 'ParserFunctions' );
+      wfLoadExtension( 'TemplateStyles' );
+      wfLoadExtension( 'Scribunto' );
+      $wgScribuntoDefaultEngine = 'luastandalone';
+
+      ## Load local settings (secrets)
+      if ( file_exists( "$IP/LocalSettings.local.php" ) ) {
+          require_once "$IP/LocalSettings.local.php";
+      }
+    owner: www-data
+    group: www-data
+    mode: '0644'
+
+- name: Create LocalSettings.local.php template
+  copy:
+    dest: "{{ mediawiki_root }}/LocalSettings.local.php.template"
+    content: |
+      <?php
+      # PickiPedia secrets - NOT checked into version control
+      # Copy this to LocalSettings.local.php and fill in values
+
+      # Database
+      $wgDBtype = "mysql";
+      $wgDBserver = "localhost";
+      $wgDBname = "{{ db_name }}";
+      $wgDBuser = "{{ db_user }}";
+      $wgDBpassword = "FILL_IN_PASSWORD";
+
+      # Security keys
+      $wgSecretKey = "FILL_IN_SECRET_KEY";
+      $wgUpgradeKey = "FILL_IN_UPGRADE_KEY";
+
+      # Sentry/GlitchTip (optional)
+      # $wgSentryDsn = "https://...";
+    owner: www-data
+    group: www-data
+    mode: '0600'
+
+- name: Create job runner script
+  copy:
+    dest: /usr/local/bin/mediawiki-jobs.sh
+    mode: '0755'
+    content: |
+      #!/bin/bash
+      # Run MediaWiki job queue
+      cd {{ mediawiki_root }}
+      /usr/bin/php maintenance/runJobs.php --maxjobs=50 --maxtime=60 2>&1 | logger -t mediawiki-jobs
+
+- name: Schedule MediaWiki job runner
+  ansible.builtin.cron:
+    name: "mediawiki job queue"
+    minute: "*/5"
+    job: "/usr/local/bin/mediawiki-jobs.sh"
+    user: www-data
+
+- name: Set permissions on MediaWiki directories
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: www-data
+    group: www-data
+    mode: '0755'
+    recurse: yes
+  loop:
+    - "{{ mediawiki_root }}/images"
+    - "{{ mediawiki_root }}/cache"
+
+- name: Create migration import script
+  copy:
+    dest: /usr/local/bin/import-pickipedia-backup.sh
+    mode: '0750'
+    content: |
+      #!/bin/bash
+      # Import PickiPedia backup from maybelle
+      set -euo pipefail
+
+      BACKUP_HOST="{{ backup_host }}"
+      BACKUP_PATH="{{ backup_path }}"
+      MW_ROOT="{{ mediawiki_root }}"
+
+      echo "=== PickiPedia Migration Import ==="
+      echo ""
+
+      # Find latest database backup
+      echo "Fetching latest database backup from $BACKUP_HOST..."
+      LATEST_DB=$(ssh root@$BACKUP_HOST "ls -t $BACKUP_PATH/pickipedia_*.sql.gz 2>/dev/null | head -1")
+
+      if [ -z "$LATEST_DB" ]; then
+          echo "ERROR: No database backup found on $BACKUP_HOST"
+          exit 1
+      fi
+
+      echo "Found: $LATEST_DB"
+
+      # Download and import database
+      echo "Downloading database backup..."
+      scp root@$BACKUP_HOST:$LATEST_DB /tmp/pickipedia-import.sql.gz
+
+      echo "Importing database (this may take a while)..."
+      gunzip -c /tmp/pickipedia-import.sql.gz | mysql {{ db_name }}
+
+      echo "Database imported successfully."
+
+      # Import images
+      echo ""
+      echo "Syncing images from $BACKUP_HOST..."
+      rsync -avz --progress root@$BACKUP_HOST:$BACKUP_PATH/images/ $MW_ROOT/images/
+
+      echo "Images synced."
+
+      # Fix ownership
+      chown -R www-data:www-data $MW_ROOT/images
+
+      # Run MediaWiki update
+      echo ""
+      echo "Running MediaWiki update script..."
+      cd $MW_ROOT
+      sudo -u www-data php maintenance/update.php --quick
+
+      echo ""
+      echo "=== Import Complete ==="
+      echo ""
+      echo "Next steps:"
+      echo "1. Copy LocalSettings.local.php.template to LocalSettings.local.php"
+      echo "2. Fill in database password and secret keys"
+      echo "3. Test the wiki: curl -I https://{{ domain_name }}/wiki/Main_Page"
+
+      # Cleanup
+      rm -f /tmp/pickipedia-import.sql.gz

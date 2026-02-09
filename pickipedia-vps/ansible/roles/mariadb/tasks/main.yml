@@ -1,0 +1,84 @@
+---
+# MariaDB installation for PickiPedia
+# Uses MariaDB 10.11 LTS
+
+- name: Install MariaDB server
+  apt:
+    name:
+      - mariadb-server
+      - mariadb-client
+      - python3-pymysql
+    state: present
+
+- name: Start and enable MariaDB
+  systemd:
+    name: mariadb
+    state: started
+    enabled: yes
+
+- name: Create database
+  community.mysql.mysql_db:
+    name: "{{ db_name }}"
+    state: present
+    login_unix_socket: /var/run/mysqld/mysqld.sock
+
+- name: Create database user
+  community.mysql.mysql_user:
+    name: "{{ db_user }}"
+    password: "{{ pickipedia_db_password }}"
+    priv: "{{ db_name }}.*:ALL"
+    state: present
+    login_unix_socket: /var/run/mysqld/mysqld.sock
+
+- name: Configure MariaDB for MediaWiki
+  copy:
+    dest: /etc/mysql/mariadb.conf.d/99-mediawiki.cnf
+    content: |
+      [mysqld]
+      # MediaWiki recommended settings
+      innodb_buffer_pool_size = 1G
+      innodb_log_file_size = 256M
+      innodb_flush_log_at_trx_commit = 2
+      innodb_file_per_table = 1
+
+      # Character set
+      character-set-server = utf8mb4
+      collation-server = utf8mb4_unicode_ci
+
+      # Performance
+      max_connections = 100
+      query_cache_type = 0
+      query_cache_size = 0
+
+      # Binary logging for backup (optional)
+      # log_bin = /var/log/mysql/mysql-bin.log
+      # expire_logs_days = 7
+    mode: '0644'
+  notify: Restart MariaDB
+
+- name: Create backup script
+  copy:
+    dest: /usr/local/bin/backup-pickipedia-db.sh
+    mode: '0750'
+    content: |
+      #!/bin/bash
+      # Daily database backup
+      BACKUP_DIR="/var/backups/pickipedia"
+      mkdir -p "$BACKUP_DIR"
+
+      DATE=$(date +%Y%m%d)
+      BACKUP_FILE="$BACKUP_DIR/pickipedia_${DATE}.sql.gz"
+
+      mysqldump --single-transaction pickipedia | gzip > "$BACKUP_FILE"
+
+      # Keep last 14 days
+      find "$BACKUP_DIR" -name "pickipedia_*.sql.gz" -mtime +14 -delete
+
+      echo "$(date): Backup completed: $BACKUP_FILE ($(stat -c%s "$BACKUP_FILE") bytes)" >> /var/log/pickipedia-backup.log
+
+- name: Schedule daily backup
+  ansible.builtin.cron:
+    name: "pickipedia database backup"
+    hour: "3"
+    minute: "0"
+    job: "/usr/local/bin/backup-pickipedia-db.sh"

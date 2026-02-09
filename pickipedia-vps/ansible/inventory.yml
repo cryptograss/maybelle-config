@@ -1,0 +1,34 @@
+all:
+  hosts:
+    pickipedia:  # After picking, a picking encyclopedia
+      ansible_host: 89.167.16.89
+      ansible_user: root
+  vars:
+    # Server specs (Hetzner CX32 recommended)
+    # - 4 vCPU (AMD EPYC)
+    # - 8 GB RAM
+    # - 80 GB NVMe
+    # - ~€8/month
+
+    # Domain and SSL
+    domain_name: pickipedia.xyz
+    www_domain: www.pickipedia.xyz
+
+    # MediaWiki version
+    mediawiki_version: "1.43.6"
+
+    # Database
+    mariadb_version: "10.11"
+    db_name: pickipedia
+    db_user: wiki
+
+    # PHP version (MediaWiki 1.43 requires PHP 8.1+)
+    php_version: "8.2"
+
+    # Server paths
+    web_root: /var/www/pickipedia
+    mediawiki_root: /var/www/pickipedia
+
+    # Backup sources (on maybelle)
+    backup_host: maybelle.cryptograss.live
+    backup_path: /mnt/persist/pickipedia/backups
