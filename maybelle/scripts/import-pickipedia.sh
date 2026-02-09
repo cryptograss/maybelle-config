@@ -13,6 +13,7 @@ PICKIPEDIA_HOST="5.78.112.39"
 SSH_KEY="/root/.ssh/id_ed25519_hunter"
 BACKUP_DIR="/mnt/persist/pickipedia/backups"
 SECRETS_DIR="/var/jenkins_home/secrets/pickipedia"
+STAGE_DIR="/var/jenkins_home/pickipedia_stage"
 REMOTE_MW_ROOT="/var/www/pickipedia"
 
 echo "============================================================"
@@ -36,6 +37,12 @@ if [ ! -f "$SECRETS_DIR/LocalSettings.local.php" ]; then
     exit 1
 fi
 
+if [ ! -d "$STAGE_DIR" ]; then
+    echo "ERROR: Jenkins staging directory not found at $STAGE_DIR"
+    echo "Run a pickipedia-build job first to create the staged build"
+    exit 1
+fi
+
 # Find latest database backup
 LATEST_DB=$(ls -t "$BACKUP_DIR"/pickipedia_*.sql.gz 2>/dev/null | head -1)
 if [ -z "$LATEST_DB" ]; then
@@ -54,6 +61,27 @@ if ! ssh -i "$SSH_KEY" -o ConnectTimeout=10 -o BatchMode=yes "root@$PICKIPEDIA_H
     exit 1
 fi
 echo "✓ SSH connection OK"
+echo ""
+
+# Sync built MediaWiki from staging
+echo "============================================================"
+echo "SYNCING BUILT MEDIAWIKI"
+echo "============================================================"
+echo ""
+
+echo "Syncing built MediaWiki from staging to VPS..."
+echo "This includes all extensions and skins from the Jenkins build."
+rsync -avz --progress --delete \
+    --exclude 'images/' \
+    --exclude 'cache/' \
+    --exclude 'LocalSettings.local.php' \
+    -e "ssh -i $SSH_KEY" \
+    "$STAGE_DIR/" \
+    "root@$PICKIPEDIA_HOST:$REMOTE_MW_ROOT/"
+
+# Fix ownership
+ssh -i "$SSH_KEY" "root@$PICKIPEDIA_HOST" "chown -R www-data:www-data $REMOTE_MW_ROOT"
+echo "✓ Built MediaWiki synced"
 echo ""
 
 # Copy database backup to VPS
