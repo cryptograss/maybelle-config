@@ -1,5 +1,5 @@
 pipelineJob('pickipedia-rsync-status') {
-    description('Status check for PickiPedia deployments to NFS')
+    description('Status check for PickiPedia deployments to VPS')
     definition {
         cps {
             script('''
@@ -187,7 +187,7 @@ pipelineJob('pickipedia-rsync-status') {
 
                                     # Check for deploy script
                                     echo "=== Deploy Script ==="
-                                    DEPLOY_SCRIPT="/usr/local/bin/deploy-pickipedia-to-nfs.sh"
+                                    DEPLOY_SCRIPT="/usr/local/bin/deploy-pickipedia-to-vps.sh"
                                     if [ -f "\\$DEPLOY_SCRIPT" ]; then
                                         echo "Deploy script exists: \\$DEPLOY_SCRIPT"
                                         ls -la "\\$DEPLOY_SCRIPT"

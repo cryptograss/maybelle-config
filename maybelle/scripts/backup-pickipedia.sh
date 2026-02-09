@@ -1,36 +1,30 @@
 #!/bin/bash
-# Daily PickiPedia MySQL backup from NFS
-# Pulls dump via SSH for use in hunter preview environments
+# Daily PickiPedia MySQL backup from VPS
+# Pulls dump via SSH for disaster recovery and hunter preview environments
 
 set -euo pipefail
 
 LOG_FILE="/var/log/pickipedia-backup.log"
 BACKUP_DIR="/mnt/persist/pickipedia/backups"
-SSH_KEY="/root/.ssh/id_ed25519_nfs"
-NFS_HOST="ssh.nyc1.nearlyfreespeech.net"
-NFS_USER="jmyles_pickipedia"
+SSH_KEY="/root/.ssh/id_ed25519_hunter"
+VPS_HOST="5.78.112.39"
 
 log() {
     echo "$(date '+%Y-%m-%d %H:%M:%S'): $*" >> "$LOG_FILE"
 }
 
-log "Starting PickiPedia backup"
+log "Starting PickiPedia backup from VPS"
 
 # Ensure backup directory exists
 mkdir -p "$BACKUP_DIR"
 
-# Run mysqldump on NFS and pipe back
+# Backup filename
 BACKUP_FILE="$BACKUP_DIR/pickipedia_$(date +%Y%m%d).sql.gz"
 
-# MySQL credentials file (deployed by ansible from vault)
-MYSQL_CNF="/root/.pickipedia-my.cnf"
-
-# Read credentials from file
-DB_USER=$(grep -oP 'user=\K.*' "$MYSQL_CNF")
-DB_PASS=$(grep -oP 'password=\K.*' "$MYSQL_CNF")
-
-if ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no "${NFS_USER}@${NFS_HOST}" \
-    "mysqldump -h pickipedia.db -u '$DB_USER' -p'$DB_PASS' pickipedia" 2>> "$LOG_FILE" \
+# Run mysqldump on VPS and pipe back
+# The VPS has local MySQL with root access via socket
+if ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no "root@${VPS_HOST}" \
+    "mysqldump pickipedia" 2>> "$LOG_FILE" \
     | gzip > "$BACKUP_FILE"; then
 
     log "Backup successful: $BACKUP_FILE ($(stat -c%s "$BACKUP_FILE") bytes)"
@@ -46,12 +40,12 @@ if ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no "${NFS_USER}@${NFS_HOST}" \
         log "WARNING - sync to hunter failed"
     fi
 
-    # Backup images from NFS
-    log "Backing up images from NFS..."
+    # Backup images from VPS
+    log "Backing up images from VPS..."
     IMAGES_BACKUP_DIR="$BACKUP_DIR/images"
     mkdir -p "$IMAGES_BACKUP_DIR"
     if rsync -avz -e "ssh -i $SSH_KEY -o StrictHostKeyChecking=no" \
-        "${NFS_USER}@${NFS_HOST}:images/" "$IMAGES_BACKUP_DIR/" >> "$LOG_FILE" 2>&1; then
+        "root@${VPS_HOST}:/var/www/pickipedia/images/" "$IMAGES_BACKUP_DIR/" >> "$LOG_FILE" 2>&1; then
         log "Images backup complete: $(find "$IMAGES_BACKUP_DIR" -type f | wc -l) files"
     else
         log "WARNING - images backup failed"
