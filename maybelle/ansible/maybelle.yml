@@ -372,10 +372,10 @@
           if rsync -vah --delete --delay-updates \
               -e "ssh -i $SSH_KEY -o StrictHostKeyChecking=no" \
               --exclude='.deploy-ready' \
-              --exclude='images/' \
-              --exclude='cache/' \
-              --exclude='LocalSettings.local.php' \
-              --exclude='.git' \
+              --exclude='/images/' \
+              --exclude='/cache/' \
+              --exclude='/LocalSettings.local.php' \
+              --exclude='/.git' \
               --exclude='extensions/SemanticMediaWiki/.smw.json' \
               "$BUILD_DIR"/ \
               "$VPS_TARGET" >> "$LOG_FILE" 2>&1; then

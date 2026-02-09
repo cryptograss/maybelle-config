@@ -72,9 +72,9 @@ echo ""
 echo "Syncing built MediaWiki from staging to VPS..."
 echo "This includes all extensions and skins from the Jenkins build."
 rsync -avz --progress --delete \
-    --exclude 'images/' \
-    --exclude 'cache/' \
-    --exclude 'LocalSettings.local.php' \
+    --exclude '/images/' \
+    --exclude '/cache/' \
+    --exclude '/LocalSettings.local.php' \
     -e "ssh -i $SSH_KEY" \
     "$STAGE_DIR/" \
     "root@$PICKIPEDIA_HOST:$REMOTE_MW_ROOT/"
