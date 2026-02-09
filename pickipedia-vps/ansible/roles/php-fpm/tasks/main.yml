@@ -30,7 +30,6 @@
       - php{{ php_version }}-bcmath
       - php{{ php_version }}-soap
       - php{{ php_version }}-imagick
-      - php{{ php_version }}-lua
     state: present
     update_cache: yes
 
