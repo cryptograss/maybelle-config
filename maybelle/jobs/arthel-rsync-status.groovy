@@ -6,6 +6,10 @@ pipelineJob('arthel-rsync-status') {
                 pipeline {
                     agent any
 
+                    options {
+                        disableConcurrentBuilds()
+                    }
+
                     stages {
                         stage('Check deploy marker') {
                             steps {

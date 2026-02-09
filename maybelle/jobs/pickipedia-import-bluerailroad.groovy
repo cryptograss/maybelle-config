@@ -8,6 +8,7 @@ pipelineJob('pickipedia-import-bluerailroad') {
                     agent any
 
                     options {
+                        disableConcurrentBuilds()
                         buildDiscarder(logRotator(numToKeepStr: '30'))
                         timeout(time: 5, unit: 'MINUTES')
                     }

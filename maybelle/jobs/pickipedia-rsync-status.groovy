@@ -6,6 +6,10 @@ pipelineJob('pickipedia-rsync-status') {
                 pipeline {
                     agent any
 
+                    options {
+                        disableConcurrentBuilds()
+                    }
+
                     environment {
                         DEPLOY_STALE = 'false'
                         STALE_MINUTES = '0'

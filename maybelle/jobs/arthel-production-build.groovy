@@ -1,4 +1,7 @@
 pipelineJob('arthel-production-build') {
+    properties {
+        disableConcurrentBuilds()
+    }
     definition {
         cpsScm {
             scm {

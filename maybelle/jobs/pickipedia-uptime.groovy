@@ -6,6 +6,10 @@ pipelineJob('pickipedia-uptime') {
                 pipeline {
                     agent any
 
+                    options {
+                        disableConcurrentBuilds()
+                    }
+
                     environment {
                         FAILURE_COUNT_FILE = '/var/jenkins_home/pickipedia-uptime-failures.txt'
                         ALERT_THRESHOLD = '2'

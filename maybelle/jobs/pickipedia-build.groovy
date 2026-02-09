@@ -1,4 +1,7 @@
 pipelineJob('pickipedia-build') {
+    properties {
+        disableConcurrentBuilds()
+    }
     definition {
         cpsScm {
             scm {

@@ -1,4 +1,7 @@
 pipelineJob('arthel-fetch-chain-data') {
+    properties {
+        disableConcurrentBuilds()
+    }
     definition {
         cpsScm {
             scm {
