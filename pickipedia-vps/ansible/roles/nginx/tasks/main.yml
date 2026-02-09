@@ -124,14 +124,13 @@
   file:
     path: /etc/nginx/sites-enabled/default
     state: absent
-  notify: Restart Nginx
 
 - name: Test Nginx configuration
   command: nginx -t
   changed_when: false
 
-- name: Start and enable Nginx
+- name: Restart Nginx to release port 80
   systemd:
     name: nginx
-    state: started
+    state: restarted
     enabled: yes
