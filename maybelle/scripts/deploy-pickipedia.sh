@@ -85,22 +85,22 @@ if ! git merge-base --is-ancestor origin/main origin/production; then
 fi
 echo "✓ Repository updated"
 
-# Handle fresh host SSH keys
+# Handle SSH host keys
+echo ""
+echo "Ensuring SSH host key is present..."
+
 if [ "$FRESH_HOST" = true ]; then
-    echo ""
-    echo "============================================================"
-    echo "HANDLING FRESH HOST SSH KEYS"
-    echo "============================================================"
-    echo ""
-
-    echo "Removing old SSH host keys for $PICKIPEDIA_HOST..."
+    echo "Fresh host mode - removing old keys first..."
     ssh-keygen -R "$PICKIPEDIA_HOST" 2>/dev/null || true
-    echo "✓ Old host keys removed"
+fi
 
-    echo ""
-    echo "Fetching new SSH host key..."
+# Always ensure host key is in known_hosts
+if ! ssh-keygen -F "$PICKIPEDIA_HOST" >/dev/null 2>&1; then
+    echo "Adding SSH host key for $PICKIPEDIA_HOST..."
     ssh-keyscan -H "$PICKIPEDIA_HOST" >> ~/.ssh/known_hosts 2>/dev/null
-    echo "✓ New host key added to known_hosts"
+    echo "✓ Host key added"
+else
+    echo "✓ Host key already present"
 fi
 
 # Run ansible
