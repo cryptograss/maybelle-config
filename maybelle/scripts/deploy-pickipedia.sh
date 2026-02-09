@@ -19,7 +19,7 @@ JENKINS_REPORTER_FILE="/root/.jenkins_reporter_password"
 TIMESTAMP=$(date +%Y%m%d-%H%M%S)
 LOG_FILE="/mnt/persist/logs/pickipedia-deploy-${TIMESTAMP}.log"
 VAULT_FILE="/tmp/vault_pass_$$"
-PICKIPEDIA_HOST="89.167.16.89"
+PICKIPEDIA_HOST="5.78.112.39"
 
 # Parse arguments
 if [ "$1" = "--fresh-host" ]; then

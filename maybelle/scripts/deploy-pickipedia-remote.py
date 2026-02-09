@@ -62,7 +62,7 @@ def main():
 
     # Confirm
     print("\n" + "-" * 60)
-    print("Will deploy PickiPedia VPS (89.167.16.89)")
+    print("Will deploy PickiPedia VPS (5.78.112.39)")
     print("Stack: MariaDB + PHP-FPM + Nginx + Caddy + MediaWiki")
     if fresh_host:
         print("⚠  FRESH HOST MODE: Old SSH host keys will be removed")
