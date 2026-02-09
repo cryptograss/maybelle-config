@@ -27,6 +27,14 @@
     state: present
     update_cache: yes
 
+- name: Create Caddy log directory
+  file:
+    path: /var/log/caddy
+    state: directory
+    owner: caddy
+    group: caddy
+    mode: '0755'
+
 - name: Create Caddyfile
   copy:
     dest: /etc/caddy/Caddyfile
@@ -38,20 +46,11 @@
           # Reverse proxy to Nginx (which handles PHP-FPM)
           reverse_proxy 127.0.0.1:8080
 
-          # Logging
-          log {
-              output file /var/log/caddy/pickipedia-access.log {
-                  roll_size 100mb
-                  roll_keep 5
-              }
-          }
-
           # Security headers
           header {
               X-Content-Type-Options nosniff
               X-Frame-Options SAMEORIGIN
               Referrer-Policy strict-origin-when-cross-origin
-              # Remove server header
               -Server
           }
 
@@ -70,27 +69,25 @@
     mode: '0644'
   notify: Restart Caddy
 
-- name: Create Caddy log directory
-  file:
-    path: /var/log/caddy
-    state: directory
-    owner: caddy
-    group: caddy
-    mode: '0755'
-
 - name: Start and enable Caddy
   systemd:
     name: caddy
     state: started
     enabled: yes
-
-- name: Wait for Caddy to obtain SSL certificate
-  uri:
-    url: "https://{{ domain_name }}/wiki/Main_Page"
-    status_code: [200, 302, 404]
-    validate_certs: yes
-  register: ssl_check
-  retries: 30
-  delay: 10
-  until: ssl_check.status in [200, 302, 404]
+  register: caddy_start
   ignore_errors: yes
+
+- name: Check Caddy status if start failed
+  command: journalctl -u caddy --no-pager -n 20
+  register: caddy_journal
+  when: caddy_start.failed | default(false)
+
+- name: Show Caddy error
+  debug:
+    var: caddy_journal.stdout_lines
+  when: caddy_start.failed | default(false)
+
+- name: Fail if Caddy didn't start
+  fail:
+    msg: "Caddy failed to start. Check the journal output above."
+  when: caddy_start.failed | default(false)
