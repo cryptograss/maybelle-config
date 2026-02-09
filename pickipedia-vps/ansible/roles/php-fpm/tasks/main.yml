@@ -122,10 +122,9 @@
   file:
     path: /etc/php/{{ php_version }}/fpm/pool.d/www.conf
     state: absent
-  notify: Restart PHP-FPM
 
-- name: Start and enable PHP-FPM
+- name: Restart PHP-FPM to load mediawiki pool
   systemd:
     name: php{{ php_version }}-fpm
-    state: started
+    state: restarted
     enabled: yes
