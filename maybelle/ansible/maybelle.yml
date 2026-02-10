@@ -158,6 +158,9 @@
           - "/var/log/pickipedia-backup.log:/var/log/pickipedia-backup.log:ro"
           - "/var/log/pickipedia-deploy.log:/var/log/pickipedia-deploy.log:ro"
           # Docker socket removed - Jenkins doesn't need it and it's a security risk
+        etc_hosts:
+          # Use Hetzner private network for faster/reliable inter-VPS communication
+          pickipedia.xyz: "10.0.0.4"
         env_file: "{{ jenkins_home }}/.env"
         env:
           CASC_JENKINS_CONFIG: "/var/jenkins_home/casc_configs/jenkins.yml"
