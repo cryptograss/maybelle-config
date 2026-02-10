@@ -1068,7 +1068,7 @@
                 - /mnt/persist/ipfs/staging:/export
               ports:
                 - "127.0.0.1:5001:5001"  # API (local only)
-                - "127.0.0.1:8080:8080"  # Gateway (via Caddy)
+                - "127.0.0.1:8088:8080"  # Gateway (via Caddy) - internal 8080 mapped to host 8088
                 - "4001:4001"             # Swarm TCP
                 - "4001:4001/udp"         # Swarm UDP
               networks:
