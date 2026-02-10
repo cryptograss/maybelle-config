@@ -51,6 +51,7 @@ const PINATA_JWT = process.env.PINATA_JWT;
 const PINATA_API_KEY = process.env.PINATA_API_KEY;
 const PINATA_SECRET_KEY = process.env.PINATA_SECRET_KEY;
 const IPFS_API_URL = process.env.IPFS_API_URL || 'http://ipfs:5001';
+const IPFS_GATEWAY_URL = process.env.IPFS_GATEWAY_URL || 'https://ipfs.maybelle.cryptograss.live';
 const STAGING_DIR = process.env.STAGING_DIR || '/staging';
 const AUTHORIZED_WALLETS = process.env.AUTHORIZED_WALLETS || '';
 
@@ -247,7 +248,7 @@ async function pinFile(filePath, filename) {
     return {
       cid: cidV1,
       ipfsUri: `ipfs://${cidV1}`,
-      gatewayUrl: `https://gateway.pinata.cloud/ipfs/${cidV1}`,
+      gatewayUrl: `${IPFS_GATEWAY_URL}/ipfs/${cidV1}`,
       filename,
       size: stats.size,
       alreadyPinned: true
@@ -275,7 +276,7 @@ async function pinFile(filePath, filename) {
   return {
     cid: pinataCid,
     ipfsUri: `ipfs://${pinataCid}`,
-    gatewayUrl: `https://gateway.pinata.cloud/ipfs/${pinataCid}`,
+    gatewayUrl: `${IPFS_GATEWAY_URL}/ipfs/${pinataCid}`,
     filename,
     size: stats.size,
     alreadyPinned: false
@@ -384,6 +385,7 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`Blue Railroad Pinning Service listening on port ${PORT}`);
   console.log(`Pinata configured: ${PINATA_JWT ? 'yes (JWT)' : 'NO - uploads will fail'}`);
   console.log(`IPFS API URL: ${IPFS_API_URL}`);
+  console.log(`IPFS Gateway URL: ${IPFS_GATEWAY_URL}`);
   const walletCount = AUTHORIZED_WALLETS.split(',').filter(w => w.trim()).length;
   console.log(`Wallet auth: ${walletCount} authorized wallet(s)`);
 });
