@@ -1017,33 +1017,8 @@
         name: ipfs-net
         state: present
 
-    - name: Start IPFS container
-      docker_container:
-        name: ipfs
-        image: ipfs/kubo:latest
-        restart_policy: unless-stopped
-        volumes:
-          - /mnt/persist/ipfs/data:/data/ipfs
-          - /mnt/persist/ipfs/staging:/export
-        ports:
-          - "127.0.0.1:5001:5001"  # API (local only)
-          - "4001:4001"            # Swarm TCP (public, for peering)
-          - "4001:4001/udp"        # Swarm UDP
-          # Gateway deliberately not exposed - access via Pinata gateway
-        networks:
-          - name: ipfs-net
-        env:
-          IPFS_PROFILE: "server"   # Optimized for always-on server
-
-    - name: Wait for IPFS to initialize
-      uri:
-        url: http://127.0.0.1:5001/api/v0/id
-        method: POST
-        status_code: [200]
-      register: ipfs_health
-      until: ipfs_health.status == 200
-      retries: 30
-      delay: 2
+    # IPFS container is now managed by docker-compose below (pinning services)
+    # This ensures consistent port mappings and lifecycle management
 
     # Blue Railroad Pinning Service
     # Downloads videos via yt-dlp, pins to Pinata + local IPFS
@@ -1110,6 +1085,13 @@
     - name: Stop standalone IPFS container (now managed by compose)
       docker_container:
         name: ipfs
+        state: absent
+      ignore_errors: yes
+
+    # Stop compose services to allow port mapping changes
+    - name: Stop existing pinning services for reconfiguration
+      community.docker.docker_compose_v2:
+        project_src: /mnt/persist/pinning-service
         state: absent
       ignore_errors: yes
 
