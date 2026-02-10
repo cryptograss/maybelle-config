@@ -1134,7 +1134,7 @@
         docker run --rm
         -v /mnt/persist/ipfs/data:/data/ipfs
         ipfs/kubo:latest
-        ipfs config --json Gateway.NoFetch true
+        config --json Gateway.NoFetch true
       when: ipfs_nofetch_check.stdout != 'true'
 
     - name: Start IPFS container after config change
