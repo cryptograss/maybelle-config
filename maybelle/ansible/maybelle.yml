@@ -1112,16 +1112,30 @@
 
     # Configure IPFS gateway to only serve pinned content (NoFetch mode)
     # This prevents the gateway from fetching arbitrary content from the IPFS network
-    - name: Configure IPFS Gateway NoFetch mode
-      command: docker exec ipfs ipfs config --json Gateway.NoFetch true
-      register: ipfs_config_result
-      changed_when: "'key already has value' not in ipfs_config_result.stderr"
+    # Note: We must stop the container first because the daemon holds a repo lock
+    - name: Check current IPFS Gateway NoFetch setting
+      command: docker exec ipfs ipfs config Gateway.NoFetch
+      register: ipfs_nofetch_check
+      changed_when: false
+      failed_when: false
 
-    - name: Restart IPFS to apply NoFetch configuration
-      command: docker restart ipfs
-      when: ipfs_config_result.changed
+    - name: Stop IPFS container for config change
+      command: docker stop ipfs
+      when: ipfs_nofetch_check.stdout != 'true'
 
-    - name: Wait for IPFS to be ready after restart
+    - name: Configure IPFS Gateway NoFetch mode (container stopped)
+      command: >
+        docker run --rm
+        -v /mnt/persist/ipfs/data:/data/ipfs
+        ipfs/kubo:latest
+        ipfs config --json Gateway.NoFetch true
+      when: ipfs_nofetch_check.stdout != 'true'
+
+    - name: Start IPFS container after config change
+      command: docker start ipfs
+      when: ipfs_nofetch_check.stdout != 'true'
+
+    - name: Wait for IPFS to be ready after config change
       uri:
         url: http://127.0.0.1:5001/api/v0/id
         method: POST
@@ -1130,7 +1144,7 @@
       until: ipfs_restart_health.status == 200
       retries: 30
       delay: 2
-      when: ipfs_config_result.changed
+      when: ipfs_nofetch_check.stdout != 'true'
 
   handlers:
     - name: Restart Jenkins container
