@@ -68,6 +68,21 @@ def main():
     )
 
     parser.add_argument(
+        '--thumbnails',
+        action='store_true',
+        default=True,
+        dest='thumbnails',
+        help='Generate and upload thumbnails for token videos (default: enabled)',
+    )
+
+    parser.add_argument(
+        '--no-thumbnails',
+        action='store_false',
+        dest='thumbnails',
+        help='Skip thumbnail generation',
+    )
+
+    parser.add_argument(
         '-v', '--verbose',
         action='store_true',
         help='Enable verbose output',
@@ -105,7 +120,7 @@ def main():
     )
 
     try:
-        results = importer.run()
+        results = importer.run(generate_thumbnails=args.thumbnails)
 
         # Print final summary
         print("\n" + "=" * 50)
