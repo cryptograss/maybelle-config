@@ -36,3 +36,8 @@ glitchtip.{{ domain_name }} {
 pinning.{{ domain_name }} {
     reverse_proxy localhost:3001
 }
+
+# IPFS gateway (serves only pinned content)
+ipfs.{{ domain_name }} {
+    reverse_proxy localhost:8080
+}

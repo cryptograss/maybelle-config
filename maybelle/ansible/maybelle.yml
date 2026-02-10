@@ -1092,9 +1092,10 @@
                 - /mnt/persist/ipfs/data:/data/ipfs
                 - /mnt/persist/ipfs/staging:/export
               ports:
-                - "127.0.0.1:5001:5001"
-                - "4001:4001"
-                - "4001:4001/udp"
+                - "127.0.0.1:5001:5001"  # API (local only)
+                - "127.0.0.1:8080:8080"  # Gateway (via Caddy)
+                - "4001:4001"             # Swarm TCP
+                - "4001:4001/udp"         # Swarm UDP
               networks:
                 - ipfs-net
               environment:
@@ -1126,6 +1127,28 @@
       until: pinning_health.status == 200
       retries: 30
       delay: 2
+
+    # Configure IPFS gateway to only serve pinned content (NoFetch mode)
+    # This prevents the gateway from fetching arbitrary content from the IPFS network
+    - name: Configure IPFS Gateway NoFetch mode
+      command: docker exec ipfs ipfs config --json Gateway.NoFetch true
+      register: ipfs_config_result
+      changed_when: "'key already has value' not in ipfs_config_result.stderr"
+
+    - name: Restart IPFS to apply NoFetch configuration
+      command: docker restart ipfs
+      when: ipfs_config_result.changed
+
+    - name: Wait for IPFS to be ready after restart
+      uri:
+        url: http://127.0.0.1:5001/api/v0/id
+        method: POST
+        status_code: [200]
+      register: ipfs_restart_health
+      until: ipfs_restart_health.status == 200
+      retries: 30
+      delay: 2
+      when: ipfs_config_result.changed
 
   handlers:
     - name: Restart Jenkins container
