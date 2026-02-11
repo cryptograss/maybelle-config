@@ -8,8 +8,29 @@ from typing import Optional
 import urllib.request
 import urllib.error
 
+from cid import make_cid
+
 
 IPFS_GATEWAY = "https://ipfs.maybelle.cryptograss.live"
+
+
+def normalize_cid(cid: str) -> str:
+    """Normalize a CID to CIDv1 base32 format.
+
+    CIDv0 (Qm...) and CIDv1 (bafy...) can represent the same content.
+    This normalizes both to CIDv1 base32 so identical content gets
+    the same filename regardless of which CID version was used.
+    """
+    try:
+        parsed = make_cid(cid)
+        # Convert to CIDv1 if it's v0
+        if parsed.version == 0:
+            parsed = parsed.to_v1()
+        # Return base32 encoded string
+        return str(parsed)
+    except Exception as e:
+        print(f"Warning: Could not normalize CID {cid}: {e}")
+        return cid  # Fall back to original if parsing fails
 
 
 def download_video(cid: str, output_path: Path, timeout: int = 60) -> bool:
@@ -117,5 +138,11 @@ def generate_thumbnail(cid: str, output_dir: Optional[Path] = None) -> Optional[
 
 
 def get_thumbnail_filename(cid: str) -> str:
-    """Get the wiki filename for a video thumbnail based on its IPFS CID."""
-    return f"Blue_Railroad_Video_{cid}.jpg"
+    """Get the wiki filename for a video thumbnail based on its IPFS CID.
+
+    CIDs are normalized to CIDv1 base32 format so that the same content
+    always gets the same filename, regardless of whether it was referenced
+    as CIDv0 (Qm...) or CIDv1 (bafy...).
+    """
+    normalized = normalize_cid(cid)
+    return f"Blue_Railroad_Video_{normalized}.jpg"
