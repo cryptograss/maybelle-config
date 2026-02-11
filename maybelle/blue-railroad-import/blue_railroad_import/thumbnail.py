@@ -26,8 +26,8 @@ def normalize_cid(cid: str) -> str:
         # Convert to CIDv1 if it's v0
         if parsed.version == 0:
             parsed = parsed.to_v1()
-        # Return base32 encoded string
-        return str(parsed)
+        # Return base32 encoded string (bafy... format)
+        return parsed.encode("base32").decode("ascii")
     except Exception as e:
         print(f"Warning: Could not normalize CID {cid}: {e}")
         return cid  # Fall back to original if parsing fails
