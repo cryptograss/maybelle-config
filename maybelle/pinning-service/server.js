@@ -66,6 +66,59 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
+// Always transcode videos to web-friendly VP9/WebM
+// - VP9 is royalty-free (unlike H.264) with excellent browser support
+// - Converts any codec (MJPEG, etc.) to efficient VP9
+// - Downscales to max 720p (but never upscales)
+// - Skips only if already a small MP4 or WebM
+
+async function transcodeIfNeeded(inputPath, onProgress = null) {
+  const stats = statSync(inputPath);
+  const sizeMB = stats.size / 1024 / 1024;
+  const ext = inputPath.split('.').pop().toLowerCase();
+
+  // Skip if already a small MP4 or WebM (likely already web-optimized)
+  if ((ext === 'mp4' || ext === 'webm') && stats.size <= 50 * 1024 * 1024) {
+    console.log(`File is ${sizeMB.toFixed(1)}MB ${ext.toUpperCase()}, assuming already optimized`);
+    if (onProgress) onProgress({ stage: 'transcode-skip', message: `File is ${sizeMB.toFixed(1)}MB ${ext.toUpperCase()}, already optimized` });
+    return { path: inputPath, transcoded: false };
+  }
+
+  console.log(`File is ${sizeMB.toFixed(1)}MB ${ext.toUpperCase()}, transcoding to VP9...`);
+  if (onProgress) onProgress({ stage: 'transcoding', message: `Transcoding ${sizeMB.toFixed(1)}MB video to VP9...`, progress: 30 });
+
+  const outputPath = inputPath.replace(/\.[^.]+$/, '_transcoded.webm');
+
+  try {
+    // Transcode to VP9:
+    // - scale=-2:'min(720,ih)' = downscale to 720p max, never upscale
+    // - CRF 30 + -b:v 0 = constant quality mode (30 ≈ H.264 CRF 23)
+    // - libopus = royalty-free audio codec, pairs well with VP9
+    // - row-mt=1 = enables row-based multithreading for faster encoding
+    execSync(`ffmpeg -i "${inputPath}" -vf "scale=-2:'min(720,ih)'" -c:v libvpx-vp9 -crf 30 -b:v 0 -row-mt 1 -c:a libopus -b:a 128k -y "${outputPath}"`, {
+      stdio: 'pipe',
+      timeout: 900000 // 15 minute timeout for VP9 (slower than H.264)
+    });
+
+    const newStats = statSync(outputPath);
+    const newSizeMB = newStats.size / 1024 / 1024;
+    const reduction = ((1 - newStats.size/stats.size) * 100).toFixed(0);
+    console.log(`Transcoded: ${sizeMB.toFixed(1)}MB -> ${newSizeMB.toFixed(1)}MB (${reduction}% reduction)`);
+    if (onProgress) onProgress({ stage: 'transcoded', message: `Transcoded: ${sizeMB.toFixed(1)}MB → ${newSizeMB.toFixed(1)}MB (${reduction}% smaller)`, progress: 50 });
+
+    // Remove original, return transcoded path
+    try { unlinkSync(inputPath); } catch (e) { /* ignore */ }
+
+    return { path: outputPath, transcoded: true, originalSize: stats.size, newSize: newStats.size };
+  } catch (error) {
+    console.error('Transcoding failed:', error.message);
+    if (onProgress) onProgress({ stage: 'transcode-error', message: `Transcoding failed: ${error.message}` });
+    // Fall back to original file
+    try { unlinkSync(outputPath); } catch (e) { /* ignore */ }
+    return { path: inputPath, transcoded: false, error: error.message };
+  }
+}
+
 // Download video from URL (Instagram, YouTube, etc.) and pin to IPFS
 app.post('/pin-from-url', requireWalletAuth, async (req, res) => {
   const { url } = req.body;
@@ -118,6 +171,104 @@ app.post('/pin-from-url', requireWalletAuth, async (req, res) => {
       error: 'Failed to download or pin video',
       details: error.message
     });
+  }
+});
+
+// Download video from URL with SSE progress streaming
+app.post('/pin-from-url-stream', requireWalletAuth, async (req, res) => {
+  const { url } = req.body;
+
+  if (!url) {
+    return res.status(400).json({ error: 'URL is required' });
+  }
+
+  // Set up SSE headers
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no'); // Disable nginx buffering
+
+  // Helper to send SSE events
+  const sendEvent = (data) => {
+    res.write(`data: ${JSON.stringify(data)}\n\n`);
+  };
+
+  // Progress callback for internal functions
+  const onProgress = (event) => {
+    sendEvent(event);
+  };
+
+  const tempFile = join(STAGING_DIR, `download-${Date.now()}`);
+
+  try {
+    sendEvent({ stage: 'signing', message: 'Authorization verified', progress: 5 });
+
+    console.log(`[stream] Downloading from: ${url}`);
+    sendEvent({ stage: 'downloading', message: 'Downloading video...', progress: 10 });
+
+    // Use yt-dlp to download the video
+    const outputTemplate = `${tempFile}.%(ext)s`;
+
+    execSync(`yt-dlp -o "${outputTemplate}" --no-playlist "${url}"`, {
+      stdio: 'pipe',
+      timeout: 300000 // 5 minute timeout
+    });
+
+    // Find the downloaded file (yt-dlp adds extension)
+    const files = execSync(`ls ${tempFile}.*`).toString().trim().split('\n');
+    if (files.length === 0 || !files[0]) {
+      throw new Error('Download completed but file not found');
+    }
+
+    const downloadedFile = files[0];
+    console.log(`[stream] Downloaded: ${downloadedFile.split('/').pop()}`);
+    sendEvent({ stage: 'downloaded', message: 'Video downloaded', progress: 25 });
+
+    // Transcode if file is too large (with progress callback)
+    const transcodeResult = await transcodeIfNeeded(downloadedFile, onProgress);
+    const fileToPin = transcodeResult.path;
+    const filename = fileToPin.split('/').pop().replace('_transcoded', '');
+
+    // Pin to Pinata and local IPFS (with progress callback)
+    const result = await pinFile(fileToPin, filename, onProgress);
+
+    // Add transcoding info to response
+    if (transcodeResult.transcoded) {
+      result.transcoded = true;
+      result.originalSize = transcodeResult.originalSize;
+      result.transcodedSize = transcodeResult.newSize;
+    }
+
+    // Cleanup
+    try { unlinkSync(fileToPin); } catch (e) { /* ignore */ }
+
+    // Send final complete event
+    sendEvent({
+      stage: 'complete',
+      cid: result.cid,
+      alreadyPinned: result.alreadyPinned,
+      transcoded: result.transcoded || false,
+      originalSize: result.originalSize,
+      transcodedSize: result.transcodedSize,
+      gatewayUrl: result.gatewayUrl,
+      progress: 100
+    });
+
+    res.end();
+
+  } catch (error) {
+    console.error('[stream] Error processing URL:', error.message);
+    // Cleanup any partial downloads
+    try {
+      execSync(`rm -f ${tempFile}.*`);
+    } catch (e) { /* ignore */ }
+
+    sendEvent({
+      stage: 'error',
+      message: error.message
+    });
+
+    res.end();
   }
 });
 
@@ -215,9 +366,10 @@ async function checkCidPinned(cidString) {
 }
 
 // Main pinning function - uploads to Pinata and pins locally (idempotent)
-async function pinFile(filePath, filename) {
+async function pinFile(filePath, filename, onProgress = null) {
   const stats = statSync(filePath);
   console.log(`Pinning file: ${filename} (${(stats.size / 1024 / 1024).toFixed(2)} MB)`);
+  if (onProgress) onProgress({ stage: 'computing-cid', message: 'Computing content hash...', progress: 55 });
 
   // Step 1: Compute CID from file content
   const fileBuffer = readFileSync(filePath);
@@ -228,15 +380,18 @@ async function pinFile(filePath, filename) {
   // Convert to v1 for consistent comparison and storage
   const cidV1 = cidToV1(computedCid);
   console.log(`CID as v1: ${cidV1}`);
+  if (onProgress) onProgress({ stage: 'checking-pinata', message: 'Checking if already pinned...', progress: 60 });
 
   const alreadyPinnedOnPinata = await checkCidPinned(computedCid);
   if (alreadyPinnedOnPinata) {
     console.log(`CID already pinned on Pinata, skipping upload`);
+    if (onProgress) onProgress({ stage: 'already-pinned', message: 'Already pinned to Pinata!', progress: 90 });
 
     // Still ensure it's pinned locally for redundancy (use v1 CID)
     const locallyPinned = await checkLocalPinned(cidV1);
     if (!locallyPinned) {
       console.log(`Not pinned locally, starting background pin...`);
+      if (onProgress) onProgress({ stage: 'pinning-local', message: 'Pinning to local node for redundancy...', progress: 95 });
       pinToLocalIPFS(cidV1)
         .then(() => console.log(`Local pin complete: ${cidV1}`))
         .catch(error => console.warn(`Local pin failed: ${error.message}`));
@@ -256,8 +411,10 @@ async function pinFile(filePath, filename) {
   }
 
   // Step 3: Upload to Pinata
+  if (onProgress) onProgress({ stage: 'uploading', message: 'Uploading to Pinata...', progress: 65 });
   const pinataCid = await uploadToPinata(filePath, filename);
   console.log(`Pinata CID: ${pinataCid}`);
+  if (onProgress) onProgress({ stage: 'uploaded', message: 'Uploaded to Pinata', progress: 85 });
 
   // Sanity check - computed CID should match Pinata's (compare as v1 to handle version differences)
   const computedV1 = cidToV1(computedCid);
@@ -269,6 +426,7 @@ async function pinFile(filePath, filename) {
   // Step 4: Pin to local IPFS node for redundancy (fire and forget)
   // Local pinning can take a long time for large files, so we don't block on it
   console.log(`Starting local IPFS pin (background)...`);
+  if (onProgress) onProgress({ stage: 'pinning-local', message: 'Pinning to local node...', progress: 90 });
   pinToLocalIPFS(pinataCid)
     .then(() => console.log(`Local pin complete: ${pinataCid}`))
     .catch(error => console.warn(`Local pin failed: ${error.message}`));
