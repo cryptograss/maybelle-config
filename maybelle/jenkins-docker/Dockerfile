@@ -27,6 +27,7 @@ RUN apt-get update && apt-get install -y \
     python3-pip \
     python3-venv \
     git \
+    ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Blue Railroad import bot
