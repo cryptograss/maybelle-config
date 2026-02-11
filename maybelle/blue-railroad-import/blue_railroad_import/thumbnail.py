@@ -11,7 +11,10 @@ import urllib.error
 from cid import make_cid
 
 
-IPFS_GATEWAY = "https://ipfs.maybelle.cryptograss.live"
+IPFS_GATEWAYS = [
+    "https://ipfs.maybelle.cryptograss.live",
+    "https://ipfs.io",
+]
 
 
 def normalize_cid(cid: str) -> str:
@@ -34,7 +37,9 @@ def normalize_cid(cid: str) -> str:
 
 
 def download_video(cid: str, output_path: Path, timeout: int = 60) -> bool:
-    """Download video from IPFS gateway.
+    """Download video from IPFS gateway with fallback.
+
+    Tries maybelle gateway first, falls back to public ipfs.io if needed.
 
     Args:
         cid: IPFS content identifier
@@ -44,16 +49,23 @@ def download_video(cid: str, output_path: Path, timeout: int = 60) -> bool:
     Returns:
         True if download succeeded, False otherwise
     """
-    url = f"{IPFS_GATEWAY}/ipfs/{cid}"
-    try:
-        urllib.request.urlretrieve(url, output_path)
-        return output_path.exists() and output_path.stat().st_size > 0
-    except (urllib.error.URLError, urllib.error.HTTPError) as e:
-        print(f"Failed to download video {cid}: {e}")
-        return False
-    except Exception as e:
-        print(f"Unexpected error downloading video {cid}: {e}")
-        return False
+    for gateway in IPFS_GATEWAYS:
+        url = f"{gateway}/ipfs/{cid}"
+        try:
+            print(f"  Trying {gateway}...")
+            urllib.request.urlretrieve(url, output_path)
+            if output_path.exists() and output_path.stat().st_size > 0:
+                print(f"  Downloaded from {gateway}")
+                return True
+        except (urllib.error.URLError, urllib.error.HTTPError) as e:
+            print(f"  {gateway} failed: {e}")
+            continue
+        except Exception as e:
+            print(f"  {gateway} unexpected error: {e}")
+            continue
+
+    print(f"Failed to download video {cid} from all gateways")
+    return False
 
 
 def extract_frame(video_path: Path, output_path: Path, time_seconds: float = 2.0) -> bool:
