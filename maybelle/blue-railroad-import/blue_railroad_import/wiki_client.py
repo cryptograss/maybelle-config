@@ -2,6 +2,7 @@
 
 import re
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Optional, Protocol
 import mwclient
 
@@ -50,6 +51,14 @@ class WikiClientProtocol(Protocol):
 
     def page_exists(self, title: str) -> bool:
         """Check if a page exists."""
+        ...
+
+    def file_exists(self, filename: str) -> bool:
+        """Check if a file exists on the wiki."""
+        ...
+
+    def upload_file(self, filepath: Path, filename: str, description: str, comment: str) -> bool:
+        """Upload a file to the wiki. Returns True if successful."""
         ...
 
 
@@ -114,6 +123,21 @@ class MWClientWrapper:
         """Check if a page exists."""
         return self.site.pages[title].exists
 
+    def file_exists(self, filename: str) -> bool:
+        """Check if a file exists on the wiki."""
+        # mwclient uses .images for File: namespace
+        return self.site.images[filename].exists
+
+    def upload_file(self, filepath: Path, filename: str, description: str, comment: str) -> bool:
+        """Upload a file to the wiki. Returns True if successful."""
+        try:
+            with open(filepath, 'rb') as f:
+                self.site.upload(f, filename, description=description, comment=comment)
+            return True
+        except Exception as e:
+            print(f"Upload failed for {filename}: {e}")
+            return False
+
 
 class DryRunClient:
     """Client for dry-run mode that reads from a real wiki but skips writes.
@@ -169,3 +193,14 @@ class DryRunClient:
         if self._site:
             return self._site.pages[title].exists
         return False
+
+    def file_exists(self, filename: str) -> bool:
+        """Check if a file exists on the wiki (dry run mode)."""
+        if self._site:
+            return self._site.images[filename].exists
+        return False
+
+    def upload_file(self, filepath: Path, filename: str, description: str, comment: str) -> bool:
+        """Simulate file upload in dry run mode."""
+        print(f"[DRY RUN] Would upload: {filename}")
+        return True
