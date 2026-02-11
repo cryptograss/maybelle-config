@@ -8,7 +8,7 @@ from .models import BotConfig, Token
 from .chain_data import load_chain_data, aggregate_tokens_from_sources
 from .config_parser import parse_config_from_wikitext, get_default_config
 from .leaderboard import generate_leaderboard_content
-from .token_page import generate_token_page_content
+from .token_page import generate_token_page_content, update_existing_page
 from .wiki_client import WikiClientProtocol, SaveResult
 from .thumbnail import generate_thumbnail, get_thumbnail_filename
 
@@ -164,11 +164,23 @@ class BlueRailroadImporter:
             self.ensure_thumbnail(token)
 
         page_title = f"Blue Railroad Token {token.token_id}"
-        content = generate_token_page_content(token)
+        existing_content = self.wiki.get_page_content(page_title)
 
-        summary = f"{'Updated' if self.wiki.page_exists(page_title) else 'Imported'} Blue Railroad token #{token.token_id} from chain data"
+        if existing_content is None:
+            # New page - create with full template
+            content = generate_token_page_content(token)
+            summary = f"Imported Blue Railroad token #{token.token_id} from chain data"
+            return self.wiki.save_page(page_title, content, summary)
 
-        return self.wiki.save_page(page_title, content, summary)
+        # Existing page - only update template if owner changed, preserve user content
+        updated_content = update_existing_page(existing_content, token)
+
+        if updated_content is None:
+            # No update needed (owner unchanged)
+            return SaveResult(page_title, 'unchanged', 'Owner unchanged')
+
+        summary = f"Updated Blue Railroad token #{token.token_id} ownership"
+        return self.wiki.save_page(page_title, updated_content, summary)
 
     def generate_leaderboard(
         self,
