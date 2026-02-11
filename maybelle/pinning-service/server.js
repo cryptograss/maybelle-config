@@ -66,6 +66,54 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
+// Always transcode videos to web-friendly H.264/MP4
+// - Converts any codec (MJPEG, etc.) to efficient H.264
+// - Downscales to max 720p (but never upscales)
+// - Skips only if already a small MP4
+
+async function transcodeIfNeeded(inputPath) {
+  const stats = statSync(inputPath);
+  const sizeMB = stats.size / 1024 / 1024;
+  const ext = inputPath.split('.').pop().toLowerCase();
+
+  // Skip if already a small MP4 (likely already web-optimized)
+  if (ext === 'mp4' && stats.size <= 50 * 1024 * 1024) {
+    console.log(`File is ${sizeMB.toFixed(1)}MB MP4, assuming already optimized`);
+    return { path: inputPath, transcoded: false };
+  }
+
+  console.log(`File is ${sizeMB.toFixed(1)}MB ${ext.toUpperCase()}, transcoding to H.264...`);
+
+  const outputPath = inputPath.replace(/\.[^.]+$/, '_transcoded.mp4');
+
+  try {
+    // Transcode to H.264:
+    // - scale=-2:'min(720,ih)' = downscale to 720p max, never upscale
+    // - CRF 23 = good quality (lower = better quality, 18-28 is typical range)
+    // - preset medium = balance of speed and compression
+    // - movflags +faststart = enables streaming before full download
+    execSync(`ffmpeg -i "${inputPath}" -vf "scale=-2:'min(720,ih)'" -c:v libx264 -crf 23 -preset medium -c:a aac -b:a 128k -movflags +faststart -y "${outputPath}"`, {
+      stdio: 'pipe',
+      timeout: 600000 // 10 minute timeout for transcoding
+    });
+
+    const newStats = statSync(outputPath);
+    const newSizeMB = newStats.size / 1024 / 1024;
+    const reduction = ((1 - newStats.size/stats.size) * 100).toFixed(0);
+    console.log(`Transcoded: ${sizeMB.toFixed(1)}MB -> ${newSizeMB.toFixed(1)}MB (${reduction}% reduction)`);
+
+    // Remove original, return transcoded path
+    try { unlinkSync(inputPath); } catch (e) { /* ignore */ }
+
+    return { path: outputPath, transcoded: true, originalSize: stats.size, newSize: newStats.size };
+  } catch (error) {
+    console.error('Transcoding failed:', error.message);
+    // Fall back to original file
+    try { unlinkSync(outputPath); } catch (e) { /* ignore */ }
+    return { path: inputPath, transcoded: false, error: error.message };
+  }
+}
+
 // Download video from URL (Instagram, YouTube, etc.) and pin to IPFS
 app.post('/pin-from-url', requireWalletAuth, async (req, res) => {
   const { url } = req.body;
@@ -95,15 +143,25 @@ app.post('/pin-from-url', requireWalletAuth, async (req, res) => {
     }
 
     const downloadedFile = files[0];
-    const filename = downloadedFile.split('/').pop();
+    console.log(`Downloaded: ${downloadedFile.split('/').pop()}`);
 
-    console.log(`Downloaded: ${filename}`);
+    // Transcode if file is too large
+    const transcodeResult = await transcodeIfNeeded(downloadedFile);
+    const fileToPin = transcodeResult.path;
+    const filename = fileToPin.split('/').pop().replace('_transcoded', '');
 
     // Pin to Pinata and local IPFS
-    const result = await pinFile(downloadedFile, filename);
+    const result = await pinFile(fileToPin, filename);
+
+    // Add transcoding info to response
+    if (transcodeResult.transcoded) {
+      result.transcoded = true;
+      result.originalSize = transcodeResult.originalSize;
+      result.transcodedSize = transcodeResult.newSize;
+    }
 
     // Cleanup
-    try { unlinkSync(downloadedFile); } catch (e) { /* ignore */ }
+    try { unlinkSync(fileToPin); } catch (e) { /* ignore */ }
 
     res.json(result);
 
@@ -128,16 +186,28 @@ app.post('/pin-file', requireWalletAuth, upload.single('file'), async (req, res)
   }
 
   try {
-    const result = await pinFile(req.file.path, req.file.originalname);
+    // Transcode if file is too large
+    const transcodeResult = await transcodeIfNeeded(req.file.path);
+    const fileToPin = transcodeResult.path;
 
-    // Cleanup
-    try { unlinkSync(req.file.path); } catch (e) { /* ignore */ }
+    const result = await pinFile(fileToPin, req.file.originalname);
+
+    // Add transcoding info to response
+    if (transcodeResult.transcoded) {
+      result.transcoded = true;
+      result.originalSize = transcodeResult.originalSize;
+      result.transcodedSize = transcodeResult.newSize;
+    }
+
+    // Cleanup (transcodeIfNeeded already deleted original if it transcoded)
+    try { unlinkSync(fileToPin); } catch (e) { /* ignore */ }
 
     res.json(result);
 
   } catch (error) {
     console.error('Error pinning file:', error.message);
     try { unlinkSync(req.file.path); } catch (e) { /* ignore */ }
+    try { execSync(`rm -f ${req.file.path.replace(/\.[^.]+$/, '_transcoded.mp4')}`); } catch (e) { /* ignore */ }
 
     res.status(500).json({
       error: 'Failed to pin file',
