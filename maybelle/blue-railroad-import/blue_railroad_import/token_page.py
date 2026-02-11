@@ -27,8 +27,7 @@ def generate_token_page_content(token: Token) -> str:
         f"|uri_type={'ipfs' if token.ipfs_cid else 'unknown'}",
         f"|ipfs_cid={token.ipfs_cid or ''}",
         "}}",
-        "",
-        "[[Category:Blue Railroad Tokens]]",
+        "",  # Template handles [[Category:Blue Railroad Tokens]] and burned detection
     ])
 
     if token.is_v2:
