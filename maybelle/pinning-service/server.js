@@ -66,35 +66,36 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// Always transcode videos to web-friendly H.264/MP4
-// - Converts any codec (MJPEG, etc.) to efficient H.264
+// Always transcode videos to web-friendly VP9/WebM
+// - VP9 is royalty-free (unlike H.264) with excellent browser support
+// - Converts any codec (MJPEG, etc.) to efficient VP9
 // - Downscales to max 720p (but never upscales)
-// - Skips only if already a small MP4
+// - Skips only if already a small MP4 or WebM
 
 async function transcodeIfNeeded(inputPath) {
   const stats = statSync(inputPath);
   const sizeMB = stats.size / 1024 / 1024;
   const ext = inputPath.split('.').pop().toLowerCase();
 
-  // Skip if already a small MP4 (likely already web-optimized)
-  if (ext === 'mp4' && stats.size <= 50 * 1024 * 1024) {
-    console.log(`File is ${sizeMB.toFixed(1)}MB MP4, assuming already optimized`);
+  // Skip if already a small MP4 or WebM (likely already web-optimized)
+  if ((ext === 'mp4' || ext === 'webm') && stats.size <= 50 * 1024 * 1024) {
+    console.log(`File is ${sizeMB.toFixed(1)}MB ${ext.toUpperCase()}, assuming already optimized`);
     return { path: inputPath, transcoded: false };
   }
 
-  console.log(`File is ${sizeMB.toFixed(1)}MB ${ext.toUpperCase()}, transcoding to H.264...`);
+  console.log(`File is ${sizeMB.toFixed(1)}MB ${ext.toUpperCase()}, transcoding to VP9...`);
 
-  const outputPath = inputPath.replace(/\.[^.]+$/, '_transcoded.mp4');
+  const outputPath = inputPath.replace(/\.[^.]+$/, '_transcoded.webm');
 
   try {
-    // Transcode to H.264:
+    // Transcode to VP9:
     // - scale=-2:'min(720,ih)' = downscale to 720p max, never upscale
-    // - CRF 23 = good quality (lower = better quality, 18-28 is typical range)
-    // - preset medium = balance of speed and compression
-    // - movflags +faststart = enables streaming before full download
-    execSync(`ffmpeg -i "${inputPath}" -vf "scale=-2:'min(720,ih)'" -c:v libx264 -crf 23 -preset medium -c:a aac -b:a 128k -movflags +faststart -y "${outputPath}"`, {
+    // - CRF 30 + -b:v 0 = constant quality mode (30 ≈ H.264 CRF 23)
+    // - libopus = royalty-free audio codec, pairs well with VP9
+    // - row-mt=1 = enables row-based multithreading for faster encoding
+    execSync(`ffmpeg -i "${inputPath}" -vf "scale=-2:'min(720,ih)'" -c:v libvpx-vp9 -crf 30 -b:v 0 -row-mt 1 -c:a libopus -b:a 128k -y "${outputPath}"`, {
       stdio: 'pipe',
-      timeout: 600000 // 10 minute timeout for transcoding
+      timeout: 900000 // 15 minute timeout for VP9 (slower than H.264)
     });
 
     const newStats = statSync(outputPath);
@@ -207,7 +208,7 @@ app.post('/pin-file', requireWalletAuth, upload.single('file'), async (req, res)
   } catch (error) {
     console.error('Error pinning file:', error.message);
     try { unlinkSync(req.file.path); } catch (e) { /* ignore */ }
-    try { execSync(`rm -f ${req.file.path.replace(/\.[^.]+$/, '_transcoded.mp4')}`); } catch (e) { /* ignore */ }
+    try { execSync(`rm -f ${req.file.path.replace(/\.[^.]+$/, '_transcoded.webm')}`); } catch (e) { /* ignore */ }
 
     res.status(500).json({
       error: 'Failed to pin file',
