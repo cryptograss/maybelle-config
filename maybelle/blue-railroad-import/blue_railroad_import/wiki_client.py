@@ -132,8 +132,27 @@ class MWClientWrapper:
         """Upload a file to the wiki. Returns True if successful."""
         try:
             with open(filepath, 'rb') as f:
-                self.site.upload(f, filename, description=description, comment=comment)
-            return True
+                result = self.site.upload(f, filename, description=description, comment=comment)
+
+            # mwclient returns a dict with the API response
+            # Check for actual upload success
+            if result and 'upload' in result:
+                upload_result = result['upload']
+                status = upload_result.get('result', '')
+                if status == 'Success':
+                    return True
+                elif status == 'Warning':
+                    # Log warnings but don't treat as success
+                    warnings = upload_result.get('warnings', {})
+                    print(f"Upload warning for {filename}: {warnings}")
+                    return False
+                else:
+                    print(f"Upload returned unexpected status for {filename}: {status}")
+                    print(f"Full result: {result}")
+                    return False
+            else:
+                print(f"Upload returned unexpected response for {filename}: {result}")
+                return False
         except Exception as e:
             print(f"Upload failed for {filename}: {e}")
             return False
