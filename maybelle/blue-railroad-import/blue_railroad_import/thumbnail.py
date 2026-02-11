@@ -16,6 +16,21 @@ IPFS_GATEWAYS = [
     "https://ipfs.io",
 ]
 
+MAYBELLE_GATEWAY = "https://ipfs.maybelle.cryptograss.live"
+
+
+def check_maybelle_pinned(cid: str) -> bool:
+    """Check if a CID is available on the maybelle IPFS gateway."""
+    if not cid:
+        return False
+    url = f"{MAYBELLE_GATEWAY}/ipfs/{cid}"
+    try:
+        req = urllib.request.Request(url, method='HEAD')
+        with urllib.request.urlopen(req, timeout=5) as response:
+            return response.status == 200
+    except Exception:
+        return False
+
 
 def normalize_cid(cid: str) -> str:
     """Normalize a CID to CIDv1 base32 format.

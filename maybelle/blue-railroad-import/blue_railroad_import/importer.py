@@ -172,14 +172,15 @@ class BlueRailroadImporter:
             summary = f"Imported Blue Railroad token #{token.token_id} from chain data"
             return self.wiki.save_page(page_title, content, summary)
 
-        # Existing page - only update template if owner changed, preserve user content
-        updated_content = update_existing_page(existing_content, token)
+        # Existing page - only update template if owner or maybelle status changed
+        result = update_existing_page(existing_content, token)
 
-        if updated_content is None:
-            # No update needed (owner unchanged)
-            return SaveResult(page_title, 'unchanged', 'Owner unchanged')
+        if result is None:
+            # No update needed
+            return SaveResult(page_title, 'unchanged', 'No changes')
 
-        summary = f"Updated Blue Railroad token #{token.token_id} ownership"
+        updated_content, reason = result
+        summary = f"Updated Blue Railroad token #{token.token_id}: {reason}"
         return self.wiki.save_page(page_title, updated_content, summary)
 
     def generate_leaderboard(
