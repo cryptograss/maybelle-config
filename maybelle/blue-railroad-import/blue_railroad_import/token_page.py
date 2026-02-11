@@ -1,15 +1,20 @@
 """Token page content generation."""
 
 from .models import Token
+from .thumbnail import get_thumbnail_filename
 
 
 def generate_token_page_content(token: Token) -> str:
     """Generate wikitext content for a token page."""
+    # Thumbnail filename is based on IPFS CID (shared across tokens with same video)
+    thumbnail = get_thumbnail_filename(token.ipfs_cid) if token.ipfs_cid else ''
+
     lines = [
         "{{Blue Railroad Token",
         f"|token_id={token.token_id}",
         f"|song_id={token.song_id or ''}",
         f"|contract_version={'V2' if token.is_v2 else 'V1'}",
+        f"|thumbnail={thumbnail}",
     ]
 
     # Version-specific fields

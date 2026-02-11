@@ -69,15 +69,15 @@ def extract_frame(video_path: Path, output_path: Path, time_seconds: float = 2.0
         return False
 
 
-def generate_thumbnail(cid: str, token_id: str, output_dir: Optional[Path] = None) -> Optional[Path]:
-    """Generate thumbnail for a token's video.
+def generate_thumbnail(cid: str, output_dir: Optional[Path] = None) -> Optional[Path]:
+    """Generate thumbnail for a video by its IPFS CID.
 
     Downloads the video from IPFS, extracts a frame at ~2 seconds,
-    and saves it as a JPEG thumbnail.
+    and saves it as a JPEG thumbnail. Filename is based on the CID,
+    so multiple tokens sharing the same video will share the thumbnail.
 
     Args:
         cid: IPFS content identifier for the video
-        token_id: Token ID (used in filename)
         output_dir: Directory to save thumbnail (defaults to temp dir)
 
     Returns:
@@ -91,16 +91,16 @@ def generate_thumbnail(cid: str, token_id: str, output_dir: Optional[Path] = Non
         output_dir = Path(tempfile.gettempdir())
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    thumb_filename = f"Blue_Railroad_Token_{token_id}_thumbnail.jpg"
+    thumb_filename = get_thumbnail_filename(cid)
     final_path = output_dir / thumb_filename
 
     # Create a temporary directory for the video download
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir = Path(tmpdir)
-        video_path = tmpdir / f"video_{token_id}.mp4"
+        video_path = tmpdir / f"video_{cid}.mp4"
         temp_thumb_path = tmpdir / thumb_filename
 
-        print(f"Downloading video for token {token_id} from IPFS...")
+        print(f"Downloading video {cid} from IPFS...")
         if not download_video(cid, video_path):
             return None
 
@@ -116,6 +116,6 @@ def generate_thumbnail(cid: str, token_id: str, output_dir: Optional[Path] = Non
         return final_path
 
 
-def get_thumbnail_filename(token_id: str) -> str:
-    """Get the wiki filename for a token's thumbnail."""
-    return f"Blue_Railroad_Token_{token_id}_thumbnail.jpg"
+def get_thumbnail_filename(cid: str) -> str:
+    """Get the wiki filename for a video thumbnail based on its IPFS CID."""
+    return f"Blue_Railroad_Video_{cid}.jpg"
