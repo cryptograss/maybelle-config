@@ -116,28 +116,31 @@ class BlueRailroadImporter:
 
         Returns True if thumbnail exists or was successfully uploaded,
         False if thumbnail generation/upload failed or no video exists.
+
+        Thumbnails are named by IPFS CID, so multiple tokens sharing
+        the same video will share the same thumbnail file.
         """
         if not token.ipfs_cid:
             self.log(f"  No IPFS CID for token {token.token_id}, skipping thumbnail")
             return False
 
-        filename = get_thumbnail_filename(token.token_id)
+        filename = get_thumbnail_filename(token.ipfs_cid)
 
-        # Check if thumbnail already exists
+        # Check if thumbnail already exists (may have been uploaded for another token)
         if self.wiki.file_exists(filename):
             self.log(f"  Thumbnail already exists: {filename}")
             return True
 
         # Generate thumbnail
-        self.log(f"  Generating thumbnail for token {token.token_id}...")
-        thumb_path = generate_thumbnail(token.ipfs_cid, token.token_id)
+        self.log(f"  Generating thumbnail for video {token.ipfs_cid}...")
+        thumb_path = generate_thumbnail(token.ipfs_cid)
         if not thumb_path:
-            self.log(f"  Failed to generate thumbnail for token {token.token_id}")
+            self.log(f"  Failed to generate thumbnail for video {token.ipfs_cid}")
             return False
 
         # Upload thumbnail
-        description = f"Thumbnail for [[Blue Railroad Token {token.token_id}]]"
-        comment = f"Upload thumbnail for Blue Railroad token #{token.token_id}"
+        description = f"Thumbnail for Blue Railroad video (IPFS: {token.ipfs_cid})"
+        comment = f"Upload thumbnail for Blue Railroad video {token.ipfs_cid}"
 
         success = self.wiki.upload_file(thumb_path, filename, description, comment)
 
