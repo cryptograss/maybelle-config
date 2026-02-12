@@ -9,6 +9,7 @@ import FormData from 'form-data';
 import Hash from 'ipfs-only-hash';
 import { CID } from 'multiformats/cid';
 import { requireWalletAuth } from './auth.js';
+import { updateSubmissionCid, isWikiConfigured } from './wiki-update.js';
 
 const app = express();
 
@@ -176,7 +177,7 @@ app.post('/pin-from-url', requireWalletAuth, async (req, res) => {
 
 // Download video from URL with SSE progress streaming
 app.post('/pin-from-url-stream', requireWalletAuth, async (req, res) => {
-  const { url } = req.body;
+  const { url, submissionId } = req.body;
 
   if (!url) {
     return res.status(400).json({ error: 'URL is required' });
@@ -242,6 +243,22 @@ app.post('/pin-from-url-stream', requireWalletAuth, async (req, res) => {
     // Cleanup
     try { unlinkSync(fileToPin); } catch (e) { /* ignore */ }
 
+    // Update wiki if submissionId provided (persist CID to PickiPedia)
+    let wikiUpdate = null;
+    if (submissionId && isWikiConfigured()) {
+      try {
+        sendEvent({ stage: 'wiki-update', message: 'Saving CID to PickiPedia...', progress: 95 });
+        wikiUpdate = await updateSubmissionCid(submissionId, result.cid);
+        console.log(`[stream] Wiki update: ${wikiUpdate.action} - ${wikiUpdate.message}`);
+      } catch (wikiError) {
+        console.error('[stream] Wiki update failed:', wikiError.message);
+        wikiUpdate = { action: 'error', message: wikiError.message };
+      }
+    } else if (submissionId && !isWikiConfigured()) {
+      console.log('[stream] Wiki credentials not configured, skipping wiki update');
+      wikiUpdate = { action: 'skipped', message: 'Wiki credentials not configured' };
+    }
+
     // Send final complete event
     sendEvent({
       stage: 'complete',
@@ -251,6 +268,7 @@ app.post('/pin-from-url-stream', requireWalletAuth, async (req, res) => {
       originalSize: result.originalSize,
       transcodedSize: result.transcodedSize,
       gatewayUrl: result.gatewayUrl,
+      wikiUpdate: wikiUpdate,
       progress: 100
     });
 

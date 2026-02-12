@@ -19,7 +19,7 @@ COPY package.json ./
 RUN npm install --production
 
 # Copy application
-COPY server.js auth.js ./
+COPY server.js auth.js wiki-update.js ./
 
 # Create staging directory
 RUN mkdir -p /staging
