@@ -29,8 +29,8 @@ if ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no "root@${VPS_HOST}" \
 
     log "Backup successful: $BACKUP_FILE ($(stat -c%s "$BACKUP_FILE") bytes)"
 
-    # Keep last 7 days of backups
-    find "$BACKUP_DIR" -name "pickipedia_*.sql.gz" -mtime +7 -delete
+    # Keep last 3 days of backups (persistent volume is small, offsite has longer retention)
+    find "$BACKUP_DIR" -name "pickipedia_*.sql.gz" -mtime +3 -delete
 
     # Sync to hunter for preview environments
     log "Syncing to hunter..."
@@ -40,16 +40,28 @@ if ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no "root@${VPS_HOST}" \
         log "WARNING - sync to hunter failed"
     fi
 
-    # Backup images from VPS
-    log "Backing up images from VPS..."
+    # Backup only recent images (modified in last 7 days) to maybelle
+    # Full image archive lives on VPS; this is just recent disaster recovery
+    log "Backing up recent images from VPS..."
     IMAGES_BACKUP_DIR="$BACKUP_DIR/images"
     mkdir -p "$IMAGES_BACKUP_DIR"
-    if rsync -avz -e "ssh -i $SSH_KEY -o StrictHostKeyChecking=no" \
-        "root@${VPS_HOST}:/var/www/pickipedia/images/" "$IMAGES_BACKUP_DIR/" >> "$LOG_FILE" 2>&1; then
-        log "Images backup complete: $(find "$IMAGES_BACKUP_DIR" -type f | wc -l) files"
+
+    # Use rsync with find to only grab files modified in last 7 days
+    # This keeps the backup small while protecting recent uploads
+    if ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no "root@${VPS_HOST}" \
+        "find /var/www/pickipedia/images -type f -mtime -7 -print0" 2>/dev/null \
+        | rsync -avz --files-from=- --from0 -e "ssh -i $SSH_KEY -o StrictHostKeyChecking=no" \
+        "root@${VPS_HOST}:/" "$IMAGES_BACKUP_DIR/" >> "$LOG_FILE" 2>&1; then
+        RECENT_COUNT=$(find "$IMAGES_BACKUP_DIR" -type f -mtime -7 2>/dev/null | wc -l)
+        log "Recent images backup complete: $RECENT_COUNT files from last 7 days"
     else
-        log "WARNING - images backup failed"
+        log "WARNING - recent images backup failed"
     fi
+
+    # Clean up old local image backups (older than 14 days)
+    find "$IMAGES_BACKUP_DIR" -type f -mtime +14 -delete 2>/dev/null || true
+    # Remove empty directories
+    find "$IMAGES_BACKUP_DIR" -type d -empty -delete 2>/dev/null || true
 else
     log "Backup FAILED"
     rm -f "$BACKUP_FILE"  # Remove partial file

@@ -771,13 +771,14 @@
           if [ "$HOUR" = "03" ]; then
               cp "$BACKUP_FILE" "$DAILY_DIR/"
               echo "$(date): Daily backup saved to $DAILY_DIR" >> "$BACKUP_DIR/backup.log"
-              # Keep daily backups for 30 days
-              find "$DAILY_DIR" -name "magenta_memory_*.dump" -mtime +30 -delete
+              # Keep daily backups for 7 days (offsite backup handles long-term)
+              find "$DAILY_DIR" -name "magenta_memory_*.dump" -mtime +7 -delete
           fi
 
-          # Cleanup bi-hourly backups (keep last 2 days)
-          find "$BACKUP_DIR" -maxdepth 1 -name "magenta_memory_*.dump" -mtime +2 -delete
-          find "$BACKUP_DIR" -maxdepth 1 -name "magenta_memory_*.sql.gz" -mtime +2 -delete
+          # Cleanup bi-hourly backups (keep last 24 hours only - ~12 dumps)
+          # Daily backups provide longer retention, bi-hourly is just for recent recovery
+          find "$BACKUP_DIR" -maxdepth 1 -name "magenta_memory_*.dump" -mtime +0 -delete
+          find "$BACKUP_DIR" -maxdepth 1 -name "magenta_memory_*.sql.gz" -mtime +0 -delete
 
     - name: Schedule bi-hourly postgres backup
       ansible.builtin.cron:
