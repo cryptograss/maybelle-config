@@ -402,3 +402,90 @@ def match_submissions_via_smw(
                 print(f"  Submission {sub.id}: found {len(tokens)} tokens via SMW")
 
     return result
+
+
+def match_tokens_by_blockheight_and_participant(
+    tokens: dict[str, Token],
+    submissions: list[Submission],
+    verbose: bool = False,
+) -> dict[int, list[int]]:
+    """Match tokens to submissions using blockheight + participant wallet.
+
+    This is useful when submissions don't have IPFS CIDs set yet.
+    A token matches a submission if:
+    - The token's blockheight equals the submission's block_height
+    - The token's owner is in the submission's participants list
+
+    Returns a dict mapping submission_id -> list of token_ids.
+    """
+    result: dict[int, list[int]] = {}
+
+    # Build lookup: (blockheight, wallet) -> submission
+    blockheight_participant_map: dict[tuple[int, str], Submission] = {}
+    for sub in submissions:
+        if sub.block_height is None:
+            continue
+        for wallet in sub.participants:
+            # Normalize wallet to lowercase for comparison
+            key = (sub.block_height, wallet.lower())
+            blockheight_participant_map[key] = sub
+
+    # Match tokens
+    for token_id_str, token in tokens.items():
+        if token.blockheight is None:
+            continue
+
+        # Normalize owner to lowercase
+        key = (token.blockheight, token.owner.lower())
+
+        if key in blockheight_participant_map:
+            sub = blockheight_participant_map[key]
+            if sub.id not in result:
+                result[sub.id] = []
+            result[sub.id].append(int(token_id_str))
+            if verbose:
+                print(f"  Token {token_id_str} -> Submission {sub.id} (blockheight {token.blockheight})")
+
+    # Sort token IDs for each submission
+    for sub_id in result:
+        result[sub_id] = sorted(result[sub_id])
+
+    return result
+
+
+def sync_submission_cids_from_tokens(
+    wiki_client: WikiClientProtocol,
+    tokens: dict[str, Token],
+    submissions: list[Submission],
+    verbose: bool = False,
+) -> list[SaveResult]:
+    """Sync IPFS CIDs from matched tokens to submissions.
+
+    Uses blockheight + participant matching to find which tokens belong to
+    which submissions, then updates the submission's ipfs_cid field.
+
+    Returns list of SaveResults for updated submissions.
+    """
+    results = []
+    matches = match_tokens_by_blockheight_and_participant(tokens, submissions, verbose)
+
+    for sub_id, token_ids in matches.items():
+        # Find the submission
+        sub = next((s for s in submissions if s.id == sub_id), None)
+        if not sub:
+            continue
+
+        # Get CID from first matched token (all tokens for same submission should have same CID)
+        first_token_id = str(token_ids[0])
+        token = tokens.get(first_token_id)
+        if not token or not token.ipfs_cid:
+            continue
+
+        # Update submission CID if not already set
+        if sub.ipfs_cid != token.ipfs_cid:
+            if verbose:
+                print(f"  Setting CID for submission {sub_id}: {token.ipfs_cid}")
+            result = update_submission_cid(wiki_client, sub_id, token.ipfs_cid, verbose=False)
+            results.append(result)
+
+    return results

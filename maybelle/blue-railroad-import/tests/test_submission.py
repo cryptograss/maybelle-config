@@ -14,6 +14,8 @@ from blue_railroad_import.submission import (
     update_submission_token_ids,
     find_tokens_for_submission,
     match_submissions_via_smw,
+    match_tokens_by_blockheight_and_participant,
+    sync_submission_cids_from_tokens,
 )
 from blue_railroad_import.models import Submission, Token
 from blue_railroad_import.wiki_client import DryRunClient, SaveResult, TokenInfo
@@ -529,3 +531,194 @@ class TestMatchSubmissionsViaSMW:
         result = match_submissions_via_smw(client, submissions)
 
         assert result[1] == [10, 15, 25]  # Sorted
+
+
+class TestMatchTokensByBlockheightAndParticipant:
+    """Tests for blockheight + participant matching."""
+
+    def test_matches_token_to_submission(self):
+        tokens = {
+            '10': Token(
+                token_id='10',
+                source_key='blueRailroadV2s',
+                owner='0xABC123',
+                owner_display='alice.eth',
+                blockheight=24000000,
+                video_hash='0x' + 'ab' * 32,
+            ),
+        }
+        submissions = [
+            Submission(id=1, block_height=24000000, participants=['0xabc123']),
+        ]
+
+        result = match_tokens_by_blockheight_and_participant(tokens, submissions)
+
+        assert result == {1: [10]}
+
+    def test_matches_multiple_tokens_same_submission(self):
+        # Two participants in same submission at same blockheight
+        tokens = {
+            '10': Token(
+                token_id='10',
+                source_key='blueRailroadV2s',
+                owner='0xABC123',
+                owner_display='alice.eth',
+                blockheight=24000000,
+                video_hash='0x' + 'ab' * 32,
+            ),
+            '11': Token(
+                token_id='11',
+                source_key='blueRailroadV2s',
+                owner='0xDEF456',
+                owner_display='bob.eth',
+                blockheight=24000000,
+                video_hash='0x' + 'ab' * 32,
+            ),
+        }
+        submissions = [
+            Submission(id=1, block_height=24000000, participants=['0xabc123', '0xdef456']),
+        ]
+
+        result = match_tokens_by_blockheight_and_participant(tokens, submissions)
+
+        assert result == {1: [10, 11]}
+
+    def test_case_insensitive_wallet_matching(self):
+        tokens = {
+            '10': Token(
+                token_id='10',
+                source_key='blueRailroadV2s',
+                owner='0xAbCdEf123456',
+                owner_display='alice.eth',
+                blockheight=24000000,
+                video_hash='0x' + 'ab' * 32,
+            ),
+        }
+        submissions = [
+            Submission(id=1, block_height=24000000, participants=['0xABCDEF123456']),
+        ]
+
+        result = match_tokens_by_blockheight_and_participant(tokens, submissions)
+
+        assert result == {1: [10]}
+
+    def test_no_match_when_blockheight_differs(self):
+        tokens = {
+            '10': Token(
+                token_id='10',
+                source_key='blueRailroadV2s',
+                owner='0xABC123',
+                owner_display='alice.eth',
+                blockheight=24000000,
+                video_hash='0x' + 'ab' * 32,
+            ),
+        }
+        submissions = [
+            Submission(id=1, block_height=24000001, participants=['0xabc123']),
+        ]
+
+        result = match_tokens_by_blockheight_and_participant(tokens, submissions)
+
+        assert result == {}
+
+    def test_no_match_when_participant_not_in_submission(self):
+        tokens = {
+            '10': Token(
+                token_id='10',
+                source_key='blueRailroadV2s',
+                owner='0xABC123',
+                owner_display='alice.eth',
+                blockheight=24000000,
+                video_hash='0x' + 'ab' * 32,
+            ),
+        }
+        submissions = [
+            Submission(id=1, block_height=24000000, participants=['0xother']),
+        ]
+
+        result = match_tokens_by_blockheight_and_participant(tokens, submissions)
+
+        assert result == {}
+
+    def test_skips_tokens_without_blockheight(self):
+        tokens = {
+            '10': Token(
+                token_id='10',
+                source_key='blueRailroads',  # V1 - no blockheight
+                owner='0xABC123',
+                owner_display='alice.eth',
+                date=20260113,
+                uri='ipfs://QmTest',
+            ),
+        }
+        submissions = [
+            Submission(id=1, block_height=24000000, participants=['0xabc123']),
+        ]
+
+        result = match_tokens_by_blockheight_and_participant(tokens, submissions)
+
+        assert result == {}
+
+
+class TestSyncSubmissionCidsFromTokens:
+    """Tests for syncing CIDs from tokens to submissions."""
+
+    def test_syncs_cid_to_submission(self):
+        existing_content = """{{Blue Railroad Submission
+|exercise=Blue Railroad Train (Squats)
+|block_height=24000000
+}}
+{{Blue Railroad Participant
+|wallet=0xABC123
+}}"""
+        client = DryRunClient(existing_pages={
+            'Blue Railroad Submission/1': existing_content
+        })
+
+        tokens = {
+            '10': Token(
+                token_id='10',
+                source_key='blueRailroadV2s',
+                owner='0xABC123',
+                owner_display='alice.eth',
+                blockheight=24000000,
+                video_hash='0x' + 'ab' * 32,
+            ),
+        }
+        submissions = [
+            Submission(id=1, block_height=24000000, participants=['0xabc123']),
+        ]
+
+        results = sync_submission_cids_from_tokens(client, tokens, submissions)
+
+        assert len(results) == 1
+        assert results[0].action in ('updated', 'created')
+        # Check the saved content has the CID
+        title, content, summary = client.saved_pages[0]
+        assert '|ipfs_cid=' in content
+
+    def test_skips_submission_with_matching_cid(self):
+        tokens = {
+            '10': Token(
+                token_id='10',
+                source_key='blueRailroadV2s',
+                owner='0xABC123',
+                owner_display='alice.eth',
+                blockheight=24000000,
+                video_hash='0x' + 'ab' * 32,
+            ),
+        }
+        # Submission already has the correct CID
+        submissions = [
+            Submission(
+                id=1,
+                block_height=24000000,
+                participants=['0xabc123'],
+                ipfs_cid='QmZtnFaddFtzGNT8BxdHVbQrhSFdq1pWxud5z4fA4kxfDt',  # Same as token
+            ),
+        ]
+
+        client = DryRunClient(existing_pages={})
+        results = sync_submission_cids_from_tokens(client, tokens, submissions)
+
+        assert len(results) == 0  # No updates needed

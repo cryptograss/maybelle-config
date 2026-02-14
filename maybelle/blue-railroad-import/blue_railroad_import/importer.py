@@ -14,6 +14,8 @@ from .thumbnail import generate_thumbnail, get_thumbnail_filename
 from .submission import (
     fetch_all_submissions,
     match_tokens_to_submissions,
+    match_tokens_by_blockheight_and_participant,
+    sync_submission_cids_from_tokens,
     get_submission_id_for_token,
     update_submission_token_ids,
 )
@@ -242,9 +244,31 @@ class BlueRailroadImporter:
         # Load all tokens (aggregated from all sources)
         all_tokens = self.load_tokens(config)
 
-        # Load all submissions and match to tokens
+        # Load all submissions
         all_submissions = self.load_submissions()
+
+        # First, sync CIDs from tokens to submissions using blockheight+participant matching
+        # This populates ipfs_cid on submissions that don't have it yet
+        cid_sync_results = sync_submission_cids_from_tokens(
+            self.wiki, all_tokens, all_submissions, verbose=self.verbose
+        )
+        for result in cid_sync_results:
+            results.submission_pages.append(result)
+            if result.action in ('created', 'updated'):
+                self.log(f"  Synced CID to submission: {result.page_title}")
+
+        # Reload submissions if any CIDs were synced (to get updated data)
+        if cid_sync_results:
+            all_submissions = self.load_submissions()
+
+        # Match tokens to submissions - try CID matching first, fall back to blockheight+participant
         token_to_submission = match_tokens_to_submissions(all_tokens, all_submissions)
+
+        # If CID matching found nothing, try blockheight+participant matching
+        if not token_to_submission:
+            token_to_submission = match_tokens_by_blockheight_and_participant(
+                all_tokens, all_submissions, verbose=self.verbose
+            )
 
         # Build reverse lookup: token_id -> submission_id
         token_submission_map: dict[str, int] = {}
