@@ -1,10 +1,61 @@
 """Wiki client wrapper for MediaWiki API operations."""
 
 import re
+import urllib.request
+import urllib.parse
+import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, Protocol
 import mwclient
+
+
+@dataclass
+class TokenInfo:
+    """Token information from SMW query."""
+    token_id: str
+    owner_address: str
+    owner_display: str
+
+
+def parse_smw_token_response(data: dict) -> list[TokenInfo]:
+    """Parse SMW API response into list of TokenInfo.
+
+    Expects the response format from an SMW ask query like:
+    [[IPFS CID::cid]]|?Token ID|?Owner Address|?Owner
+
+    Args:
+        data: The JSON response from SMW API
+
+    Returns:
+        List of TokenInfo objects for tokens found
+    """
+    results = []
+    query_results = data.get('query', {}).get('results', {})
+
+    for page_title, page_data in query_results.items():
+        printouts = page_data.get('printouts', {})
+
+        # Extract Token ID
+        token_id_list = printouts.get('Token ID', [])
+        token_id = token_id_list[0].get('fulltext', '') if token_id_list else ''
+
+        # Extract Owner Address
+        owner_addr_list = printouts.get('Owner Address', [])
+        owner_address = owner_addr_list[0].get('fulltext', '') if owner_addr_list else ''
+
+        # Extract Owner (display name), fall back to address
+        owner_list = printouts.get('Owner', [])
+        owner_display = owner_list[0].get('fulltext', '') if owner_list else owner_address
+
+        if token_id:
+            results.append(TokenInfo(
+                token_id=token_id,
+                owner_address=owner_address,
+                owner_display=owner_display,
+            ))
+
+    return results
 
 
 def _parse_template_params(wikitext: str) -> dict[str, str]:
@@ -61,6 +112,10 @@ class WikiClientProtocol(Protocol):
         """Upload a file to the wiki. Returns True if successful."""
         ...
 
+    def query_tokens_by_cid(self, ipfs_cid: str) -> list[TokenInfo]:
+        """Query tokens with a specific IPFS CID using Semantic MediaWiki."""
+        ...
+
 
 @dataclass
 class SaveResult:
@@ -92,6 +147,7 @@ class MWClientWrapper:
         host, scheme = _parse_site_url(site_url)
         self.site = mwclient.Site(host, scheme=scheme, path='/')
         self.site.login(username, password)
+        self._api_url = f"{scheme}://{host}/api.php"
 
     def get_page_content(self, title: str) -> Optional[str]:
         """Get the current content of a page, or None if it doesn't exist."""
@@ -157,6 +213,34 @@ class MWClientWrapper:
             print(f"Upload failed for {filename}: {e}")
             return False
 
+    def query_tokens_by_cid(self, ipfs_cid: str) -> list[TokenInfo]:
+        """Query tokens with a specific IPFS CID using Semantic MediaWiki.
+
+        Uses the SMW ask API to find all token pages with the given CID.
+        Returns list of TokenInfo with token_id, owner_address, and owner_display.
+        """
+        if not ipfs_cid:
+            return []
+
+        # Build SMW query: [[IPFS CID::cid]]|?Token ID|?Owner Address|?Owner
+        query = f"[[IPFS CID::{ipfs_cid}]]|?Token ID|?Owner Address|?Owner"
+        params = {
+            'action': 'ask',
+            'query': query,
+            'format': 'json',
+        }
+
+        url = f"{self._api_url}?{urllib.parse.urlencode(params)}"
+
+        try:
+            with urllib.request.urlopen(url, timeout=30) as response:
+                data = json.loads(response.read().decode('utf-8'))
+        except Exception as e:
+            print(f"SMW query failed for CID {ipfs_cid}: {e}")
+            return []
+
+        return parse_smw_token_response(data)
+
 
 class DryRunClient:
     """Client for dry-run mode that reads from a real wiki but skips writes.
@@ -168,16 +252,20 @@ class DryRunClient:
         self,
         existing_pages: Optional[dict[str, str]] = None,
         wiki_url: Optional[str] = None,
+        mock_cid_tokens: Optional[dict[str, list[TokenInfo]]] = None,
     ):
         self.existing_pages = existing_pages or {}
         self.saved_pages: list[tuple[str, str, str]] = []
         self._page_cache: dict[str, Optional[str]] = {}
+        self._mock_cid_tokens = mock_cid_tokens or {}
 
         # Anonymous read-only connection to the wiki
         self._site = None
+        self._api_url = None
         if wiki_url:
             host, scheme = _parse_site_url(wiki_url)
             self._site = mwclient.Site(host, scheme=scheme, path='/')
+            self._api_url = f"{scheme}://{host}/api.php"
 
     def _read_from_wiki(self, title: str) -> Optional[str]:
         """Read a page from the wiki (anonymous, cached)."""
@@ -223,3 +311,38 @@ class DryRunClient:
         """Simulate file upload in dry run mode."""
         print(f"[DRY RUN] Would upload: {filename}")
         return True
+
+    def query_tokens_by_cid(self, ipfs_cid: str) -> list[TokenInfo]:
+        """Query tokens with a specific IPFS CID.
+
+        In dry-run mode with mock data, returns mock_cid_tokens.
+        With a real wiki_url, performs actual SMW query.
+        """
+        if not ipfs_cid:
+            return []
+
+        # Check mock data first (for testing)
+        if ipfs_cid in self._mock_cid_tokens:
+            return self._mock_cid_tokens[ipfs_cid]
+
+        # If we have a real wiki connection, query it
+        if self._api_url:
+            query = f"[[IPFS CID::{ipfs_cid}]]|?Token ID|?Owner Address|?Owner"
+            params = {
+                'action': 'ask',
+                'query': query,
+                'format': 'json',
+            }
+
+            url = f"{self._api_url}?{urllib.parse.urlencode(params)}"
+
+            try:
+                with urllib.request.urlopen(url, timeout=30) as response:
+                    data = json.loads(response.read().decode('utf-8'))
+            except Exception as e:
+                print(f"[DRY RUN] SMW query failed for CID {ipfs_cid}: {e}")
+                return []
+
+            return parse_smw_token_response(data)
+
+        return []

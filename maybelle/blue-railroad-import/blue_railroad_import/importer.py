@@ -4,13 +4,19 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
-from .models import BotConfig, Token
+from .models import BotConfig, Token, Submission
 from .chain_data import load_chain_data, aggregate_tokens_from_sources
 from .config_parser import parse_config_from_wikitext, get_default_config
 from .leaderboard import generate_leaderboard_content
 from .token_page import generate_token_page_content, update_existing_page
 from .wiki_client import WikiClientProtocol, SaveResult
 from .thumbnail import generate_thumbnail, get_thumbnail_filename
+from .submission import (
+    fetch_all_submissions,
+    match_tokens_to_submissions,
+    get_submission_id_for_token,
+    update_submission_token_ids,
+)
 
 
 CONFIG_PAGE = 'PickiPedia:BlueRailroadConfig'
@@ -21,6 +27,7 @@ class ImportResults:
     """Results from an import run."""
     token_pages: list[SaveResult] = field(default_factory=list)
     leaderboard_pages: list[SaveResult] = field(default_factory=list)
+    submission_pages: list[SaveResult] = field(default_factory=list)
 
     def _by_action(self, results: list[SaveResult], action: str) -> list[SaveResult]:
         return [r for r in results if r.action == action]
@@ -58,10 +65,22 @@ class ImportResults:
         return self._by_action(self.leaderboard_pages, 'error')
 
     @property
+    def submission_pages_updated(self) -> list[SaveResult]:
+        return self._by_action(self.submission_pages, 'updated')
+
+    @property
+    def submission_pages_unchanged(self) -> list[SaveResult]:
+        return self._by_action(self.submission_pages, 'unchanged')
+
+    @property
+    def submission_pages_error(self) -> list[SaveResult]:
+        return self._by_action(self.submission_pages, 'error')
+
+    @property
     def errors(self) -> list[str]:
         return [
             f"{r.page_title}: {r.message}"
-            for r in self.token_pages + self.leaderboard_pages
+            for r in self.token_pages + self.leaderboard_pages + self.submission_pages
             if r.action == 'error'
         ]
 
@@ -111,6 +130,13 @@ class BlueRailroadImporter:
         self.log(f"  Loaded {len(tokens)} total tokens from {len(config.sources)} source(s)")
         return tokens
 
+    def load_submissions(self) -> list[Submission]:
+        """Load all submissions from the wiki."""
+        self.log("Loading submissions from wiki...")
+        submissions = fetch_all_submissions(self.wiki, verbose=self.verbose)
+        self.log(f"  Loaded {len(submissions)} submission(s)")
+        return submissions
+
     def ensure_thumbnail(self, token: Token) -> bool:
         """Ensure a thumbnail exists for the token's video.
 
@@ -157,7 +183,12 @@ class BlueRailroadImporter:
 
         return success
 
-    def import_token(self, token: Token, generate_thumbnails: bool = True) -> SaveResult:
+    def import_token(
+        self,
+        token: Token,
+        generate_thumbnails: bool = True,
+        submission_id: Optional[int] = None,
+    ) -> SaveResult:
         """Import a single token to the wiki."""
         # Generate thumbnail if needed
         if generate_thumbnails:
@@ -168,12 +199,12 @@ class BlueRailroadImporter:
 
         if existing_content is None:
             # New page - create with full template
-            content = generate_token_page_content(token)
+            content = generate_token_page_content(token, submission_id)
             summary = f"Imported Blue Railroad token #{token.token_id} from chain data"
             return self.wiki.save_page(page_title, content, summary)
 
-        # Existing page - only update template if owner or maybelle status changed
-        result = update_existing_page(existing_content, token)
+        # Existing page - only update template if owner, maybelle status, or submission changed
+        result = update_existing_page(existing_content, token, submission_id)
 
         if result is None:
             # No update needed
@@ -211,12 +242,29 @@ class BlueRailroadImporter:
         # Load all tokens (aggregated from all sources)
         all_tokens = self.load_tokens(config)
 
+        # Load all submissions and match to tokens
+        all_submissions = self.load_submissions()
+        token_to_submission = match_tokens_to_submissions(all_tokens, all_submissions)
+
+        # Build reverse lookup: token_id -> submission_id
+        token_submission_map: dict[str, int] = {}
+        for sub_id, token_ids in token_to_submission.items():
+            for tid in token_ids:
+                token_submission_map[str(tid)] = sub_id
+
+        self.log(f"  Matched {len(token_submission_map)} token(s) to {len(token_to_submission)} submission(s)")
+
         # Import individual token pages
         self.log("\nImporting token pages...")
         if generate_thumbnails:
             self.log("  (thumbnail generation enabled)")
         for key, token in all_tokens.items():
-            result = self.import_token(token, generate_thumbnails=generate_thumbnails)
+            submission_id = token_submission_map.get(key)
+            result = self.import_token(
+                token,
+                generate_thumbnails=generate_thumbnails,
+                submission_id=submission_id,
+            )
             results.token_pages.append(result)
 
             if result.action == 'created':
@@ -232,6 +280,27 @@ class BlueRailroadImporter:
         self.log(f"  Updated: {len(results.token_pages_updated)}")
         self.log(f"  Unchanged: {len(results.token_pages_unchanged)}")
         self.log(f"  Errors: {len(results.token_pages_error)}")
+
+        # Update submission pages with token IDs
+        self.log("\nUpdating submission pages with token links...")
+        for sub_id, token_ids in token_to_submission.items():
+            result = update_submission_token_ids(
+                self.wiki,
+                sub_id,
+                token_ids,
+                verbose=self.verbose,
+            )
+            results.submission_pages.append(result)
+
+            if result.action == 'updated':
+                self.log(f"  Updated: Blue Railroad Submission/{sub_id} (tokens: {token_ids})")
+            elif result.action == 'error':
+                self.log(f"  ERROR: Blue Railroad Submission/{sub_id}: {result.message}")
+
+        self.log(f"\nSubmission page summary:")
+        self.log(f"  Updated: {len(results.submission_pages_updated)}")
+        self.log(f"  Unchanged: {len(results.submission_pages_unchanged)}")
+        self.log(f"  Errors: {len(results.submission_pages_error)}")
 
         # Generate leaderboards (using ALL aggregated tokens)
         self.log(f"\nGenerating leaderboards from {len(all_tokens)} total tokens...")

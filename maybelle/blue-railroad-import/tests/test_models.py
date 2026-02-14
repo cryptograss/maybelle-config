@@ -1,7 +1,7 @@
 """Tests for data models."""
 
 import pytest
-from blue_railroad_import.models import Token, OwnerStats
+from blue_railroad_import.models import Token, OwnerStats, Submission
 
 
 class TestToken:
@@ -130,3 +130,42 @@ class TestOwnerStats:
         assert stats.token_count == 1
         assert stats.newest_date == 0
         assert stats.oldest_date == 0
+
+
+class TestSubmission:
+    """Tests for Submission model."""
+
+    def test_is_minted_when_has_token_ids(self):
+        sub = Submission(id=1, token_ids=[5, 6])
+        assert sub.is_minted is True
+
+    def test_is_not_minted_when_no_token_ids(self):
+        sub = Submission(id=1, token_ids=[])
+        assert sub.is_minted is False
+
+    def test_is_not_minted_with_status_but_no_tokens(self):
+        # Status alone doesn't make it minted - need actual token IDs
+        sub = Submission(id=1, status='Minted', token_ids=[])
+        assert sub.is_minted is False
+
+    def test_has_cid_when_cid_present(self):
+        sub = Submission(id=1, ipfs_cid='QmTest123')
+        assert sub.has_cid is True
+
+    def test_has_no_cid_when_none(self):
+        sub = Submission(id=1, ipfs_cid=None)
+        assert sub.has_cid is False
+
+    def test_has_no_cid_when_empty(self):
+        sub = Submission(id=1, ipfs_cid='')
+        assert sub.has_cid is False
+
+    def test_default_values(self):
+        sub = Submission(id=1)
+        assert sub.exercise == ''
+        assert sub.video is None
+        assert sub.block_height is None
+        assert sub.status == 'Pending'
+        assert sub.ipfs_cid is None
+        assert sub.token_ids == []
+        assert sub.participants == []
