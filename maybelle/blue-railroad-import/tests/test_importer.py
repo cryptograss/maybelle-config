@@ -130,7 +130,8 @@ class TestBlueRailroadImporter:
         importer = BlueRailroadImporter(wiki, chain_data_file)
 
         config = importer.load_config()
-        tokens = importer.load_tokens(config)
+        chain_data = importer.load_chain_data()
+        tokens = importer.load_tokens(chain_data, config)
 
         # 3 tokens total: 2 from V1, 1 from V2
         assert len(tokens) == 3

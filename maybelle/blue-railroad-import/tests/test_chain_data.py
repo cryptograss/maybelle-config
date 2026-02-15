@@ -6,6 +6,8 @@ from blue_railroad_import.chain_data import (
     parse_token,
     iter_tokens_from_source,
     aggregate_tokens_from_sources,
+    load_ens_mapping,
+    resolve_ens_to_address,
 )
 
 
@@ -136,3 +138,61 @@ class TestAggregateTokensFromSources:
         assert len(tokens) == 1
         assert tokens['1'].owner == '0x222'
         assert tokens['1'].is_v2 is True
+
+
+class TestLoadEnsMapping:
+    """Tests for ENS name -> address mapping extraction from chain data."""
+
+    def test_extracts_mapping_from_chain_data(self):
+        """Extracts ENS mapping from ensToAddress key in chain data."""
+        chain_data = {
+            'blueRailroads': {},
+            'ensToAddress': {
+                'justinholmes.eth': '0x4f84b3650Dbf651732a41647618E7fF94A633F09',
+                'skylergolden.eth': '0x5da9E9c29365959f1DE138Ba62c19274F7eccF4F',
+            },
+        }
+
+        result = load_ens_mapping(chain_data)
+
+        assert result == chain_data['ensToAddress']
+
+    def test_returns_empty_dict_when_key_missing(self):
+        """Returns empty dict if ensToAddress key doesn't exist."""
+        chain_data = {'blueRailroads': {}}
+        result = load_ens_mapping(chain_data)
+        assert result == {}
+
+
+class TestResolveEnsToAddress:
+    """Tests for resolving ENS names to addresses."""
+
+    def test_resolves_known_ens_name(self):
+        """Resolves ENS name that exists in mapping."""
+        ens_mapping = {
+            'justinholmes.eth': '0x4f84b3650Dbf651732a41647618E7fF94A633F09',
+        }
+
+        result = resolve_ens_to_address('justinholmes.eth', ens_mapping)
+
+        assert result == '0x4f84b3650Dbf651732a41647618E7fF94A633F09'
+
+    def test_case_insensitive_lookup(self):
+        """ENS resolution is case-insensitive."""
+        ens_mapping = {
+            'justinholmes.eth': '0x4f84b3650Dbf651732a41647618E7fF94A633F09',
+        }
+
+        result = resolve_ens_to_address('JustinHolmes.ETH', ens_mapping)
+
+        assert result == '0x4f84b3650Dbf651732a41647618E7fF94A633F09'
+
+    def test_returns_none_for_unknown_ens(self):
+        """Returns None for ENS names not in mapping."""
+        ens_mapping = {
+            'justinholmes.eth': '0x4f84b3650...',
+        }
+
+        result = resolve_ens_to_address('unknown.eth', ens_mapping)
+
+        assert result is None

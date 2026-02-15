@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Optional
 
 from .models import BotConfig, Token, Submission
-from .chain_data import load_chain_data, aggregate_tokens_from_sources
+from .chain_data import load_chain_data, aggregate_tokens_from_sources, load_ens_mapping
 from .config_parser import parse_config_from_wikitext, get_default_config
 from .leaderboard import generate_leaderboard_content
 from .token_page import generate_token_page_content, update_existing_page
@@ -122,15 +122,22 @@ class BlueRailroadImporter:
         self.log("  Using default configuration")
         return get_default_config()
 
-    def load_tokens(self, config: BotConfig) -> dict[str, Token]:
-        """Load and aggregate all tokens from chain data."""
+    def load_chain_data(self) -> dict:
+        """Load raw chain data from file."""
         self.log(f"Loading chain data from: {self.chain_data_path}")
+        return load_chain_data(self.chain_data_path)
 
-        chain_data = load_chain_data(self.chain_data_path)
+    def load_tokens(self, chain_data: dict, config: BotConfig) -> dict[str, Token]:
+        """Aggregate all tokens from chain data."""
         tokens = aggregate_tokens_from_sources(chain_data, config.sources)
-
         self.log(f"  Loaded {len(tokens)} total tokens from {len(config.sources)} source(s)")
         return tokens
+
+    def get_ens_mapping(self, chain_data: dict) -> dict[str, str]:
+        """Extract ENS name -> address mapping from chain data."""
+        ens_mapping = load_ens_mapping(chain_data)
+        self.log(f"  Loaded {len(ens_mapping)} ENS -> address mappings")
+        return ens_mapping
 
     def load_submissions(self) -> list[Submission]:
         """Load all submissions from the wiki."""
@@ -241,8 +248,10 @@ class BlueRailroadImporter:
         # Load config
         config = self.load_config()
 
-        # Load all tokens (aggregated from all sources)
-        all_tokens = self.load_tokens(config)
+        # Load chain data and extract tokens + ENS mapping
+        chain_data = self.load_chain_data()
+        all_tokens = self.load_tokens(chain_data, config)
+        ens_mapping = self.get_ens_mapping(chain_data)
 
         # Load all submissions
         all_submissions = self.load_submissions()
@@ -250,7 +259,8 @@ class BlueRailroadImporter:
         # First, sync CIDs from tokens to submissions using blockheight+participant matching
         # This populates ipfs_cid on submissions that don't have it yet
         cid_sync_results = sync_submission_cids_from_tokens(
-            self.wiki, all_tokens, all_submissions, verbose=self.verbose
+            self.wiki, all_tokens, all_submissions,
+            ens_mapping=ens_mapping, verbose=self.verbose
         )
         for result in cid_sync_results:
             results.submission_pages.append(result)
@@ -267,7 +277,8 @@ class BlueRailroadImporter:
         # If CID matching found nothing, try blockheight+participant matching
         if not token_to_submission:
             token_to_submission = match_tokens_by_blockheight_and_participant(
-                all_tokens, all_submissions, verbose=self.verbose
+                all_tokens, all_submissions,
+                ens_mapping=ens_mapping, verbose=self.verbose
             )
 
         # Build reverse lookup: token_id -> submission_id

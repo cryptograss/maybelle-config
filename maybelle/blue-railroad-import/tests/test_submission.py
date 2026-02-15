@@ -722,3 +722,155 @@ class TestSyncSubmissionCidsFromTokens:
         results = sync_submission_cids_from_tokens(client, tokens, submissions)
 
         assert len(results) == 0  # No updates needed
+
+
+class TestEnsResolutionInMatching:
+    """Tests for ENS name resolution during token-to-submission matching."""
+
+    def test_matches_ens_name_to_address(self):
+        """ENS names in submissions can match token owner addresses."""
+        tokens = {
+            '10': Token(
+                token_id='10',
+                source_key='blueRailroadV2s',
+                owner='0x4f84b3650Dbf651732a41647618E7fF94A633F09',
+                owner_display='Justin Myles Holmes',
+                blockheight=24000000,
+                video_hash='0x' + 'ab' * 32,
+            ),
+        }
+        submissions = [
+            Submission(
+                id=1,
+                block_height=24000000,
+                participants=['justinholmes.eth'],  # ENS name, not address
+            ),
+        ]
+        ens_mapping = {
+            'justinholmes.eth': '0x4f84b3650Dbf651732a41647618E7fF94A633F09',
+        }
+
+        result = match_tokens_by_blockheight_and_participant(
+            tokens, submissions, ens_mapping=ens_mapping
+        )
+
+        assert result == {1: [10]}
+
+    def test_ens_resolution_case_insensitive(self):
+        """ENS name lookup is case-insensitive."""
+        tokens = {
+            '10': Token(
+                token_id='10',
+                source_key='blueRailroadV2s',
+                owner='0xDEF456789',
+                owner_display='Skyler',
+                blockheight=24000000,
+                video_hash='0x' + 'ab' * 32,
+            ),
+        }
+        submissions = [
+            Submission(
+                id=1,
+                block_height=24000000,
+                participants=['SkylerGolden.ETH'],  # Mixed case
+            ),
+        ]
+        ens_mapping = {
+            'skylergolden.eth': '0xdef456789',  # Lowercase key
+        }
+
+        result = match_tokens_by_blockheight_and_participant(
+            tokens, submissions, ens_mapping=ens_mapping
+        )
+
+        assert result == {1: [10]}
+
+    def test_no_match_when_ens_not_in_mapping(self):
+        """Unresolvable ENS names don't match."""
+        tokens = {
+            '10': Token(
+                token_id='10',
+                source_key='blueRailroadV2s',
+                owner='0xABC123',
+                owner_display='alice',
+                blockheight=24000000,
+                video_hash='0x' + 'ab' * 32,
+            ),
+        }
+        submissions = [
+            Submission(
+                id=1,
+                block_height=24000000,
+                participants=['unknown.eth'],  # Not in mapping
+            ),
+        ]
+        ens_mapping = {
+            'justinholmes.eth': '0x4f84b3650...',
+        }
+
+        result = match_tokens_by_blockheight_and_participant(
+            tokens, submissions, ens_mapping=ens_mapping
+        )
+
+        assert result == {}
+
+    def test_mixed_ens_and_address_participants(self):
+        """Submissions can have both ENS names and addresses as participants."""
+        tokens = {
+            '10': Token(
+                token_id='10',
+                source_key='blueRailroadV2s',
+                owner='0x4f84b3650Dbf651732a41647618E7fF94A633F09',
+                owner_display='Justin',
+                blockheight=24000000,
+                video_hash='0x' + 'ab' * 32,
+            ),
+            '11': Token(
+                token_id='11',
+                source_key='blueRailroadV2s',
+                owner='0xDEF456',
+                owner_display='Skyler',
+                blockheight=24000000,
+                video_hash='0x' + 'ab' * 32,
+            ),
+        }
+        submissions = [
+            Submission(
+                id=1,
+                block_height=24000000,
+                participants=[
+                    'justinholmes.eth',  # ENS name
+                    '0xdef456',          # Raw address
+                ],
+            ),
+        ]
+        ens_mapping = {
+            'justinholmes.eth': '0x4f84b3650Dbf651732a41647618E7fF94A633F09',
+        }
+
+        result = match_tokens_by_blockheight_and_participant(
+            tokens, submissions, ens_mapping=ens_mapping
+        )
+
+        assert result == {1: [10, 11]}
+
+    def test_works_without_ens_mapping(self):
+        """Matching still works when no ENS mapping is provided (addresses only)."""
+        tokens = {
+            '10': Token(
+                token_id='10',
+                source_key='blueRailroadV2s',
+                owner='0xABC123',
+                owner_display='alice',
+                blockheight=24000000,
+                video_hash='0x' + 'ab' * 32,
+            ),
+        }
+        submissions = [
+            Submission(id=1, block_height=24000000, participants=['0xabc123']),
+        ]
+
+        # No ens_mapping provided - should still work for address participants
+        result = match_tokens_by_blockheight_and_participant(tokens, submissions)
+
+        assert result == {1: [10]}

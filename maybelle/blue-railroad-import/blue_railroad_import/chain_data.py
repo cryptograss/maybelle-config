@@ -2,7 +2,7 @@
 
 import json
 from pathlib import Path
-from typing import Iterator
+from typing import Iterator, Optional
 
 from .models import Token, Source
 
@@ -11,6 +11,39 @@ def load_chain_data(path: Path) -> dict:
     """Load chain data JSON from file."""
     with open(path) as f:
         return json.load(f)
+
+
+def load_ens_mapping(chain_data: dict) -> dict[str, str]:
+    """Extract ENS name → address mapping from chain data.
+
+    The ensToAddress mapping is included in chainData.json by arthel's
+    chain data fetch, providing forward-resolved ENS names to their
+    current addresses.
+
+    Args:
+        chain_data: The loaded chain data dict
+
+    Returns:
+        Dict mapping lowercase ENS names to addresses, or empty dict if
+        the mapping isn't present.
+    """
+    return chain_data.get('ensToAddress', {})
+
+
+def resolve_ens_to_address(
+    ens_name: str,
+    ens_mapping: dict[str, str],
+) -> Optional[str]:
+    """Resolve an ENS name to an address using the mapping.
+
+    Args:
+        ens_name: The ENS name (e.g., 'justinholmes.eth')
+        ens_mapping: The ENS→address mapping dict
+
+    Returns:
+        The resolved address, or None if not found in mapping.
+    """
+    return ens_mapping.get(ens_name.lower())
 
 
 def parse_token(token_id: str, token_data: dict, source_key: str) -> Token:
