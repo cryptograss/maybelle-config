@@ -1,5 +1,6 @@
 """Thumbnail generation from IPFS videos."""
 
+import json
 import subprocess
 import tempfile
 import shutil
@@ -18,18 +19,70 @@ IPFS_GATEWAYS = [
 
 MAYBELLE_GATEWAY = "https://ipfs.maybelle.cryptograss.live"
 
+# Hysteresis: require 3 consecutive failures before marking as unpinned
+FAILURE_THRESHOLD = 3
+CACHE_FILE = Path(tempfile.gettempdir()) / "maybelle_pin_cache.json"
+
+
+def _load_pin_cache() -> dict:
+    """Load the pin status cache from disk."""
+    try:
+        if CACHE_FILE.exists():
+            with open(CACHE_FILE, 'r') as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return {}
+
+
+def _save_pin_cache(cache: dict) -> None:
+    """Save the pin status cache to disk."""
+    try:
+        with open(CACHE_FILE, 'w') as f:
+            json.dump(cache, f)
+    except Exception as e:
+        print(f"Warning: Could not save pin cache: {e}")
+
 
 def check_maybelle_pinned(cid: str) -> bool:
-    """Check if a CID is available on the maybelle IPFS gateway."""
+    """Check if a CID is available on the maybelle IPFS gateway.
+
+    Uses hysteresis to avoid flip-flopping when the gateway is temporarily
+    slow or overloaded. A CID is only marked as unpinned after 3 consecutive
+    failed checks.
+    """
     if not cid:
         return False
+
+    cache = _load_pin_cache()
+    cid_status = cache.get(cid, {"pinned": True, "failures": 0})
+
     url = f"{MAYBELLE_GATEWAY}/ipfs/{cid}"
     try:
         req = urllib.request.Request(url, method='HEAD')
-        with urllib.request.urlopen(req, timeout=5) as response:
-            return response.status == 200
+        with urllib.request.urlopen(req, timeout=10) as response:
+            if response.status == 200:
+                # Success - reset failures, mark as pinned
+                cache[cid] = {"pinned": True, "failures": 0}
+                _save_pin_cache(cache)
+                return True
     except Exception:
+        pass
+
+    # Check failed - increment failure count
+    failures = cid_status.get("failures", 0) + 1
+    was_pinned = cid_status.get("pinned", True)
+
+    if failures >= FAILURE_THRESHOLD:
+        # Enough consecutive failures - mark as unpinned
+        cache[cid] = {"pinned": False, "failures": failures}
+        _save_pin_cache(cache)
         return False
+    else:
+        # Not enough failures yet - keep previous status
+        cache[cid] = {"pinned": was_pinned, "failures": failures}
+        _save_pin_cache(cache)
+        return was_pinned
 
 
 def normalize_cid(cid: str) -> str:
