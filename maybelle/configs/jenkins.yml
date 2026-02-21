@@ -54,6 +54,7 @@ jobs:
   - file: /var/jenkins_home/jobs/pickipedia-uptime.groovy
   - file: /var/jenkins_home/jobs/backup-pickipedia.groovy
   - file: /var/jenkins_home/jobs/pickipedia-import-bluerailroad.groovy
+  - file: /var/jenkins_home/jobs/arthel-fetch-pinata-data.groovy
 
 credentials:
   system:
