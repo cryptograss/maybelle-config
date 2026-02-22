@@ -1119,6 +1119,15 @@
         state: absent
       ignore_errors: yes
 
+    # Force stop and remove containers when --rebuild flag is passed
+    # This ensures fresh containers with new code (state: absent above may silently fail)
+    - name: Force remove pinning containers for rebuild
+      command: docker compose down --remove-orphans
+      args:
+        chdir: /mnt/persist/pinning-service
+      when: rebuild_images | default(false) | bool
+      ignore_errors: yes
+
     # Force rebuild with --no-cache when --rebuild flag is passed
     # This ensures code changes are picked up (Docker layer caching can skip new files)
     - name: Build pinning service with no cache
@@ -1132,6 +1141,7 @@
         project_src: /mnt/persist/pinning-service
         build: always
         state: present
+        recreate: "{{ 'always' if (rebuild_images | default(false) | bool) else 'smart' }}"
 
     - name: Wait for pinning service to be ready
       uri:
