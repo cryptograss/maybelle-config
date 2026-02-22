@@ -165,12 +165,15 @@ if [ -n "$REBUILD_IMAGES" ]; then
     EXTRA_VARS="-e rebuild_images=true"
 fi
 
+LOG_FILE="/tmp/ansible-deploy-$(date +%Y%m%d-%H%M%S).log"
 echo "Running ansible playbook..."
+echo "Log file: $LOG_FILE"
 cd "$REPO_DIR/maybelle/ansible"
-ansible-playbook -i localhost, maybelle.yml --vault-password-file "$VAULT_PASSWORD_FILE" $EXTRA_VARS
+ansible-playbook -i localhost, maybelle.yml --vault-password-file "$VAULT_PASSWORD_FILE" $EXTRA_VARS 2>&1 | tee "$LOG_FILE"
 
 echo ""
 echo "=== Chapter 1 complete ==="
+echo "Log saved to: $LOG_FILE"
 echo "Press enter to exit"
 read
 OUTER_EOF
