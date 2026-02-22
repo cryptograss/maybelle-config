@@ -81,6 +81,38 @@ app.get('/time', (req, res) => {
   res.json({ timestamp: Date.now() });
 });
 
+// List all pins on the local IPFS node
+// Returns array of CIDs that are pinned locally (for redundancy tracking)
+app.get('/local-pins', async (req, res) => {
+  try {
+    const response = await fetch(`${IPFS_API_URL}/api/v0/pin/ls?type=recursive`, {
+      method: 'POST'
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      return res.status(500).json({ error: `IPFS API error: ${response.status}`, details: errorText });
+    }
+
+    const result = await response.json();
+    // IPFS returns { Keys: { "CID": { Type: "recursive" }, ... } }
+    const pins = Object.keys(result.Keys || {}).map(cid => ({
+      cid,
+      type: result.Keys[cid].Type
+    }));
+
+    res.json({
+      node: 'maybelle',
+      fetchedAt: new Date().toISOString(),
+      count: pins.length,
+      pins
+    });
+  } catch (error) {
+    console.error('Error fetching local pins:', error);
+    res.status(500).json({ error: 'Failed to fetch local pins', details: error.message });
+  }
+});
+
 // Always transcode videos to web-friendly VP9/WebM
 // - VP9 is royalty-free (unlike H.264) with excellent browser support
 // - Converts any codec (MJPEG, etc.) to efficient VP9
