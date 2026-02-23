@@ -58,6 +58,36 @@ const AUTHORIZED_WALLETS = process.env.AUTHORIZED_WALLETS || '';
 const COCONUT_API_KEY = process.env.COCONUT_API_KEY;
 const JOBS_DIR = process.env.JOBS_DIR || join(STAGING_DIR, 'jobs');
 const WEBHOOK_BASE_URL = process.env.WEBHOOK_BASE_URL || 'https://pinning.maybelle.cryptograss.live';
+const PIN_MANIFEST_PATH = process.env.PIN_MANIFEST_PATH || join(STAGING_DIR, 'pin-manifest.json');
+
+// Pin manifest - tracks when CIDs were pinned locally (IPFS doesn't store this)
+function loadPinManifest() {
+  try {
+    if (existsSync(PIN_MANIFEST_PATH)) {
+      return JSON.parse(readFileSync(PIN_MANIFEST_PATH, 'utf8'));
+    }
+  } catch (e) {
+    console.warn('Could not load pin manifest:', e.message);
+  }
+  return {};
+}
+
+function savePinManifest(manifest) {
+  try {
+    writeFileSync(PIN_MANIFEST_PATH, JSON.stringify(manifest, null, 2));
+  } catch (e) {
+    console.warn('Could not save pin manifest:', e.message);
+  }
+}
+
+function recordPin(cid, metadata = {}) {
+  const manifest = loadPinManifest();
+  manifest[cid] = {
+    pinnedAt: new Date().toISOString(),
+    ...metadata
+  };
+  savePinManifest(manifest);
+}
 
 // File upload handling
 const upload = multer({
@@ -83,6 +113,7 @@ app.get('/time', (req, res) => {
 
 // List all pins on the local IPFS node
 // Returns array of CIDs that are pinned locally (for redundancy tracking)
+// Includes pinnedAt timestamps from our manifest (IPFS doesn't track this)
 app.get('/local-pins', async (req, res) => {
   try {
     const response = await fetch(`${IPFS_API_URL}/api/v0/pin/ls?type=recursive`, {
@@ -95,10 +126,15 @@ app.get('/local-pins', async (req, res) => {
     }
 
     const result = await response.json();
+    const manifest = loadPinManifest();
+
     // IPFS returns { Keys: { "CID": { Type: "recursive" }, ... } }
+    // Merge with manifest data for timestamps
     const pins = Object.keys(result.Keys || {}).map(cid => ({
       cid,
-      type: result.Keys[cid].Type
+      type: result.Keys[cid].Type,
+      pinnedAt: manifest[cid]?.pinnedAt || null,
+      metadata: manifest[cid] || null
     }));
 
     res.json({
@@ -598,6 +634,9 @@ async function pinToLocalIPFS(cid) {
 
   const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
   console.log(`Local IPFS: Pin complete in ${elapsed}s`);
+
+  // Record pin timestamp in manifest (IPFS doesn't track this natively)
+  recordPin(cid, { source: 'pinToLocalIPFS', elapsedSeconds: parseFloat(elapsed) });
 
   // Return the last line which should be the final result
   return JSON.parse(lines[lines.length - 1]);
