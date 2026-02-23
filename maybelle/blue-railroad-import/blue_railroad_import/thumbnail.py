@@ -21,7 +21,13 @@ MAYBELLE_GATEWAY = "https://ipfs.maybelle.cryptograss.live"
 
 # Hysteresis: require 3 consecutive failures before marking as unpinned
 FAILURE_THRESHOLD = 3
-CACHE_FILE = Path(tempfile.gettempdir()) / "maybelle_pin_cache.json"
+
+# Use persistent Hetzner volume if available, otherwise fall back to temp
+# /mnt/persist survives even full Jenkins rebuilds
+_PERSIST_CACHE_DIR = Path("/mnt/persist/blue-railroad-cache")
+_DEFAULT_CACHE_DIR = Path(tempfile.gettempdir())
+CACHE_DIR = _PERSIST_CACHE_DIR if _PERSIST_CACHE_DIR.exists() else _DEFAULT_CACHE_DIR
+CACHE_FILE = CACHE_DIR / "maybelle_pin_cache.json"
 
 
 def _load_pin_cache() -> dict:
@@ -38,6 +44,7 @@ def _load_pin_cache() -> dict:
 def _save_pin_cache(cache: dict) -> None:
     """Save the pin status cache to disk."""
     try:
+        CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
         with open(CACHE_FILE, 'w') as f:
             json.dump(cache, f)
     except Exception as e:
