@@ -1141,7 +1141,7 @@
         project_src: /mnt/persist/pinning-service
         build: always
         state: present
-        recreate: "{{ 'always' if (rebuild_images | default(false) | bool) else 'smart' }}"
+        recreate: "{{ 'always' if (rebuild_images | default(false) | bool) else 'auto' }}"
 
     - name: Wait for pinning service to be ready
       uri:
