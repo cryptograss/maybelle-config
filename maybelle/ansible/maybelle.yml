@@ -1029,48 +1029,17 @@
 
     # Bootstrap GlitchTip with superuser, organization, and project
     - name: Create GlitchTip superuser (idempotent)
-      command: >
-        docker exec glitchtip-web ./manage.py shell -c "
-        from django.contrib.auth import get_user_model;
-        User = get_user_model();
-        email = '{{ glitchtip_admin_email }}';
-        exists = User.objects.filter(email=email).exists();
-        print('EXISTS' if exists else 'CREATED');
-        exists or User.objects.create_superuser(email=email, password='{{ glitchtip_admin_password }}');
-        "
+      command: docker exec glitchtip-web ./manage.py shell -c "from django.contrib.auth import get_user_model; User = get_user_model(); email = '{{ glitchtip_admin_email }}'; exists = User.objects.filter(email=email).exists(); print('EXISTS' if exists else 'CREATED'); exists or User.objects.create_superuser(email=email, password='{{ glitchtip_admin_password }}')"
       register: glitchtip_superuser
       changed_when: "'CREATED' in glitchtip_superuser.stdout"
 
     - name: Create GlitchTip organization and PickiPedia project
-      command: >
-        docker exec glitchtip-web ./manage.py shell -c "
-        from organizations_ext.models import Organization;
-        from projects.models import Project;
-        from django.contrib.auth import get_user_model;
-        User = get_user_model();
-        user = User.objects.get(email='{{ glitchtip_admin_email }}');
-        org, org_created = Organization.objects.get_or_create(name='Cryptograss', defaults={'slug': 'cryptograss'});
-        if org_created:
-            org.add_user(user, role=0);
-        proj, proj_created = Project.objects.get_or_create(organization=org, name='PickiPedia', defaults={'slug': 'pickipedia', 'platform': 'php'});
-        print('ORG_CREATED' if org_created else 'ORG_EXISTS');
-        print('PROJ_CREATED' if proj_created else 'PROJ_EXISTS');
-        "
+      command: docker exec glitchtip-web ./manage.py shell -c "from apps.organizations_ext.models import Organization, OrganizationUser; from apps.projects.models import Project; from django.contrib.auth import get_user_model; User = get_user_model(); user = User.objects.get(email='{{ glitchtip_admin_email }}'); org, org_created = Organization.objects.get_or_create(name='Cryptograss', defaults=dict(slug='cryptograss')); OrganizationUser.objects.get_or_create(user=user, organization=org, defaults=dict(role=0)); proj, proj_created = Project.objects.get_or_create(organization=org, name='PickiPedia', defaults=dict(slug='pickipedia', platform='php')); print('ORG_CREATED' if org_created else 'ORG_EXISTS'); print('PROJ_CREATED' if proj_created else 'PROJ_EXISTS')"
       register: glitchtip_project
       changed_when: "'CREATED' in glitchtip_project.stdout"
 
     - name: Get or create PickiPedia project DSN
-      command: >
-        docker exec glitchtip-web ./manage.py shell -c "
-        from organizations_ext.models import Organization;
-        from projects.models import Project, ProjectKey;
-        org = Organization.objects.get(slug='cryptograss');
-        proj = Project.objects.get(organization=org, slug='pickipedia');
-        key = ProjectKey.objects.filter(project=proj).first();
-        if not key:
-            key = ProjectKey.objects.create(project=proj);
-        print(key.get_dsn());
-        "
+      command: docker exec glitchtip-web ./manage.py shell -c "from apps.organizations_ext.models import Organization; from apps.projects.models import Project, ProjectKey; org = Organization.objects.get(slug='cryptograss'); proj = Project.objects.get(organization=org, slug='pickipedia'); key = ProjectKey.objects.filter(project=proj).first() or ProjectKey.objects.create(project=proj); print(key.get_dsn())"
       register: glitchtip_dsn
       changed_when: false
 
@@ -1079,6 +1048,38 @@
         content: "{{ glitchtip_dsn.stdout_lines[-1] }}"
         dest: /mnt/persist/glitchtip/pickipedia-dsn.txt
         mode: '0644'
+
+    - name: Create PickiPedia secrets directory for Jenkins
+      file:
+        path: /var/jenkins_home/secrets/pickipedia
+        state: directory
+        mode: '0700'
+        owner: '1000'
+        group: '1000'
+
+    - name: Write PickiPedia LocalSettings.local.php for Jenkins builds
+      copy:
+        dest: /var/jenkins_home/secrets/pickipedia/LocalSettings.local.php
+        mode: '0600'
+        owner: '1000'
+        group: '1000'
+        content: |
+          <?php
+          # PickiPedia secrets - managed by ansible
+
+          # Database
+          $wgDBtype = "mysql";
+          $wgDBserver = "localhost";
+          $wgDBname = "{{ pickipedia_db_name }}";
+          $wgDBuser = "{{ pickipedia_db_user }}";
+          $wgDBpassword = "{{ pickipedia_db_password }}";
+
+          # Security keys
+          $wgSecretKey = "{{ pickipedia_secret_key }}";
+          $wgUpgradeKey = "{{ pickipedia_upgrade_key }}";
+
+          # Sentry/GlitchTip error tracking
+          $wgSentryDsn = "{{ glitchtip_dsn.stdout_lines[-1] }}";
 
     # IPFS node for Blue Railroad video pinning
     # Provides local redundancy alongside Pinata cloud pinning
