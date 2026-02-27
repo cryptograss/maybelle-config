@@ -166,6 +166,15 @@
     group: www-data
     mode: '0644'
 
+- name: Fetch GlitchTip DSN from maybelle
+  uri:
+    url: "https://glitchtip-dsn.maybelle.cryptograss.live/pickipedia-dsn.txt"
+    user: deploy
+    password: "{{ glitchtip_dsn_fetch_password }}"
+    force_basic_auth: true
+    return_content: true
+  register: glitchtip_dsn_response
+
 - name: Create LocalSettings.local.php with secrets
   copy:
     dest: "{{ mediawiki_root }}/LocalSettings.local.php"
@@ -185,7 +194,7 @@
       $wgUpgradeKey = "{{ pickipedia_upgrade_key }}";
 
       # Sentry/GlitchTip error tracking
-      $wgSentryDsn = "{{ pickipedia_sentry_dsn }}";
+      $wgSentryDsn = "{{ glitchtip_dsn_response.content | trim }}";
     owner: www-data
     group: www-data
     mode: '0600'

@@ -32,6 +32,17 @@ glitchtip.{{ domain_name }} {
     reverse_proxy localhost:8800
 }
 
+# GlitchTip DSN endpoint (for automated pickipedia config)
+glitchtip-dsn.{{ domain_name }} {
+    basicauth {
+        deploy {{ glitchtip_dsn_fetch_password_hash }}
+    }
+    root * /mnt/persist/glitchtip
+    file_server {
+        index pickipedia-dsn.txt
+    }
+}
+
 # Blue Railroad pinning service (video download + IPFS pinning)
 pinning.{{ domain_name }} {
     reverse_proxy localhost:3001

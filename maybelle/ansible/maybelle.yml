@@ -1048,7 +1048,7 @@
       register: glitchtip_project
       changed_when: "'CREATED' in glitchtip_project.stdout"
 
-    - name: Get PickiPedia project DSN
+    - name: Get or create PickiPedia project DSN
       command: >
         docker exec glitchtip-web ./manage.py shell -c "
         from organizations_ext.models import Organization;
@@ -1063,15 +1063,11 @@
       register: glitchtip_dsn
       changed_when: false
 
-    - name: Display GlitchTip DSN for PickiPedia
-      debug:
-        msg: "PickiPedia GlitchTip DSN: {{ glitchtip_dsn.stdout_lines[-1] }}"
-
-    - name: Save GlitchTip DSN to file for reference
+    - name: Save GlitchTip DSN to file
       copy:
         content: "{{ glitchtip_dsn.stdout_lines[-1] }}"
         dest: /mnt/persist/glitchtip/pickipedia-dsn.txt
-        mode: '0600'
+        mode: '0644'
 
     # IPFS node for Blue Railroad video pinning
     # Provides local redundancy alongside Pinata cloud pinning
