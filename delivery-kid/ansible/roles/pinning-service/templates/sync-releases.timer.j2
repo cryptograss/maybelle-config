@@ -1,0 +1,10 @@
+[Unit]
+Description=Sync releases from PickiPedia hourly
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=1h
+RandomizedDelaySec=5min
+
+[Install]
+WantedBy=timers.target
