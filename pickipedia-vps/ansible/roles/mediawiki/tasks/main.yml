@@ -50,125 +50,15 @@
     group: www-data
     mode: '0755'
 
-# Base LocalSettings.php - will need to be updated with secrets after migration
-- name: Create base LocalSettings.php
-  copy:
+# Fetch LocalSettings.php from the pickipedia repo (source of truth)
+- name: Download LocalSettings.php from pickipedia repo
+  get_url:
+    url: "https://raw.githubusercontent.com/cryptograss/pickipedia/main/LocalSettings.php"
     dest: "{{ mediawiki_root }}/LocalSettings.php"
-    content: |
-      <?php
-      # PickiPedia MediaWiki Configuration
-      # Base configuration - secrets loaded from LocalSettings.local.php
-
-      # Protect against web entry
-      if ( !defined( 'MEDIAWIKI' ) ) {
-          exit;
-      }
-
-      ## Site basics
-      $wgSitename = "PickiPedia";
-      $wgMetaNamespace = "PickiPedia";
-
-      ## The URL base path to the directory containing the wiki
-      $wgScriptPath = "";
-      $wgArticlePath = "/wiki/$1";
-      $wgUsePathInfo = true;
-
-      ## Server URLs
-      $wgServer = "https://{{ domain_name }}";
-
-      ## Resource paths
-      $wgResourceBasePath = $wgScriptPath;
-
-      ## Logo
-      $wgLogos = [
-          '1x' => "$wgResourceBasePath/resources/assets/pickipedia.png",
-          'icon' => "$wgResourceBasePath/resources/assets/pickipedia.png",
-      ];
-
-      ## Contact info
-      $wgEmergencyContact = "justin@cryptograss.live";
-      $wgPasswordSender = "wiki@pickipedia.xyz";
-
-      ## Database settings
-      # Loaded from LocalSettings.local.php
-
-      ## Shared memory settings
-      $wgMainCacheType = CACHE_ACCEL;
-      $wgMemCachedServers = [];
-
-      ## File uploads
-      $wgEnableUploads = true;
-      $wgUseImageMagick = true;
-      $wgImageMagickConvertCommand = "/usr/bin/convert";
-      $wgMaxUploadSize = 104857600; # 100MB
-      $wgFileExtensions = array_merge(
-          $wgFileExtensions,
-          [ 'pdf', 'mp3', 'mp4', 'ogg', 'webm', 'svg' ]
-      );
-
-      ## InstantCommons allows wiki to use images from commons.wikimedia.org
-      $wgUseInstantCommons = true;
-
-      ## Skin
-      $wgDefaultSkin = "timeless";
-      wfLoadSkin( 'Timeless' );
-      wfLoadSkin( 'Vector' );
-      wfLoadSkin( 'MinervaNeue' );
-
-      ## License
-      $wgRightsPage = "";
-      $wgRightsUrl = "https://creativecommons.org/licenses/by-sa/4.0/";
-      $wgRightsText = "Creative Commons Attribution-ShareAlike";
-      $wgRightsIcon = "$wgResourceBasePath/resources/assets/licenses/cc-by-sa.png";
-
-      ## Path to the GNU diff3 utility
-      $wgDiff3 = "/usr/bin/diff3";
-
-      ## Jobs
-      $wgJobRunRate = 0; # Disable job queue on web requests
-      # Run jobs via cron instead
-
-      ## Caching
-      $wgCacheDirectory = "$IP/cache";
-
-      ## Email
-      $wgEnableEmail = true;
-      $wgEnableUserEmail = true;
-      $wgEmailAuthentication = true;
-
-      ## Namespaces
-      define("NS_MUSICIAN", 100);
-      define("NS_MUSICIAN_TALK", 101);
-      define("NS_SHOW", 102);
-      define("NS_SHOW_TALK", 103);
-      $wgExtraNamespaces[NS_MUSICIAN] = "Musician";
-      $wgExtraNamespaces[NS_MUSICIAN_TALK] = "Musician_talk";
-      $wgExtraNamespaces[NS_SHOW] = "Show";
-      $wgExtraNamespaces[NS_SHOW_TALK] = "Show_talk";
-
-      ## User rights
-      $wgGroupPermissions['*']['createaccount'] = false;
-      $wgGroupPermissions['*']['edit'] = false;
-      $wgGroupPermissions['user']['edit'] = true;
-      $wgGroupPermissions['sysop']['createaccount'] = true;
-
-      ## Release group - users who can add trusted IPFS/torrent content
-      ## delivery-kid only pins CIDs from users in this group
-      $wgGroupPermissions['release']['edit'] = true;
-
-      ## Load extensions
-      wfLoadExtension( 'ParserFunctions' );
-      wfLoadExtension( 'TemplateStyles' );
-      wfLoadExtension( 'Scribunto' );
-      $wgScribuntoDefaultEngine = 'luastandalone';
-
-      ## Load local settings (secrets)
-      if ( file_exists( "$IP/LocalSettings.local.php" ) ) {
-          require_once "$IP/LocalSettings.local.php";
-      }
     owner: www-data
     group: www-data
     mode: '0644'
+    force: yes
 
 - name: Fetch GlitchTip DSN from maybelle
   uri:
