@@ -38,6 +38,58 @@
   environment:
     IPFS_PATH: /var/lib/ipfs/.ipfs
 
+# Split datastore: move blocks to Storage Box, keep metadata local
+- name: Check if blocks directory is already a symlink
+  stat:
+    path: /var/lib/ipfs/.ipfs/blocks
+  register: blocks_stat
+
+- name: Stop IPFS before moving blocks (if running)
+  systemd:
+    name: ipfs
+    state: stopped
+  ignore_errors: yes
+  when:
+    - storage_box_mount is defined
+    - blocks_stat.stat.exists
+    - not blocks_stat.stat.islnk
+
+- name: Move existing blocks to Storage Box
+  command: mv /var/lib/ipfs/.ipfs/blocks {{ storage_box_mount }}/ipfs-blocks/blocks
+  when:
+    - storage_box_mount is defined
+    - blocks_stat.stat.exists
+    - not blocks_stat.stat.islnk
+    - blocks_stat.stat.isdir
+
+- name: Remove blocks directory if empty
+  file:
+    path: /var/lib/ipfs/.ipfs/blocks
+    state: absent
+  when:
+    - storage_box_mount is defined
+    - blocks_stat.stat.exists
+    - not blocks_stat.stat.islnk
+
+- name: Create blocks directory on Storage Box
+  file:
+    path: "{{ storage_box_mount }}/ipfs-blocks/blocks"
+    state: directory
+    owner: ipfs
+    group: ipfs
+    mode: '0755'
+  when: storage_box_mount is defined
+
+- name: Symlink blocks to Storage Box
+  file:
+    src: "{{ storage_box_mount }}/ipfs-blocks/blocks"
+    dest: /var/lib/ipfs/.ipfs/blocks
+    state: link
+    owner: ipfs
+    group: ipfs
+  when: storage_box_mount is defined
+  notify: restart ipfs
+
 - name: Configure IPFS storage max
   become_user: ipfs
   command: "ipfs config Datastore.StorageMax {{ ipfs_storage_max }}"
@@ -66,7 +118,8 @@
     content: |
       [Unit]
       Description=IPFS Daemon
-      After=network.target
+      After=network.target remote-fs.target
+      Wants=remote-fs.target
 
       [Service]
       Type=simple

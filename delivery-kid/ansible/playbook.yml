@@ -3,10 +3,12 @@
 #
 # Pre-requisites:
 # 1. Create Hetzner CX22 VPS with Ubuntu 24.04
-# 2. Add SSH key during creation
-# 3. Attach storage volume for IPFS data
-# 4. Point DNS records to server IP
-# 5. Run: ansible-playbook -i inventory.yml playbook.yml
+# 2. Create Hetzner Storage Box BX11 (or larger)
+# 3. Enable SMB/CIFS on the Storage Box via Hetzner console
+# 4. Add SSH key during VPS creation
+# 5. Point DNS records to server IP
+# 6. Copy inventory.yml.example to inventory.yml and fill in values
+# 7. Run: ansible-playbook -i inventory.yml playbook.yml
 
 - name: Provision Delivery Kid Server
   hosts: delivery-kid
@@ -24,6 +26,7 @@
       - aria2
       - nodejs
       - npm
+      - cifs-utils
 
   pre_tasks:
     - name: Update apt cache
@@ -53,6 +56,9 @@
           =============================================
 
   roles:
+    # Mount Storage Box first - IPFS depends on it
+    - storage-box
+    # IPFS with blocks on Storage Box, metadata on local SSD
     - ipfs
     - pinning-service
     - aria2
@@ -77,6 +83,10 @@
       debug:
         msg: |
           Delivery Kid provisioned successfully!
+
+          Storage:
+          - Local SSD: IPFS metadata, DHT, system
+          - Storage Box: IPFS blocks ({{ storage_box_mount }})
 
           Services running:
           - IPFS daemon on port 5001 (API) and 8080 (gateway)

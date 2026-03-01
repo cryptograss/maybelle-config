@@ -5,46 +5,88 @@ IPFS and BitTorrent distribution server for Cryptograss music releases.
 ## Architecture
 
 ```
-                        ┌─────────────────────┐
-                        │     Caddy           │
-                        │  (SSL termination)  │
-                        └─────────┬───────────┘
-                                  │
-         ┌────────────────────────┼────────────────────────┐
-         │                        │                        │
-         ▼                        ▼                        ▼
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│ Pinning Service │    │   IPFS Gateway  │    │     aria2       │
-│   (port 3001)   │    │   (port 8080)   │    │  BitTorrent     │
-│                 │    │                 │    │   (port 6881)   │
-│ POST /api/pin   │    │ /ipfs/<cid>     │    │                 │
-│ POST /api/upload│    │                 │    │ Seeds torrents  │
-│ GET /api/pins   │    │                 │    │ created by      │
-│ POST /api/torrent    │                 │    │ delivery-driver │
-└────────┬────────┘    └────────┬────────┘    └─────────────────┘
-         │                      │
-         └──────────┬───────────┘
-                    ▼
-         ┌─────────────────┐      ┌─────────────────┐
-         │   IPFS Node     │      │     Pinata      │
-         │  (Kubo daemon)  │─────▶│  (backup pins)  │
-         │                 │      │                 │
-         └─────────────────┘      └─────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│                     Hetzner CX22 VPS                            │
+│                     (~€3.29/month)                              │
+│                                                                 │
+│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐ │
+│  │ Pinning Service │  │   IPFS Daemon   │  │     aria2       │ │
+│  │   (port 3001)   │  │  (5001 / 8080)  │  │   (6800/6881)   │ │
+│  └────────┬────────┘  └────────┬────────┘  └─────────────────┘ │
+│           │                    │                                │
+│           └────────┬───────────┘                                │
+│                    │                                            │
+│  ┌─────────────────▼─────────────────┐                         │
+│  │         40GB Local NVMe           │                         │
+│  │  - IPFS metadata (badger/leveldb) │                         │
+│  │  - DHT routing table              │                         │
+│  │  - OS and applications            │                         │
+│  └───────────────────────────────────┘                         │
+│                    │                                            │
+│                    │ symlink: .ipfs/blocks -> /mnt/storage-box │
+│                    │                                            │
+└────────────────────┼────────────────────────────────────────────┘
+                     │
+                     │ SMB/CIFS mount
+                     ▼
+┌─────────────────────────────────────────────────────────────────┐
+│               Hetzner Storage Box BX11                          │
+│                   (~€3.20/month)                                │
+│                                                                 │
+│  ┌───────────────────────────────────┐                         │
+│  │           1TB HDD Storage         │                         │
+│  │     - IPFS blocks (flatfs)        │                         │
+│  │     - The actual pinned content   │                         │
+│  └───────────────────────────────────┘                         │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+
+Total: ~€6.50/month (~$7) for 1TB of IPFS storage + BitTorrent seeding
 ```
 
-## Deployment
+## Why This Split?
 
-1. Provision a Hetzner VPS (CX22 or larger)
-2. Copy inventory example:
-   ```bash
-   cp ansible/inventory.yml.example ansible/inventory.yml
-   ```
-3. Edit inventory with your server IP and domains
-4. Add Pinata JWT to `secrets/vault.yml` (optional)
-5. Run playbook:
-   ```bash
-   ansible-playbook -i ansible/inventory.yml ansible/playbook.yml
-   ```
+IPFS stores two kinds of data:
+- **Metadata** (DHT, peer info, datastore indexes) - small, latency-sensitive
+- **Blocks** (actual content) - large, written once, read sequentially
+
+By keeping metadata on fast local NVMe and blocks on cheap network storage,
+we get the best of both worlds: responsive peer discovery with massive storage capacity.
+
+## Setup
+
+### 1. Provision Infrastructure
+
+**Hetzner VPS (CX22):**
+- Ubuntu 24.04
+- Add your SSH key
+
+**Hetzner Storage Box (BX11):**
+- Enable SMB/CIFS in Robot console (Settings → SMB → Enable)
+- Note the hostname: `uXXXXXX.your-storagebox.de`
+
+**DNS:**
+- Point `delivery.cryptograss.live` to VPS IP
+- Point `ipfs.cryptograss.live` to VPS IP
+
+### 2. Configure Inventory
+
+```bash
+cd ansible
+cp inventory.yml.example inventory.yml
+# Edit inventory.yml with your values
+```
+
+Add Storage Box password to `secrets/vault.yml`:
+```yaml
+storage_box_password: "your-storage-box-password"
+```
+
+### 3. Deploy
+
+```bash
+ansible-playbook -i inventory.yml playbook.yml
+```
 
 ## Endpoints
 
@@ -59,5 +101,5 @@ IPFS and BitTorrent distribution server for Cryptograss music releases.
 
 ## Related
 
-- **delivery-driver** - CLI tool for creating releases (runs on your laptop)
+- **[delivery-driver](https://github.com/magent-cryptograss/delivery-driver)** - CLI tool for creating releases (runs on your laptop)
 - **maybelle** - CI server that deploys this
