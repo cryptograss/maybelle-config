@@ -1,0 +1,24 @@
+all:
+  hosts:
+    delivery-kid:
+      ansible_host: 46.62.220.103
+      ansible_user: root
+      ansible_ssh_private_key_file: ~/.ssh/id_ed25519_hunter
+  vars:
+    # Hetzner CX22 VPS
+    # Domain and SSL
+    domain_name: delivery-kid.cryptograss.live
+    ipfs_gateway_domain: ipfs.delivery-kid.cryptograss.live
+
+    # IPFS configuration
+    ipfs_version: "0.27.0"
+    ipfs_storage_max: "900GB"
+
+    # Hetzner Storage Box BX11
+    storage_box_host: "u554727.your-storagebox.de"
+    storage_box_user: "u554727"
+    storage_box_mount: "/mnt/storage-box"
+    storage_box_password: "{{ vault_storage_box_password }}"
+
+    # Torrent seeding
+    torrent_upload_limit: "10M"
