@@ -3,34 +3,9 @@ all:
     delivery-kid:
       ansible_host: YOUR_VPS_IP
       ansible_user: root
-      ansible_ssh_private_key_file: ~/.ssh/id_ed25519_hunter
   vars:
-    # Server specs (Hetzner CX22)
-    # - 2 vCPU (Intel)
-    # - 4 GB RAM
-    # - 40 GB NVMe (local - for IPFS metadata)
-    # - 20 TB traffic
-    # - ~€3.29/month
-
-    # Domain and SSL
-    domain_name: delivery.cryptograss.live
-    ipfs_gateway_domain: ipfs.cryptograss.live
-
-    # IPFS configuration
-    ipfs_version: "0.27.0"
-    ipfs_storage_max: "900GB"  # Leave some headroom on 1TB Storage Box
-
-    # Hetzner Storage Box (BX11 = 1TB for €3.20/mo)
-    # Enable SMB/CIFS in Hetzner Robot console first!
-    # Format: uXXXXXX.your-storagebox.de
+    # Hetzner Storage Box credentials
+    # Enable SMB/CIFS in Hetzner Robot console first
     storage_box_host: "uXXXXXX.your-storagebox.de"
     storage_box_user: "uXXXXXX"
-    storage_box_mount: "/mnt/storage-box"
-    # Password goes in vault.yml:
-    # storage_box_password: "your-storage-box-password"
-
-    # Pinata backup (optional - set in vault.yml)
-    # pinata_jwt: "{{ vault_pinata_jwt }}"
-
-    # Torrent seeding
-    torrent_upload_limit: "10M"  # 10 MB/s upload limit
+    # storage_box_password goes in secrets/vault.yml

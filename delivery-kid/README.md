@@ -1,6 +1,9 @@
 # Delivery Kid
 
-IPFS and BitTorrent distribution server for Cryptograss music releases.
+IPFS pinning server - same service as maybelle, on a dedicated VPS.
+
+The pinning service code lives in `maybelle/pinning-service/`. This directory
+contains the ansible playbook to deploy it to Hetzner with Storage Box storage.
 
 ## Architecture
 

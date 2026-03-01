@@ -1,14 +1,12 @@
 ---
-# Delivery Kid - IPFS/BitTorrent Distribution Server
+# Delivery Kid - IPFS Pinning Server
+#
+# Same pinning service as maybelle, just on a different VPS with Storage Box storage.
 #
 # Pre-requisites:
-# 1. Create Hetzner CX22 VPS with Ubuntu 24.04
-# 2. Create Hetzner Storage Box BX11 (or larger)
-# 3. Enable SMB/CIFS on the Storage Box via Hetzner console
-# 4. Add SSH key during VPS creation
-# 5. Point DNS records to server IP
-# 6. Copy inventory.yml.example to inventory.yml and fill in values
-# 7. Run: ansible-playbook -i inventory.yml playbook.yml
+# 1. Hetzner CX22 VPS with Ubuntu 24.04
+# 2. Hetzner Storage Box BX11 with SMB/CIFS enabled
+# 3. DNS records pointing to server
 
 - name: Provision Delivery Kid Server
   hosts: delivery-kid
@@ -18,80 +16,194 @@
     - ../../secrets/vault.yml
 
   vars:
-    system_packages:
-      - curl
-      - wget
-      - git
-      - jq
-      - aria2
-      - nodejs
-      - npm
-      - cifs-utils
+    domain_name: "delivery-kid.cryptograss.live"
+    ipfs_gateway_domain: "ipfs.delivery-kid.cryptograss.live"
+    # Pinning service authorized wallets - same as maybelle
+    authorized_wallets_config: "{{ lookup('file', playbook_dir + '/../../maybelle/pinning-service/authorized-wallets.json') | from_json }}"
+    pinning_authorized_wallets: "{{ authorized_wallets_config.wallets | map(attribute='address') | join(',') }}"
 
   pre_tasks:
-    - name: Update apt cache
-      apt:
-        update_cache: yes
-        cache_valid_time: 3600
+    - name: Install community.docker collection
+      command: ansible-galaxy collection install community.docker
+      changed_when: false
 
-    - name: Install system packages
-      apt:
-        name: "{{ system_packages }}"
-        state: present
-
-    - name: Set timezone
-      timezone:
-        name: UTC
-
+  tasks:
     - name: Deploy SSH login banner
       copy:
-        src: ../../ascii-art/delivery-kid.txt
+        src: "{{ playbook_dir }}/../../ascii-art/delivery-kid.txt"
         dest: /etc/motd
         mode: '0644'
 
-  roles:
-    # Mount Storage Box first - IPFS depends on it
-    - storage-box
-    # IPFS with blocks on Storage Box, metadata on local SSD
-    - ipfs
-    - pinning-service
-    - aria2
-    - role: ../../shared/ansible/roles/caddy
-      vars:
-        caddy_config: |
+    - name: Install required packages
+      apt:
+        name:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - docker.io
+          - docker-compose-v2
+          - cifs-utils
+          - jq
+        state: present
+        update_cache: yes
+
+    # Mount Hetzner Storage Box for IPFS block storage
+    - name: Create Storage Box credentials file
+      copy:
+        content: |
+          username={{ storage_box_user }}
+          password={{ storage_box_password }}
+        dest: /root/.storage-box-credentials
+        mode: '0600'
+
+    - name: Create Storage Box mount point
+      file:
+        path: /mnt/storage-box
+        state: directory
+        mode: '0755'
+
+    - name: Mount Storage Box via CIFS
+      mount:
+        path: /mnt/storage-box
+        src: "//{{ storage_box_host }}/backup"
+        fstype: cifs
+        opts: "credentials=/root/.storage-box-credentials,uid=0,gid=0,file_mode=0755,dir_mode=0755"
+        state: mounted
+
+    # Create directories for IPFS and pinning service
+    - name: Create IPFS directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0755'
+      loop:
+        - /mnt/storage-box/ipfs
+        - /mnt/storage-box/ipfs/blocks
+        - /var/lib/ipfs          # Local metadata
+        - /var/lib/ipfs/staging
+
+    - name: Create pinning service directory
+      file:
+        path: /opt/pinning-service
+        state: directory
+        mode: '0755'
+
+    # Copy pinning service from maybelle (same code, different VPS)
+    - name: Copy pinning service files
+      copy:
+        src: "{{ playbook_dir }}/../../maybelle/pinning-service/"
+        dest: /opt/pinning-service/
+        mode: '0644'
+
+    - name: Create Docker network for services
+      docker_network:
+        name: delivery-kid-net
+        state: present
+
+    # Docker Compose for IPFS + Pinning Service
+    # Same as maybelle, just different URLs
+    - name: Create docker-compose file
+      copy:
+        dest: /opt/pinning-service/docker-compose.yml
+        mode: '0644'
+        content: |
+          services:
+            pinning:
+              build:
+                context: .
+              container_name: pinning-service
+              environment:
+                - PORT=3001
+                - PINATA_JWT={{ pinata_jwt }}
+                - AUTHORIZED_WALLETS={{ pinning_authorized_wallets }}
+                - IPFS_API_URL=http://ipfs:5001
+                - IPFS_GATEWAY_URL=https://{{ ipfs_gateway_domain }}
+                - STAGING_DIR=/staging
+                - WIKI_URL=https://pickipedia.xyz
+                - WIKI_BOT_USER={{ BLUERAILROAD_BOT_USERNAME }}
+                - WIKI_BOT_PASSWORD={{ BLUERAILROAD_BOT_PASSWORD }}
+                - COCONUT_API_KEY={{ coconut_api_key | default('') }}
+                - WEBHOOK_BASE_URL=https://{{ domain_name }}
+              volumes:
+                - /var/lib/ipfs/staging:/staging
+              ports:
+                - "127.0.0.1:3001:3001"
+              networks:
+                - delivery-kid-net
+              restart: unless-stopped
+              depends_on:
+                - ipfs
+
+            ipfs:
+              image: ipfs/kubo:latest
+              container_name: ipfs
+              volumes:
+                - /var/lib/ipfs:/data/ipfs
+                - /mnt/storage-box/ipfs/blocks:/data/ipfs/blocks
+                - /var/lib/ipfs/staging:/export
+              ports:
+                - "127.0.0.1:5001:5001"  # API
+                - "127.0.0.1:8080:8080"  # Gateway
+                - "4001:4001"             # Swarm TCP
+                - "4001:4001/udp"         # Swarm UDP
+              networks:
+                - delivery-kid-net
+              environment:
+                - IPFS_PROFILE=server
+              restart: unless-stopped
+
+          networks:
+            delivery-kid-net:
+              external: true
+              name: delivery-kid-net
+
+    - name: Start services
+      community.docker.docker_compose_v2:
+        project_src: /opt/pinning-service
+        build: always
+        state: present
+
+    - name: Wait for pinning service to be ready
+      uri:
+        url: http://127.0.0.1:3001/health
+        status_code: [200]
+      register: pinning_health
+      until: pinning_health.status == 200
+      retries: 30
+      delay: 2
+
+    # Caddy reverse proxy
+    - name: Install Caddy
+      apt:
+        name: caddy
+        state: present
+
+    - name: Configure Caddy
+      copy:
+        dest: /etc/caddy/Caddyfile
+        content: |
           {{ domain_name }} {
-              handle /api/* {
-                  reverse_proxy localhost:3001
-              }
+              reverse_proxy /health localhost:3001
+              reverse_proxy /time localhost:3001
+              reverse_proxy /pin* localhost:3001
+              reverse_proxy /transcode* localhost:3001
+              reverse_proxy /job* localhost:3001
+              reverse_proxy /local-pins localhost:3001
+              reverse_proxy /webhook/* localhost:3001
+
               handle {
-                  respond "delivery-kid - IPFS pinning server" 200
+                  respond "delivery-kid pinning service" 200
               }
           }
 
           {{ ipfs_gateway_domain }} {
               reverse_proxy localhost:8080
           }
+        mode: '0644'
+      notify: Reload Caddy
 
-  post_tasks:
-    - name: Display post-installation notes
-      debug:
-        msg: |
-          Delivery Kid provisioned successfully!
-
-          Storage:
-          - Local SSD: IPFS metadata, DHT, system
-          - Storage Box: IPFS blocks ({{ storage_box_mount }})
-
-          Services running:
-          - IPFS daemon on port 5001 (API) and 8080 (gateway)
-          - Pinning service API on port 3001
-          - aria2 BitTorrent on port 6800 (RPC) and 6881 (DHT)
-
-          Endpoints:
-          - https://{{ domain_name }}/api/health
-          - https://{{ ipfs_gateway_domain }}/ipfs/<CID>
-
-          To pin content:
-          curl -X POST https://{{ domain_name }}/api/pin \
-            -H "Content-Type: application/json" \
-            -d '{"cid": "Qm...", "name": "My Content"}'
+  handlers:
+    - name: Reload Caddy
+      systemd:
+        name: caddy
+        state: reloaded

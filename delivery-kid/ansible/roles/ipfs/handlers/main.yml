@@ -1,5 +1,0 @@
----
-- name: restart ipfs
-  systemd:
-    name: ipfs
-    state: restarted
