@@ -167,14 +167,19 @@
       retries: 30
       delay: 2
 
-    # Configure IPFS API to listen on all interfaces BEFORE health check
-    # The API won't be reachable from host until this is done
+    # Configure IPFS to listen on all interfaces BEFORE health check
+    # By default kubo listens on 127.0.0.1 which doesn't work with Docker port forwarding
     - name: Check IPFS API listen address
       command: docker exec ipfs ipfs config Addresses.API
       register: ipfs_api_addr
       changed_when: false
 
-    - name: Configure IPFS API to listen on all interfaces
+    - name: Check IPFS Gateway listen address
+      command: docker exec ipfs ipfs config Addresses.Gateway
+      register: ipfs_gateway_addr
+      changed_when: false
+
+    - name: Configure IPFS to listen on all interfaces
       block:
         - name: Stop IPFS for config change
           command: docker stop ipfs
@@ -191,10 +196,20 @@
             -v /mnt/storage-box/ipfs/blocks:/data/ipfs/blocks
             ipfs/kubo:latest
             config Addresses.API /ip4/0.0.0.0/tcp/5001
+          when: "'/ip4/0.0.0.0/' not in ipfs_api_addr.stdout"
+
+        - name: Set IPFS Gateway listen address
+          command: >
+            docker run --rm
+            -v /var/lib/ipfs:/data/ipfs
+            -v /mnt/storage-box/ipfs/blocks:/data/ipfs/blocks
+            ipfs/kubo:latest
+            config Addresses.Gateway /ip4/0.0.0.0/tcp/8080
+          when: "'/ip4/0.0.0.0/' not in ipfs_gateway_addr.stdout"
 
         - name: Start IPFS after config change
           command: docker start ipfs
-      when: "'/ip4/0.0.0.0/' not in ipfs_api_addr.stdout"
+      when: "'/ip4/0.0.0.0/' not in ipfs_api_addr.stdout or '/ip4/0.0.0.0/' not in ipfs_gateway_addr.stdout"
 
     # NOW health check - API should be reachable
     - name: Wait for IPFS API to be ready
