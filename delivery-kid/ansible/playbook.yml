@@ -62,7 +62,8 @@
         path: /mnt/storage-box
         src: "//{{ storage_box_host }}/backup"
         fstype: cifs
-        opts: "credentials=/root/.storage-box-credentials,uid=0,gid=0,file_mode=0755,dir_mode=0755"
+        # uid/gid 1000 matches the 'ipfs' user inside the kubo container
+        opts: "credentials=/root/.storage-box-credentials,uid=1000,gid=1000,file_mode=0755,dir_mode=0755"
         state: mounted
 
     # Create directories for IPFS and pinning service
