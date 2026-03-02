@@ -25,7 +25,10 @@
   pre_tasks:
     - name: Install community.docker collection
       command: ansible-galaxy collection install community.docker
+      delegate_to: localhost
+      become: no
       changed_when: false
+      run_once: true
 
   tasks:
     - name: Deploy SSH login banner
