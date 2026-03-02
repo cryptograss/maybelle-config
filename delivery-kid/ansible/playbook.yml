@@ -159,17 +159,16 @@
         build: always
         state: present
 
-    - name: Wait for IPFS to initialize
-      uri:
-        url: http://127.0.0.1:5001/api/v0/id
-        method: POST
-        status_code: [200]
-      register: ipfs_health
-      until: ipfs_health.status == 200
-      retries: 45
-      delay: 4
+    # Wait for IPFS container to be running (not API - that won't work until configured)
+    - name: Wait for IPFS container to start
+      command: docker inspect -f '{{.State.Running}}' ipfs
+      register: ipfs_container_state
+      until: ipfs_container_state.stdout == 'true'
+      retries: 30
+      delay: 2
 
-    # Configure IPFS API to listen on all interfaces so pinning service can reach it
+    # Configure IPFS API to listen on all interfaces BEFORE health check
+    # The API won't be reachable from host until this is done
     - name: Check IPFS API listen address
       command: docker exec ipfs ipfs config Addresses.API
       register: ipfs_api_addr
@@ -194,17 +193,18 @@
 
         - name: Start IPFS after config change
           command: docker start ipfs
-
-        - name: Wait for IPFS to be ready after config
-          uri:
-            url: http://127.0.0.1:5001/api/v0/id
-            method: POST
-            status_code: [200]
-          register: ipfs_reconfig_health
-          until: ipfs_reconfig_health.status == 200
-          retries: 30
-          delay: 2
       when: "'/ip4/0.0.0.0/' not in ipfs_api_addr.stdout"
+
+    # NOW health check - API should be reachable
+    - name: Wait for IPFS API to be ready
+      uri:
+        url: http://127.0.0.1:5001/api/v0/id
+        method: POST
+        status_code: [200]
+      register: ipfs_health
+      until: ipfs_health.status == 200
+      retries: 30
+      delay: 2
 
     - name: Wait for pinning service to be ready
       uri:
