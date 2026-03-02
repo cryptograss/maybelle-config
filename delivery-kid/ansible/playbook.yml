@@ -160,6 +160,11 @@
         recreate: always
         state: present
 
+    # IPFS with Storage Box mount takes time to initialize
+    - name: Wait for containers to stabilize
+      pause:
+        seconds: 15
+
     - name: Wait for IPFS to initialize
       uri:
         url: http://127.0.0.1:5001/api/v0/id
@@ -167,8 +172,8 @@
         status_code: [200]
       register: ipfs_health
       until: ipfs_health.status == 200
-      retries: 30
-      delay: 2
+      retries: 45
+      delay: 4
 
     # Configure IPFS API to listen on all interfaces so pinning service can reach it
     - name: Check IPFS API listen address
