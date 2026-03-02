@@ -22,14 +22,6 @@
     authorized_wallets_config: "{{ lookup('file', playbook_dir + '/../../maybelle/pinning-service/authorized-wallets.json') | from_json }}"
     pinning_authorized_wallets: "{{ authorized_wallets_config.wallets | map(attribute='address') | join(',') }}"
 
-  pre_tasks:
-    - name: Install community.docker collection
-      command: ansible-galaxy collection install community.docker
-      delegate_to: localhost
-      become: no
-      changed_when: false
-      run_once: true
-
   tasks:
     - name: Deploy SSH login banner
       copy:
