@@ -161,7 +161,7 @@
 
     # Wait for IPFS container to be running (not API - that won't work until configured)
     - name: Wait for IPFS container to start
-      command: docker inspect -f '{{.State.Running}}' ipfs
+      command: docker inspect -f '{% raw %}{{.State.Running}}{% endraw %}' ipfs
       register: ipfs_container_state
       until: ipfs_container_state.stdout == 'true'
       retries: 30
