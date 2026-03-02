@@ -157,6 +157,7 @@
       community.docker.docker_compose_v2:
         project_src: /opt/pinning-service
         build: always
+        recreate: always
         state: present
 
     - name: Wait for pinning service to be ready
