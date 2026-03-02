@@ -169,11 +169,23 @@
       retries: 30
       delay: 2
 
-    # Caddy reverse proxy
+    # Caddy reverse proxy - install from official repo (not Ubuntu's)
+    - name: Add Caddy GPG key
+      apt_key:
+        url: https://dl.cloudsmith.io/public/caddy/stable/gpg.key
+        state: present
+
+    - name: Add Caddy repository
+      apt_repository:
+        repo: "deb https://dl.cloudsmith.io/public/caddy/stable/deb/debian any-version main"
+        state: present
+        filename: caddy-stable
+
     - name: Install Caddy
       apt:
         name: caddy
         state: present
+        update_cache: yes
 
     - name: Configure Caddy
       copy:
@@ -196,10 +208,16 @@
               reverse_proxy localhost:8080
           }
         mode: '0644'
-      notify: Reload Caddy
+      notify: Restart Caddy
 
-  handlers:
-    - name: Reload Caddy
+    - name: Start and enable Caddy
       systemd:
         name: caddy
-        state: reloaded
+        state: started
+        enabled: yes
+
+  handlers:
+    - name: Restart Caddy
+      systemd:
+        name: caddy
+        state: restarted
