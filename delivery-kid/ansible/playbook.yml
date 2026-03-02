@@ -157,13 +157,7 @@
       community.docker.docker_compose_v2:
         project_src: /opt/pinning-service
         build: always
-        recreate: always
         state: present
-
-    # IPFS with Storage Box mount takes time to initialize
-    - name: Wait for containers to stabilize
-      pause:
-        seconds: 15
 
     - name: Wait for IPFS to initialize
       uri:
