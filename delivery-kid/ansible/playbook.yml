@@ -268,12 +268,15 @@
           {{ domain_name }} {
               route {
                   reverse_proxy /health localhost:3001
+                  reverse_proxy /version localhost:3001
                   reverse_proxy /time localhost:3001
                   reverse_proxy /local-pins localhost:3001
                   reverse_proxy /pin* localhost:3001
                   reverse_proxy /transcode* localhost:3001
                   reverse_proxy /job* localhost:3001
                   reverse_proxy /webhook/* localhost:3001
+                  reverse_proxy /sync/* localhost:3001
+                  reverse_proxy /releases localhost:3001
                   respond "delivery-kid pinning service" 200
               }
           }
