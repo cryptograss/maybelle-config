@@ -250,3 +250,112 @@ export async function updateSubmissionCid(submissionId, ipfsCid) {
 export function isWikiConfigured() {
   return !!(WIKI_BOT_USER && WIKI_BOT_PASSWORD);
 }
+
+/**
+ * Create a Release page with YAML content.
+ * @param {Object} metadata - Release metadata
+ * @param {string} metadata.title - Track/release title
+ * @param {string} metadata.ipfs_cid - Primary CID (streaming format)
+ * @param {string} [metadata.ipfs_cid_lossless] - Lossless CID (FLAC)
+ * @param {string} [metadata.album] - Album name
+ * @param {string} [metadata.artist] - Artist name
+ * @param {number} [metadata.track_number] - Track number in album
+ * @param {string} [metadata.file_type] - MIME type (audio/ogg, video/webm, etc.)
+ * @param {number} [metadata.file_size] - File size in bytes
+ * @param {string} [metadata.description] - Description
+ * @returns {Object} Result with page_title and action
+ */
+export async function createReleasePage(metadata) {
+  if (!metadata.title || !metadata.ipfs_cid) {
+    throw new Error('Release requires at least title and ipfs_cid');
+  }
+
+  // Ensure we're logged in
+  if (!editToken) {
+    await login();
+  }
+
+  // Generate page title from CID (canonical identifier)
+  const pageTitle = `Release:${metadata.ipfs_cid}`;
+
+  // Build YAML content
+  const yamlLines = [];
+  yamlLines.push(`title: ${metadata.title}`);
+  yamlLines.push(`ipfs_cid: ${metadata.ipfs_cid}`);
+
+  if (metadata.ipfs_cid_lossless) {
+    yamlLines.push(`ipfs_cid_lossless: ${metadata.ipfs_cid_lossless}`);
+  }
+  if (metadata.album) {
+    yamlLines.push(`album: ${metadata.album}`);
+  }
+  if (metadata.artist) {
+    yamlLines.push(`artist: ${metadata.artist}`);
+  }
+  if (metadata.track_number) {
+    yamlLines.push(`track_number: ${metadata.track_number}`);
+  }
+  if (metadata.file_type) {
+    yamlLines.push(`file_type: ${metadata.file_type}`);
+  }
+  if (metadata.file_size) {
+    yamlLines.push(`file_size: ${metadata.file_size}`);
+  }
+  if (metadata.description) {
+    yamlLines.push(`description: ${metadata.description}`);
+  }
+  yamlLines.push(`created_at: ${new Date().toISOString()}`);
+
+  const yamlContent = yamlLines.join('\n');
+
+  // Check if page already exists
+  const existingContent = await getPageContent(pageTitle);
+  if (existingContent) {
+    console.log(`[wiki] Release page already exists: ${pageTitle}`);
+    return {
+      action: 'exists',
+      page_title: pageTitle,
+      message: 'Release page already exists'
+    };
+  }
+
+  // Create the page with release-yaml content model
+  const url = `${WIKI_URL}/api.php`;
+  const params = new URLSearchParams({
+    action: 'edit',
+    title: pageTitle,
+    text: yamlContent,
+    contentmodel: 'release-yaml',
+    summary: `Create release: ${metadata.title}`,
+    token: editToken,
+    format: 'json'
+  });
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'Cookie': cookies
+    },
+    body: params.toString()
+  });
+
+  const data = await response.json();
+
+  if (data.error) {
+    if (data.error.code === 'badtoken') {
+      editToken = null;
+      await login();
+      return createReleasePage(metadata);
+    }
+    throw new Error(`Wiki create failed: ${data.error.info}`);
+  }
+
+  console.log(`[wiki] Created release page: ${pageTitle}`);
+
+  return {
+    action: 'created',
+    page_title: pageTitle,
+    message: `Created release: ${metadata.title}`
+  };
+}

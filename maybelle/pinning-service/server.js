@@ -9,7 +9,7 @@ import FormData from 'form-data';
 import Hash from 'ipfs-only-hash';
 import { CID } from 'multiformats/cid';
 import { requireWalletAuth } from './auth.js';
-import { updateSubmissionCid, isWikiConfigured } from './wiki-update.js';
+import { updateSubmissionCid, isWikiConfigured, createReleasePage } from './wiki-update.js';
 import { getAllReleases, syncReleases, getSyncStatus } from './wiki-sync.js';
 import { getTorrentSummary, addTorrentByInfohash, getActiveInfohashes, isAria2Available } from './aria2-client.js';
 
@@ -217,6 +217,55 @@ async function transcodeIfNeeded(inputPath, onProgress = null) {
     // Fall back to original file
     try { unlinkSync(outputPath); } catch (e) { /* ignore */ }
     return { path: inputPath, transcoded: false, error: error.message };
+  }
+}
+
+/**
+ * Transcode audio to OGG Vorbis for streaming.
+ * @param {string} inputPath - Path to input audio file (FLAC, WAV, etc.)
+ * @param {number} quality - Vorbis quality (0-10, default 6 ≈ ~192kbps)
+ * @returns {Object} { path, transcoded, originalSize, newSize }
+ */
+async function transcodeAudioToOgg(inputPath, quality = 6) {
+  const stats = statSync(inputPath);
+  const sizeMB = stats.size / 1024 / 1024;
+  const ext = inputPath.split('.').pop().toLowerCase();
+
+  // Skip if already OGG
+  if (ext === 'ogg') {
+    console.log(`File is already OGG, skipping transcode`);
+    return { path: inputPath, transcoded: false };
+  }
+
+  console.log(`Transcoding ${sizeMB.toFixed(1)}MB ${ext.toUpperCase()} to OGG Vorbis (quality ${quality})...`);
+
+  const outputPath = inputPath.replace(/\.[^.]+$/, '.ogg');
+
+  try {
+    // Transcode to OGG Vorbis:
+    // - libvorbis encoder with quality setting (6 ≈ 192kbps VBR)
+    // - Preserve metadata with -map_metadata
+    execSync(`ffmpeg -i "${inputPath}" -c:a libvorbis -q:a ${quality} -map_metadata 0 -y "${outputPath}"`, {
+      stdio: 'pipe',
+      timeout: 300000 // 5 minute timeout
+    });
+
+    const newStats = statSync(outputPath);
+    const newSizeMB = newStats.size / 1024 / 1024;
+    const reduction = ((1 - newStats.size/stats.size) * 100).toFixed(0);
+    console.log(`Transcoded audio: ${sizeMB.toFixed(1)}MB -> ${newSizeMB.toFixed(1)}MB (${reduction}% reduction)`);
+
+    return {
+      path: outputPath,
+      transcoded: true,
+      originalSize: stats.size,
+      newSize: newStats.size,
+      originalPath: inputPath
+    };
+  } catch (error) {
+    console.error('Audio transcoding failed:', error.message);
+    try { unlinkSync(outputPath); } catch (e) { /* ignore */ }
+    throw new Error(`Audio transcoding failed: ${error.message}`);
   }
 }
 
@@ -1453,6 +1502,191 @@ app.post('/torrents/sync', requireWalletAuth, async (req, res) => {
 
     res.json(results);
   } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// =============================================================================
+// Album Upload - Upload FLAC files, transcode to OGG, create Release pages
+// =============================================================================
+
+// Configure multer for album uploads (multiple files)
+const albumUpload = multer({
+  dest: STAGING_DIR,
+  limits: { fileSize: 500 * 1024 * 1024 } // 500MB per file
+});
+
+/**
+ * Upload album tracks, transcode to OGG, pin both formats, create Release pages.
+ *
+ * Request body (multipart/form-data):
+ * - files: FLAC files (multiple)
+ * - album: Album name
+ * - artist: Artist name
+ * - track_names: JSON array of track names (order matches files)
+ *
+ * Returns array of Release page results.
+ */
+app.post('/upload-album', requireWalletAuth, albumUpload.array('files', 50), async (req, res) => {
+  const files = req.files;
+  const { album, artist, track_names } = req.body;
+
+  if (!files || files.length === 0) {
+    return res.status(400).json({ error: 'No files uploaded' });
+  }
+
+  if (!album) {
+    return res.status(400).json({ error: 'Album name is required' });
+  }
+
+  let trackNames = [];
+  if (track_names) {
+    try {
+      trackNames = JSON.parse(track_names);
+    } catch (e) {
+      return res.status(400).json({ error: 'track_names must be valid JSON array' });
+    }
+  }
+
+  const results = [];
+
+  try {
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      const trackNumber = i + 1;
+      const originalName = file.originalname;
+
+      // Use provided track name or derive from filename
+      const trackName = trackNames[i] || originalName.replace(/\.[^.]+$/, '').replace(/_/g, ' ');
+
+      console.log(`[album] Processing track ${trackNumber}/${files.length}: ${trackName}`);
+
+      try {
+        // 1. Transcode FLAC to OGG
+        const transcodeResult = await transcodeAudioToOgg(file.path, 6);
+        const oggPath = transcodeResult.path;
+        const flacPath = transcodeResult.originalPath || file.path;
+
+        // 2. Pin OGG to IPFS (streaming version)
+        const oggBuffer = readFileSync(oggPath);
+        const oggCid = await Hash.of(oggBuffer);
+        console.log(`[album] OGG CID: ${oggCid}`);
+
+        // Pin to local IPFS
+        const oggFormData = new FormData();
+        oggFormData.append('file', createReadStream(oggPath), { filename: `${trackName}.ogg` });
+        await fetch(`${IPFS_API_URL}/api/v0/add?pin=true`, {
+          method: 'POST',
+          body: oggFormData
+        });
+
+        // 3. Pin FLAC to IPFS (lossless version)
+        let flacCid = null;
+        if (transcodeResult.transcoded && existsSync(flacPath)) {
+          const flacBuffer = readFileSync(flacPath);
+          flacCid = await Hash.of(flacBuffer);
+          console.log(`[album] FLAC CID: ${flacCid}`);
+
+          const flacFormData = new FormData();
+          flacFormData.append('file', createReadStream(flacPath), { filename: originalName });
+          await fetch(`${IPFS_API_URL}/api/v0/add?pin=true`, {
+            method: 'POST',
+            body: flacFormData
+          });
+        }
+
+        // 4. Pin to Pinata (OGG for streaming)
+        let pinataCid = null;
+        if (PINATA_JWT) {
+          try {
+            const pinataFormData = new FormData();
+            pinataFormData.append('file', createReadStream(oggPath), { filename: `${trackName}.ogg` });
+            pinataFormData.append('pinataMetadata', JSON.stringify({
+              name: `${album} - ${trackName}`,
+              keyvalues: { album, artist, track_number: trackNumber }
+            }));
+
+            const pinataResponse = await fetch('https://api.pinata.cloud/pinning/pinFileToIPFS', {
+              method: 'POST',
+              headers: { 'Authorization': `Bearer ${PINATA_JWT}` },
+              body: pinataFormData
+            });
+
+            if (pinataResponse.ok) {
+              const pinataData = await pinataResponse.json();
+              pinataCid = pinataData.IpfsHash;
+              console.log(`[album] Pinata CID: ${pinataCid}`);
+            }
+          } catch (pinataError) {
+            console.error(`[album] Pinata upload failed: ${pinataError.message}`);
+          }
+        }
+
+        // 5. Create Release page on wiki
+        let releaseResult = { action: 'skipped', message: 'Wiki not configured' };
+        if (isWikiConfigured()) {
+          releaseResult = await createReleasePage({
+            title: trackName,
+            ipfs_cid: oggCid,
+            ipfs_cid_lossless: flacCid,
+            album: album,
+            artist: artist || 'Unknown Artist',
+            track_number: trackNumber,
+            file_type: 'audio/ogg',
+            file_size: statSync(oggPath).size
+          });
+        }
+
+        // 6. Cleanup temp files
+        try { unlinkSync(oggPath); } catch (e) { /* ignore */ }
+        if (flacPath !== file.path) {
+          try { unlinkSync(flacPath); } catch (e) { /* ignore */ }
+        }
+        try { unlinkSync(file.path); } catch (e) { /* ignore */ }
+
+        results.push({
+          track_number: trackNumber,
+          title: trackName,
+          ogg_cid: oggCid,
+          flac_cid: flacCid,
+          pinata_cid: pinataCid,
+          release_page: releaseResult.page_title,
+          release_action: releaseResult.action,
+          status: 'success'
+        });
+
+      } catch (trackError) {
+        console.error(`[album] Track ${trackNumber} failed:`, trackError.message);
+        // Cleanup on error
+        try { unlinkSync(file.path); } catch (e) { /* ignore */ }
+
+        results.push({
+          track_number: trackNumber,
+          title: trackName,
+          status: 'error',
+          error: trackError.message
+        });
+      }
+    }
+
+    const successful = results.filter(r => r.status === 'success').length;
+    const failed = results.filter(r => r.status === 'error').length;
+
+    res.json({
+      album,
+      artist,
+      total_tracks: files.length,
+      successful,
+      failed,
+      tracks: results
+    });
+
+  } catch (error) {
+    console.error('[album] Upload failed:', error);
+    // Cleanup any remaining files
+    for (const file of files) {
+      try { unlinkSync(file.path); } catch (e) { /* ignore */ }
+    }
     res.status(500).json({ error: error.message });
   }
 });
