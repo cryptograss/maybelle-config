@@ -382,6 +382,9 @@ app.post('/pin-from-url-stream', requireWalletAuth, async (req, res) => {
     // Pin to Pinata and local IPFS (with progress callback)
     const result = await pinFile(fileToPin, filename, onProgress);
 
+    // Get final file size before cleanup
+    const finalFileSize = transcodeResult.transcoded ? transcodeResult.newSize : statSync(fileToPin).size;
+
     // Add transcoding info to response
     if (transcodeResult.transcoded) {
       result.transcoded = true;
@@ -394,9 +397,23 @@ app.post('/pin-from-url-stream', requireWalletAuth, async (req, res) => {
 
     // Update wiki if submissionId provided (persist CID to PickiPedia)
     let wikiUpdate = null;
+    let releaseResult = null;
     if (submissionId && isWikiConfigured()) {
       try {
-        sendEvent({ stage: 'wiki-update', message: 'Saving CID to PickiPedia...', progress: 95 });
+        // Create Release page first
+        sendEvent({ stage: 'wiki-update', message: 'Creating Release page...', progress: 93 });
+        const releaseMetadata = {
+          title: `Blue Railroad Submission ${submissionId}`,
+          ipfs_cid: result.cid,
+          file_type: 'video/webm',
+          file_size: finalFileSize,
+          description: `Video from Blue Railroad Submission #${submissionId}`
+        };
+        releaseResult = await createReleasePage(releaseMetadata);
+        console.log(`[stream] Release page: ${releaseResult.action} - ${releaseResult.message}`);
+
+        // Then update the submission to reference the CID
+        sendEvent({ stage: 'wiki-update', message: 'Updating submission page...', progress: 96 });
         wikiUpdate = await updateSubmissionCid(submissionId, result.cid);
         console.log(`[stream] Wiki update: ${wikiUpdate.action} - ${wikiUpdate.message}`);
       } catch (wikiError) {
@@ -418,6 +435,7 @@ app.post('/pin-from-url-stream', requireWalletAuth, async (req, res) => {
       transcodedSize: result.transcodedSize,
       gatewayUrl: result.gatewayUrl,
       wikiUpdate: wikiUpdate,
+      releaseCreated: releaseResult,
       progress: 100
     });
 
