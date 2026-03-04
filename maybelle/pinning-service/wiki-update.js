@@ -4,6 +4,7 @@
  */
 
 import fetch from 'node-fetch';
+import YAML from 'js-yaml';
 
 const WIKI_URL = process.env.WIKI_URL || 'https://pickipedia.xyz';
 const WIKI_BOT_USER = process.env.WIKI_BOT_USER;
@@ -278,35 +279,24 @@ export async function createReleasePage(metadata) {
   // Generate page title from CID (canonical identifier)
   const pageTitle = `Release:${metadata.ipfs_cid}`;
 
-  // Build YAML content
-  const yamlLines = [];
-  yamlLines.push(`title: ${metadata.title}`);
-  yamlLines.push(`ipfs_cid: ${metadata.ipfs_cid}`);
+  // Build YAML content safely using js-yaml to prevent injection
+  const yamlData = {
+    title: metadata.title,
+    ipfs_cid: metadata.ipfs_cid
+  };
 
-  if (metadata.ipfs_cid_lossless) {
-    yamlLines.push(`ipfs_cid_lossless: ${metadata.ipfs_cid_lossless}`);
-  }
-  if (metadata.album) {
-    yamlLines.push(`album: ${metadata.album}`);
-  }
-  if (metadata.artist) {
-    yamlLines.push(`artist: ${metadata.artist}`);
-  }
-  if (metadata.track_number) {
-    yamlLines.push(`track_number: ${metadata.track_number}`);
-  }
-  if (metadata.file_type) {
-    yamlLines.push(`file_type: ${metadata.file_type}`);
-  }
-  if (metadata.file_size) {
-    yamlLines.push(`file_size: ${metadata.file_size}`);
-  }
-  if (metadata.description) {
-    yamlLines.push(`description: ${metadata.description}`);
-  }
-  yamlLines.push(`created_at: ${new Date().toISOString()}`);
+  // Add optional fields if present
+  if (metadata.ipfs_cid_lossless) yamlData.ipfs_cid_lossless = metadata.ipfs_cid_lossless;
+  if (metadata.album) yamlData.album = metadata.album;
+  if (metadata.artist) yamlData.artist = metadata.artist;
+  if (metadata.track_number) yamlData.track_number = metadata.track_number;
+  if (metadata.file_type) yamlData.file_type = metadata.file_type;
+  if (metadata.file_size) yamlData.file_size = metadata.file_size;
+  if (metadata.description) yamlData.description = metadata.description;
+  yamlData.created_at = new Date().toISOString();
 
-  const yamlContent = yamlLines.join('\n');
+  // Use YAML.dump for safe serialization (handles special chars, newlines, etc.)
+  const yamlContent = YAML.dump(yamlData, { lineWidth: -1 });
 
   // Check if page already exists
   const existingContent = await getPageContent(pageTitle);

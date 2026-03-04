@@ -2,7 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import multer from 'multer';
 import { execSync, spawn } from 'child_process';
-import { createReadStream, readFileSync, statSync, unlinkSync, existsSync, writeFileSync, readdirSync, copyFileSync } from 'fs';
+import { createReadStream, readFileSync, statSync, unlinkSync, existsSync, writeFileSync, readdirSync, copyFileSync, openSync, readSync, closeSync } from 'fs';
 import { join } from 'path';
 import fetch from 'node-fetch';
 import FormData from 'form-data';
@@ -269,6 +269,74 @@ async function transcodeAudioToOgg(inputPath, quality = 6) {
   }
 }
 
+/**
+ * Safely download video using yt-dlp with proper argument escaping.
+ * Uses spawn() to avoid shell injection vulnerabilities.
+ */
+function downloadWithYtDlp(url, outputTemplate, timeoutMs = 300000) {
+  return new Promise((resolve, reject) => {
+    // Validate URL format to prevent obvious abuse
+    try {
+      new URL(url);
+    } catch (e) {
+      return reject(new Error('Invalid URL format'));
+    }
+
+    const args = ['-o', outputTemplate, '--no-playlist', url];
+    const proc = spawn('yt-dlp', args, { stdio: 'pipe' });
+
+    let stderr = '';
+    proc.stderr.on('data', (data) => { stderr += data.toString(); });
+
+    const timeout = setTimeout(() => {
+      proc.kill('SIGKILL');
+      reject(new Error('Download timed out'));
+    }, timeoutMs);
+
+    proc.on('close', (code) => {
+      clearTimeout(timeout);
+      if (code === 0) {
+        resolve();
+      } else {
+        reject(new Error(`yt-dlp exited with code ${code}: ${stderr.slice(0, 500)}`));
+      }
+    });
+
+    proc.on('error', (err) => {
+      clearTimeout(timeout);
+      reject(err);
+    });
+  });
+}
+
+/**
+ * Find downloaded file by prefix (replaces unsafe glob pattern).
+ * yt-dlp adds extension, so we search for files starting with our prefix.
+ */
+function findDownloadedFile(prefix) {
+  const dir = prefix.substring(0, prefix.lastIndexOf('/'));
+  const base = prefix.substring(prefix.lastIndexOf('/') + 1);
+  const files = readdirSync(dir).filter(f => f.startsWith(base));
+  if (files.length === 0) {
+    return null;
+  }
+  return join(dir, files[0]);
+}
+
+/**
+ * Cleanup files matching a prefix (replaces unsafe rm glob).
+ */
+function cleanupByPrefix(prefix) {
+  const dir = prefix.substring(0, prefix.lastIndexOf('/'));
+  const base = prefix.substring(prefix.lastIndexOf('/') + 1);
+  try {
+    const files = readdirSync(dir).filter(f => f.startsWith(base));
+    for (const f of files) {
+      try { unlinkSync(join(dir, f)); } catch (e) { /* ignore */ }
+    }
+  } catch (e) { /* ignore */ }
+}
+
 // Download video from URL (Instagram, YouTube, etc.) and pin to IPFS
 app.post('/pin-from-url', requireWalletAuth, async (req, res) => {
   const { url } = req.body;
@@ -282,24 +350,17 @@ app.post('/pin-from-url', requireWalletAuth, async (req, res) => {
   try {
     console.log(`Downloading from: ${url}`);
 
-    // Use yt-dlp to download the video
-    // Output template ensures we get a predictable filename
+    // Use yt-dlp to download the video (safe spawn, no shell injection)
     const outputTemplate = `${tempFile}.%(ext)s`;
-
-    execSync(`yt-dlp -o "${outputTemplate}" --no-playlist "${url}"`, {
-      stdio: 'pipe',
-      timeout: 300000 // 5 minute timeout
-    });
+    await downloadWithYtDlp(url, outputTemplate);
 
     // Find the downloaded file (yt-dlp adds extension)
-    const files = execSync(`ls ${tempFile}.*`).toString().trim().split('\n');
-    if (files.length === 0 || !files[0]) {
+    const downloadedFile = findDownloadedFile(tempFile);
+    if (!downloadedFile) {
       throw new Error('Download completed but file not found');
     }
 
-    const downloadedFile = files[0];
     const filename = downloadedFile.split('/').pop();
-
     console.log(`Downloaded: ${filename}`);
 
     // Pin to Pinata and local IPFS
@@ -312,10 +373,7 @@ app.post('/pin-from-url', requireWalletAuth, async (req, res) => {
 
   } catch (error) {
     console.error('Error processing URL:', error.message);
-    // Cleanup any partial downloads
-    try {
-      execSync(`rm -f ${tempFile}.*`);
-    } catch (e) { /* ignore */ }
+    cleanupByPrefix(tempFile);
 
     res.status(500).json({
       error: 'Failed to download or pin video',
@@ -356,21 +414,16 @@ app.post('/pin-from-url-stream', requireWalletAuth, async (req, res) => {
     console.log(`[stream] Downloading from: ${url}`);
     sendEvent({ stage: 'downloading', message: 'Downloading video...', progress: 10 });
 
-    // Use yt-dlp to download the video
+    // Use yt-dlp to download the video (safe spawn, no shell injection)
     const outputTemplate = `${tempFile}.%(ext)s`;
-
-    execSync(`yt-dlp -o "${outputTemplate}" --no-playlist "${url}"`, {
-      stdio: 'pipe',
-      timeout: 300000 // 5 minute timeout
-    });
+    await downloadWithYtDlp(url, outputTemplate);
 
     // Find the downloaded file (yt-dlp adds extension)
-    const files = execSync(`ls ${tempFile}.*`).toString().trim().split('\n');
-    if (files.length === 0 || !files[0]) {
+    const downloadedFile = findDownloadedFile(tempFile);
+    if (!downloadedFile) {
       throw new Error('Download completed but file not found');
     }
 
-    const downloadedFile = files[0];
     console.log(`[stream] Downloaded: ${downloadedFile.split('/').pop()}`);
     sendEvent({ stage: 'downloaded', message: 'Video downloaded', progress: 25 });
 
@@ -444,9 +497,7 @@ app.post('/pin-from-url-stream', requireWalletAuth, async (req, res) => {
   } catch (error) {
     console.error('[stream] Error processing URL:', error.message);
     // Cleanup any partial downloads
-    try {
-      execSync(`rm -f ${tempFile}.*`);
-    } catch (e) { /* ignore */ }
+    cleanupByPrefix(tempFile);
 
     sendEvent({
       stage: 'error',
@@ -1535,6 +1586,65 @@ const albumUpload = multer({
 });
 
 /**
+ * Sanitize a string for use as a filename.
+ * Removes path traversal characters and other problematic chars.
+ */
+function sanitizeFilename(name) {
+  return name
+    .replace(/[\/\\]/g, '-')      // Replace path separators
+    .replace(/\.\./g, '')         // Remove parent directory references
+    .replace(/[<>:"|?*\x00-\x1f]/g, '') // Remove invalid filename chars
+    .trim()
+    .slice(0, 200);               // Limit length
+}
+
+// Audio file magic bytes for validation
+const AUDIO_MAGIC_BYTES = {
+  'fLaC': 'audio/flac',      // FLAC
+  'OggS': 'audio/ogg',       // OGG (Vorbis/Opus)
+  'ID3':  'audio/mpeg',      // MP3 with ID3 tag
+  '\xFF\xFB': 'audio/mpeg',  // MP3 frame sync
+  '\xFF\xFA': 'audio/mpeg',  // MP3 frame sync
+  '\xFF\xF3': 'audio/mpeg',  // MP3 frame sync
+  '\xFF\xF2': 'audio/mpeg',  // MP3 frame sync
+  'RIFF': 'audio/wav',       // WAV (need to check for WAVE)
+};
+
+/**
+ * Validate that a file is an audio file by checking magic bytes.
+ * Returns the detected MIME type or null if not recognized.
+ */
+function validateAudioFile(filePath) {
+  // Read first 12 bytes to check magic bytes
+  const buffer = Buffer.alloc(12);
+  const fd = openSync(filePath, 'r');
+  readSync(fd, buffer, 0, 12, 0);
+  closeSync(fd);
+
+  const header = buffer.toString('latin1', 0, 4);
+
+  // Check FLAC
+  if (header === 'fLaC') return 'audio/flac';
+
+  // Check OGG
+  if (header === 'OggS') return 'audio/ogg';
+
+  // Check ID3 (MP3 with tags)
+  if (header.startsWith('ID3')) return 'audio/mpeg';
+
+  // Check MP3 frame sync (no ID3)
+  if (buffer[0] === 0xFF && (buffer[1] & 0xE0) === 0xE0) return 'audio/mpeg';
+
+  // Check WAV (RIFF....WAVE)
+  if (header === 'RIFF' && buffer.toString('latin1', 8, 12) === 'WAVE') return 'audio/wav';
+
+  // Check AIFF
+  if (header === 'FORM' && buffer.toString('latin1', 8, 12) === 'AIFF') return 'audio/aiff';
+
+  return null;
+}
+
+/**
  * Upload album tracks, transcode to OGG, pin both formats, create Release pages.
  *
  * Request body (multipart/form-data):
@@ -1568,14 +1678,30 @@ app.post('/upload-album', requireWalletAuth, albumUpload.array('files', 50), asy
 
   const results = [];
 
+  // Validate all files are audio before processing
+  for (const file of files) {
+    const mimeType = validateAudioFile(file.path);
+    if (!mimeType) {
+      // Cleanup all uploaded files
+      for (const f of files) {
+        try { unlinkSync(f.path); } catch (e) { /* ignore */ }
+      }
+      return res.status(400).json({
+        error: `Invalid audio file: ${file.originalname}`,
+        details: 'File does not appear to be a valid audio file (FLAC, OGG, MP3, WAV, or AIFF)'
+      });
+    }
+  }
+
   try {
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
       const trackNumber = i + 1;
       const originalName = file.originalname;
 
-      // Use provided track name or derive from filename
-      const trackName = trackNames[i] || originalName.replace(/\.[^.]+$/, '').replace(/_/g, ' ');
+      // Use provided track name or derive from filename, then sanitize for safe filename use
+      const rawTrackName = trackNames[i] || originalName.replace(/\.[^.]+$/, '').replace(/_/g, ' ');
+      const trackName = sanitizeFilename(rawTrackName);
 
       console.log(`[album] Processing track ${trackNumber}/${files.length}: ${trackName}`);
 
