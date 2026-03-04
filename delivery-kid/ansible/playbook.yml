@@ -244,6 +244,53 @@
       retries: 30
       delay: 2
 
+    # Configure CORS for IPFS WebUI access
+    - name: Check if IPFS API CORS is configured
+      command: docker exec ipfs ipfs config API.HTTPHeaders.Access-Control-Allow-Origin
+      register: ipfs_cors_check
+      changed_when: false
+      failed_when: false
+
+    - name: Configure IPFS API CORS
+      block:
+        - name: Stop IPFS for CORS config
+          command: docker stop ipfs
+
+        - name: Remove stale repo lock
+          file:
+            path: /var/lib/ipfs/repo.lock
+            state: absent
+
+        - name: Configure IPFS API CORS origins
+          command: >
+            docker run --rm
+            -v /var/lib/ipfs:/data/ipfs
+            -v /mnt/storage-box/ipfs/blocks:/data/ipfs/blocks
+            ipfs/kubo:latest
+            config --json API.HTTPHeaders.Access-Control-Allow-Origin '["https://{{ ipfs_admin_domain }}", "http://localhost:5001", "http://127.0.0.1:5001"]'
+
+        - name: Configure IPFS API CORS methods
+          command: >
+            docker run --rm
+            -v /var/lib/ipfs:/data/ipfs
+            -v /mnt/storage-box/ipfs/blocks:/data/ipfs/blocks
+            ipfs/kubo:latest
+            config --json API.HTTPHeaders.Access-Control-Allow-Methods '["PUT", "POST", "GET"]'
+
+        - name: Start IPFS after CORS config
+          command: docker start ipfs
+
+        - name: Wait for IPFS to be ready after CORS config
+          uri:
+            url: http://127.0.0.1:5001/api/v0/id
+            method: POST
+            status_code: [200]
+          register: ipfs_cors_health
+          until: ipfs_cors_health.status == 200
+          retries: 30
+          delay: 2
+      when: "ipfs_admin_domain not in (ipfs_cors_check.stdout | default(''))"
+
     # Caddy reverse proxy - install from official repo (not Ubuntu's)
     - name: Add Caddy GPG key
       apt_key:
