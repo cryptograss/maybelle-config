@@ -18,6 +18,7 @@
   vars:
     domain_name: "delivery-kid.cryptograss.live"
     ipfs_gateway_domain: "ipfs.delivery-kid.cryptograss.live"
+    ipfs_admin_domain: "ipfs-admin.delivery-kid.cryptograss.live"
     # Pinning service authorized wallets - same as maybelle
     authorized_wallets_config: "{{ lookup('file', playbook_dir + '/../../maybelle/pinning-service/authorized-wallets.json') | from_json }}"
     pinning_authorized_wallets: "{{ authorized_wallets_config.wallets | map(attribute='address') | join(',') }}"
@@ -261,6 +262,17 @@
         state: present
         update_cache: yes
 
+    # Generate password hash for IPFS admin (using same password as maybelle)
+    - name: Generate IPFS admin password hash
+      command: docker run --rm caddy caddy hash-password --plaintext '{{ maybelle_ipfs_admin_password }}'
+      register: ipfs_password_hash_result
+      changed_when: false
+      no_log: true
+
+    - name: Set IPFS admin password hash fact
+      set_fact:
+        ipfs_admin_password_hash: "{{ ipfs_password_hash_result.stdout }}"
+
     - name: Configure Caddy
       copy:
         dest: /etc/caddy/Caddyfile
@@ -283,6 +295,14 @@
 
           {{ ipfs_gateway_domain }} {
               reverse_proxy localhost:8080
+          }
+
+          # IPFS admin/WebUI (authenticated)
+          {{ ipfs_admin_domain }} {
+              basicauth {
+                  admin {{ ipfs_admin_password_hash }}
+              }
+              reverse_proxy localhost:5001
           }
         mode: '0644'
       notify: Restart Caddy
