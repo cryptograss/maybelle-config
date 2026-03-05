@@ -73,6 +73,51 @@ function isValidEmail(email) {
     return emailRegex.test(email) && email.length <= 254;
 }
 
+// Disposable email domains to block
+const DISPOSABLE_DOMAINS = [
+    'tempmail.com', 'throwaway.email', 'guerrillamail.com', 'mailinator.com',
+    '10minutemail.com', 'temp-mail.org', 'fakeinbox.com', 'trashmail.com',
+    'yopmail.com', 'sharklasers.com', 'getnada.com', 'maildrop.cc'
+];
+
+function isDisposableEmail(email) {
+    const domain = email.split('@')[1]?.toLowerCase();
+    return DISPOSABLE_DOMAINS.some(d => domain === d || domain?.endsWith('.' + d));
+}
+
+// Detect suspicious content patterns
+function containsSuspiciousContent(text) {
+    if (!text) return false;
+    const suspicious = [
+        /<script/i,
+        /javascript:/i,
+        /onclick=/i,
+        /onerror=/i,
+        /onload=/i,
+        /eval\(/i,
+        /\x00/,  // null bytes
+    ];
+    return suspicious.some(pattern => pattern.test(text));
+}
+
+// Count URLs in text
+function countUrls(text) {
+    if (!text) return 0;
+    const urlPattern = /https?:\/\/[^\s]+/gi;
+    return (text.match(urlPattern) || []).length;
+}
+
+// Time-based validation (form must be open for at least 3 seconds)
+const MIN_FORM_TIME_MS = 3000;
+
+function isValidTimestamp(timestamp) {
+    if (!timestamp) return true; // Allow if not provided (backwards compat)
+    const formLoadTime = parseInt(timestamp, 10);
+    if (isNaN(formLoadTime)) return true;
+    const elapsed = Date.now() - formLoadTime;
+    return elapsed >= MIN_FORM_TIME_MS;
+}
+
 // ============================================
 // Middleware
 // ============================================
@@ -159,7 +204,13 @@ app.get('/health', (req, res) => {
 
 // Booking inquiry endpoint
 app.post('/inquiry', async (req, res) => {
-    const { name, email, message, website } = req.body;
+    const { name, email, message, website, _t } = req.body;
+
+    // SECURITY: Time-based check - bots submit instantly
+    if (!isValidTimestamp(_t)) {
+        console.log(`Too fast submission from ${getRateLimitKey(req)}`);
+        return res.json({ success: true, message: 'Inquiry received' }); // Silent fail
+    }
 
     // SECURITY: Honeypot field - bots often fill hidden fields
     if (website) {
@@ -181,6 +232,25 @@ app.post('/inquiry', async (req, res) => {
     // Validate email format
     if (!isValidEmail(cleanEmail)) {
         return res.status(400).json({ error: 'Invalid email address' });
+    }
+
+    // Block disposable emails
+    if (isDisposableEmail(cleanEmail)) {
+        console.log(`Blocked disposable email: ${cleanEmail} from ${getRateLimitKey(req)}`);
+        return res.status(400).json({ error: 'Please use a permanent email address' });
+    }
+
+    // Check for suspicious content (script injection attempts)
+    if (containsSuspiciousContent(cleanName) || containsSuspiciousContent(cleanMessage)) {
+        console.log(`Suspicious content blocked from ${getRateLimitKey(req)}`);
+        return res.status(400).json({ error: 'Invalid characters detected' });
+    }
+
+    // Flag excessive URLs (likely spam)
+    const urlCount = countUrls(cleanMessage);
+    if (urlCount > 3) {
+        console.log(`Excessive URLs (${urlCount}) blocked from ${getRateLimitKey(req)}`);
+        return res.status(400).json({ error: 'Too many links in message' });
     }
 
     const timestamp = new Date().toISOString();
@@ -210,7 +280,13 @@ ${escapeHtml(cleanMessage) || '(no message)'}
 
 // Mailing list signup endpoint
 app.post('/subscribe', async (req, res) => {
-    const { email, website } = req.body;
+    const { email, website, _t } = req.body;
+
+    // SECURITY: Time-based check - bots submit instantly
+    if (!isValidTimestamp(_t)) {
+        console.log(`Too fast submission from ${getRateLimitKey(req)}`);
+        return res.json({ success: true, message: 'Subscribed successfully' }); // Silent fail
+    }
 
     // SECURITY: Honeypot field
     if (website) {
@@ -226,6 +302,12 @@ app.post('/subscribe', async (req, res) => {
 
     if (!isValidEmail(cleanEmail)) {
         return res.status(400).json({ error: 'Invalid email address' });
+    }
+
+    // Block disposable emails
+    if (isDisposableEmail(cleanEmail)) {
+        console.log(`Blocked disposable email: ${cleanEmail} from ${getRateLimitKey(req)}`);
+        return res.status(400).json({ error: 'Please use a permanent email address' });
     }
 
     const timestamp = new Date().toISOString();
