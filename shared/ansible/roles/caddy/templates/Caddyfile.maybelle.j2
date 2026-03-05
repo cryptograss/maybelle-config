@@ -43,21 +43,4 @@ glitchtip-dsn.{{ domain_name }} {
     }
 }
 
-# Blue Railroad pinning service (video download + IPFS pinning)
-pinning.{{ domain_name }} {
-    reverse_proxy localhost:3001
-}
-
-# IPFS gateway (serves only pinned content)
-ipfs.{{ domain_name }} {
-    reverse_proxy localhost:8088
-}
-
-# IPFS admin/WebUI (authenticated)
-# Provides access to Kubo WebUI and API for pin management
-ipfs-admin.{{ domain_name }} {
-    basicauth {
-        admin {{ ipfs_admin_password_hash }}
-    }
-    reverse_proxy localhost:5001
-}
+# IPFS/Pinning service removed - now handled by delivery-kid.cryptograss.live
