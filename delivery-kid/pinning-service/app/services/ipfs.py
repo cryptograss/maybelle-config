@@ -166,3 +166,63 @@ async def get_local_pins() -> list[str]:
 
     except Exception:
         return []
+
+
+@dataclass
+class UnpinResult:
+    success: bool
+    local_unpinned: bool = False
+    pinata_unpinned: bool = False
+    error: Optional[str] = None
+
+
+async def unpin(cid: str) -> UnpinResult:
+    """
+    Unpin a CID from both local IPFS and Pinata.
+    """
+    settings = get_settings()
+    local_unpinned = False
+    pinata_unpinned = False
+    errors = []
+
+    # Unpin from local IPFS
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                f"{settings.ipfs_api_url}/api/v0/pin/rm",
+                params={"arg": cid}
+            )
+            if response.status_code == 200:
+                local_unpinned = True
+            else:
+                errors.append(f"Local unpin failed: {response.status_code} {response.text[:100]}")
+    except Exception as e:
+        errors.append(f"Local unpin error: {e}")
+
+    # Unpin from Pinata
+    if settings.pinata_jwt:
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.delete(
+                    f"https://api.pinata.cloud/pinning/unpin/{cid}",
+                    headers={
+                        "Authorization": f"Bearer {settings.pinata_jwt}"
+                    }
+                )
+                if response.status_code == 200:
+                    pinata_unpinned = True
+                elif response.status_code == 404:
+                    # Not pinned on Pinata, that's fine
+                    pinata_unpinned = True
+                else:
+                    errors.append(f"Pinata unpin failed: {response.status_code}")
+        except Exception as e:
+            errors.append(f"Pinata unpin error: {e}")
+
+    success = local_unpinned  # Consider success if local unpin worked
+    return UnpinResult(
+        success=success,
+        local_unpinned=local_unpinned,
+        pinata_unpinned=pinata_unpinned,
+        error="; ".join(errors) if errors else None
+    )
