@@ -1,5 +1,6 @@
 """Multi-step album upload draft routes."""
 
+import asyncio
 import json
 import shutil
 import uuid
@@ -264,6 +265,7 @@ async def finalize_sse_generator(
         # Also build mapping from new filename to track info for transcoding
         has_flac = False
         flac_to_track_info = {}  # Maps new FLAC filename -> FinalizeTrack
+        wav_to_convert = []  # List of (src_wav, dest_flac, track_info) tuples
         for idx, filename in enumerate(ordered_files, start=1):
             src_path = upload_dir / filename
             if not src_path.exists():
@@ -286,13 +288,56 @@ async def finalize_sse_generator(
                 dest_name = f"{track_num}-{safe_title}.flac"
                 shutil.copy2(src_path, flac_dir / dest_name)
                 flac_to_track_info[dest_name] = track_info
+            elif ext == ".wav":
+                # WAV files need to be converted to FLAC first
+                has_flac = True
+                dest_name = f"{track_num}-{safe_title}.flac"
+                wav_to_convert.append((src_path, flac_dir / dest_name, track_info))
             elif ext in {".jpg", ".jpeg", ".png", ".webp"}:
                 # Cover art goes to album root
                 shutil.copy2(src_path, album_dir / "cover" + ext)
             else:
-                # Non-FLAC audio goes directly to OGG dir (will be transcoded)
+                # Other audio formats go directly to OGG dir
                 dest_name = f"{track_num}-{safe_title}{ext}"
                 shutil.copy2(src_path, ogg_dir / dest_name)
+
+        # Convert WAV files to FLAC
+        if wav_to_convert:
+            yield await send_event("progress", {
+                "stage": "wav_to_flac",
+                "message": "Converting WAV to FLAC...",
+                "progress": 10
+            })
+
+            for i, (wav_path, flac_path, track_info) in enumerate(wav_to_convert):
+                yield await send_event("progress", {
+                    "stage": "wav_to_flac",
+                    "message": f"Converting {wav_path.name} to FLAC...",
+                    "progress": 10 + int((i / len(wav_to_convert)) * 10),
+                    "track": wav_path.name
+                })
+
+                # Use ffmpeg to convert WAV to FLAC (lossless)
+                cmd = [
+                    "ffmpeg", "-y", "-i", str(wav_path),
+                    "-c:a", "flac",
+                    "-compression_level", "8",
+                    str(flac_path)
+                ]
+                proc = await asyncio.create_subprocess_exec(
+                    *cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE
+                )
+                _, stderr = await proc.communicate()
+
+                if proc.returncode != 0:
+                    yield await send_event("warning", {
+                        "message": f"Failed to convert {wav_path.name} to FLAC: {stderr.decode()[:200]}"
+                    })
+                else:
+                    # Add to track info mapping for metadata embedding
+                    flac_to_track_info[flac_path.name] = track_info
 
         # Transcode FLAC files to OGG
         if has_flac:
