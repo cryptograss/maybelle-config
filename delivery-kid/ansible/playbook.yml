@@ -339,6 +339,7 @@
                   reverse_proxy /webhook/* localhost:3001
                   reverse_proxy /sync/* localhost:3001
                   reverse_proxy /releases localhost:3001
+                  reverse_proxy /draft-album* localhost:3001
                   respond "delivery-kid pinning service" 200
               }
           }
