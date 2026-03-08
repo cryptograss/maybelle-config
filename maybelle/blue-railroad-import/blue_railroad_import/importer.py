@@ -73,6 +73,10 @@ class ImportResults:
         return self._by_action(self.release_pages, 'created')
 
     @property
+    def release_pages_updated(self) -> list[SaveResult]:
+        return self._by_action(self.release_pages, 'updated')
+
+    @property
     def release_pages_unchanged(self) -> list[SaveResult]:
         return self._by_action(self.release_pages, 'unchanged')
 
@@ -368,6 +372,8 @@ class BlueRailroadImporter:
                 results.release_pages.append(result)
                 if result.action == 'created':
                     self.log(f"  Created: {result.page_title}")
+                elif result.action == 'updated':
+                    self.log(f"  Enriched: {result.page_title}")
                 elif result.action == 'error':
                     self.log(f"  ERROR: {result.page_title}: {result.message}")
 
@@ -383,11 +389,14 @@ class BlueRailroadImporter:
                 results.release_pages.append(result)
                 if result.action == 'created':
                     self.log(f"  Created: {result.page_title}")
+                elif result.action == 'updated':
+                    self.log(f"  Enriched: {result.page_title}")
                 elif result.action == 'error':
                     self.log(f"  ERROR: {result.page_title}: {result.message}")
 
         self.log(f"\nRelease page summary:")
         self.log(f"  Created: {len(results.release_pages_created)}")
+        self.log(f"  Updated: {len(results.release_pages_updated)}")
         self.log(f"  Unchanged: {len(results.release_pages_unchanged)}")
         self.log(f"  Errors: {len(results.release_pages_error)}")
 
