@@ -145,6 +145,88 @@ def ensure_release_for_token(
     return wiki.save_page(page_title, yaml_content, summary)
 
 
+def convert_releases_to_yaml(wiki, verbose: bool = False) -> list[SaveResult]:
+    """Convert Release pages from wikitext to release-yaml content model.
+
+    Queries all pages in the Release namespace (3004), checks their content
+    model, and re-saves any wikitext pages as release-yaml. Preserves
+    existing content where possible, parsing it as YAML metadata.
+
+    Args:
+        wiki: MWClientWrapper instance (needs .site access)
+        verbose: Print progress
+
+    Returns:
+        List of SaveResult for each page processed.
+    """
+    import urllib.request
+    import urllib.parse
+    import json
+
+    results = []
+
+    # Query all Release pages with their content model
+    api_url = f"{wiki._api_url}?action=query&list=allpages&apnamespace=3004&aplimit=500&format=json"
+    with urllib.request.urlopen(api_url, timeout=30) as response:
+        data = json.loads(response.read().decode('utf-8'))
+
+    all_pages = data.get('query', {}).get('allpages', [])
+
+    if verbose:
+        print(f"Found {len(all_pages)} Release pages")
+
+    for page_info in all_pages:
+        title = page_info['title']
+
+        # Check content model via page info query
+        info_url = (
+            f"{wiki._api_url}?action=query&titles={urllib.parse.quote(title)}"
+            f"&prop=info&format=json"
+        )
+        with urllib.request.urlopen(info_url, timeout=30) as response:
+            info_data = json.loads(response.read().decode('utf-8'))
+
+        page_data = next(iter(info_data['query']['pages'].values()))
+        content_model = page_data.get('contentmodel', 'unknown')
+
+        if content_model == 'release-yaml':
+            if verbose:
+                print(f"  Already release-yaml: {title}")
+            results.append(SaveResult(title, 'unchanged', 'Already release-yaml'))
+            continue
+
+        if verbose:
+            print(f"  Converting: {title} (was {content_model})")
+
+        # Read existing content
+        existing_content = wiki.get_page_content(title)
+
+        # Extract CID from title (after "Release:" prefix)
+        cid = title.split(':', 1)[1] if ':' in title else title
+
+        # Try to parse existing content as YAML to preserve metadata
+        existing_data = _parse_existing_yaml(existing_content) if existing_content else {}
+
+        # Ensure ipfs_cid is set
+        if not existing_data.get('ipfs_cid'):
+            existing_data['ipfs_cid'] = cid
+
+        yaml_content = yaml.dump(existing_data, default_flow_style=False, allow_unicode=True)
+
+        try:
+            page = wiki.site.pages[title]
+            page.save(
+                yaml_content,
+                summary='Convert to release-yaml content model',
+                contentmodel='release-yaml',
+            )
+            results.append(SaveResult(title, 'updated', f'Converted from {content_model}'))
+        except Exception as e:
+            results.append(SaveResult(title, 'error', str(e)))
+
+    return results
+
+
 def ensure_release_for_submission(
     wiki: WikiClientProtocol,
     submission: Submission,

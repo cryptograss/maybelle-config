@@ -130,6 +130,32 @@ def cmd_mark_minted(args):
         print(f"  Marked as minted: Token #{args.token_id} to {args.wallet}")
 
 
+def cmd_convert_releases(args):
+    """Convert Release pages from wikitext to release-yaml content model."""
+    wiki_client = create_wiki_client(args)
+
+    from .release_page import convert_releases_to_yaml
+    results = convert_releases_to_yaml(
+        wiki_client,
+        verbose=args.verbose or args.dry_run,
+    )
+
+    converted = [r for r in results if r.action == 'updated']
+    skipped = [r for r in results if r.action == 'unchanged']
+    errors = [r for r in results if r.action == 'error']
+
+    print(f"\nConversion complete:")
+    print(f"  Converted: {len(converted)}")
+    print(f"  Already release-yaml: {len(skipped)}")
+    print(f"  Errors: {len(errors)}")
+
+    for r in errors:
+        print(f"  ERROR: {r.page_title}: {r.message}")
+
+    if errors:
+        sys.exit(1)
+
+
 def add_common_args(parser):
     """Add common arguments to a parser."""
     parser.add_argument(
@@ -241,6 +267,14 @@ def main():
         help='Minted token ID',
     )
     minted_parser.set_defaults(func=cmd_mark_minted)
+
+    # Convert releases content model
+    convert_parser = subparsers.add_parser(
+        'convert-releases',
+        help='Convert Release pages from wikitext to release-yaml content model'
+    )
+    add_common_args(convert_parser)
+    convert_parser.set_defaults(func=cmd_convert_releases)
 
     args = parser.parse_args()
 
