@@ -19,6 +19,7 @@ from .submission import (
     get_submission_id_for_token,
     update_submission_token_ids,
 )
+from .release_page import ensure_release_for_token, ensure_release_for_submission
 
 
 CONFIG_PAGE = 'PickiPedia:BlueRailroadConfig'
@@ -30,6 +31,7 @@ class ImportResults:
     token_pages: list[SaveResult] = field(default_factory=list)
     leaderboard_pages: list[SaveResult] = field(default_factory=list)
     submission_pages: list[SaveResult] = field(default_factory=list)
+    release_pages: list[SaveResult] = field(default_factory=list)
 
     def _by_action(self, results: list[SaveResult], action: str) -> list[SaveResult]:
         return [r for r in results if r.action == action]
@@ -67,6 +69,18 @@ class ImportResults:
         return self._by_action(self.leaderboard_pages, 'error')
 
     @property
+    def release_pages_created(self) -> list[SaveResult]:
+        return self._by_action(self.release_pages, 'created')
+
+    @property
+    def release_pages_unchanged(self) -> list[SaveResult]:
+        return self._by_action(self.release_pages, 'unchanged')
+
+    @property
+    def release_pages_error(self) -> list[SaveResult]:
+        return self._by_action(self.release_pages, 'error')
+
+    @property
     def submission_pages_updated(self) -> list[SaveResult]:
         return self._by_action(self.submission_pages, 'updated')
 
@@ -82,7 +96,7 @@ class ImportResults:
     def errors(self) -> list[str]:
         return [
             f"{r.page_title}: {r.message}"
-            for r in self.token_pages + self.leaderboard_pages + self.submission_pages
+            for r in self.token_pages + self.leaderboard_pages + self.submission_pages + self.release_pages
             if r.action == 'error'
         ]
 
@@ -336,6 +350,46 @@ class BlueRailroadImporter:
         self.log(f"  Updated: {len(results.submission_pages_updated)}")
         self.log(f"  Unchanged: {len(results.submission_pages_unchanged)}")
         self.log(f"  Errors: {len(results.submission_pages_error)}")
+
+        # Ensure Release pages exist for tokens with IPFS CIDs
+        self.log("\nEnsuring Release pages for token videos...")
+        seen_cids: set[str] = set()
+        for key, token in all_tokens.items():
+            if not token.ipfs_cid or token.ipfs_cid in seen_cids:
+                continue
+            seen_cids.add(token.ipfs_cid)
+            submission_id = token_submission_map.get(key)
+            result = ensure_release_for_token(
+                self.wiki, token,
+                submission_id=submission_id,
+                verbose=self.verbose,
+            )
+            if result:
+                results.release_pages.append(result)
+                if result.action == 'created':
+                    self.log(f"  Created: {result.page_title}")
+                elif result.action == 'error':
+                    self.log(f"  ERROR: {result.page_title}: {result.message}")
+
+        # Ensure Release pages for submissions with CIDs not already covered by tokens
+        for sub in all_submissions:
+            if not sub.has_cid or sub.ipfs_cid in seen_cids:
+                continue
+            seen_cids.add(sub.ipfs_cid)
+            result = ensure_release_for_submission(
+                self.wiki, sub, verbose=self.verbose,
+            )
+            if result:
+                results.release_pages.append(result)
+                if result.action == 'created':
+                    self.log(f"  Created: {result.page_title}")
+                elif result.action == 'error':
+                    self.log(f"  ERROR: {result.page_title}: {result.message}")
+
+        self.log(f"\nRelease page summary:")
+        self.log(f"  Created: {len(results.release_pages_created)}")
+        self.log(f"  Unchanged: {len(results.release_pages_unchanged)}")
+        self.log(f"  Errors: {len(results.release_pages_error)}")
 
         # Generate leaderboards (using ALL aggregated tokens)
         self.log(f"\nGenerating leaderboards from {len(all_tokens)} total tokens...")
