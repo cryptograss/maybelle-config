@@ -68,16 +68,8 @@ def ensure_release_for_token(
     if verbose:
         print(f"  Creating release page: {page_title}")
 
-    try:
-        page = wiki.site.pages[page_title]
-        page.save(
-            yaml_content,
-            summary=f'Create release for {title} (via Blue Railroad import)',
-            contentmodel='release-yaml',
-        )
-        return SaveResult(page_title, 'created', f'Created release for {title}')
-    except Exception as e:
-        return SaveResult(page_title, 'error', str(e))
+    summary = f'Create release for {title} (via Blue Railroad import)'
+    return wiki.save_page(page_title, yaml_content, summary)
 
 
 def ensure_release_for_submission(
@@ -111,13 +103,5 @@ def ensure_release_for_submission(
     if verbose:
         print(f"  Creating release page: {page_title}")
 
-    try:
-        page = wiki.site.pages[page_title]
-        page.save(
-            yaml_content,
-            summary=f'Create release for {title} (via Blue Railroad import)',
-            contentmodel='release-yaml',
-        )
-        return SaveResult(page_title, 'created', f'Created release for {title}')
-    except Exception as e:
-        return SaveResult(page_title, 'error', str(e))
+    summary = f'Create release for {title} (via Blue Railroad import)'
+    return wiki.save_page(page_title, yaml_content, summary)
