@@ -37,6 +37,7 @@ class Settings(BaseSettings):
     cors_origins: list[str] = [
         "https://cryptograss.live",
         "https://www.cryptograss.live",
+        "https://pickipedia.xyz",
     ]
     cors_origin_regex: str = r"https://\w+\d*\.hunter\.cryptograss\.live"
 
