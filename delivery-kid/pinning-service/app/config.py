@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     authorized_wallets: str = ""
 
     # Auth settings
-    max_timestamp_drift_seconds: int = 600  # 10 minutes
+    max_timestamp_drift_seconds: int = 3600  # 1 hour — token generated at page load, user may browse before uploading
     api_key: str = ""  # Shared API key for server-to-server auth (e.g., from PickiPedia)
 
     # Upload limits

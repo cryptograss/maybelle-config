@@ -2,6 +2,7 @@
 
 import hashlib
 import hmac
+import logging
 import time
 from dataclasses import dataclass
 from typing import Optional
@@ -11,6 +12,8 @@ from eth_account import Account
 from fastapi import Request, HTTPException, Depends
 
 from .config import get_settings, Settings
+
+logger = logging.getLogger(__name__)
 
 
 def create_upload_token(api_key: str, username: str, timestamp: int) -> str:
@@ -22,15 +25,24 @@ def create_upload_token(api_key: str, username: str, timestamp: int) -> str:
 def verify_upload_token(token: str, username: str, timestamp: int, settings: Settings) -> bool:
     """Verify an HMAC upload token."""
     if not settings.api_key:
+        logger.warning("HMAC verify failed: no api_key configured")
         return False
     expected = create_upload_token(settings.api_key, username, timestamp)
     if not hmac.compare_digest(token, expected):
+        logger.warning("HMAC verify failed: token mismatch for user=%s", username)
         return False
     # Check timestamp freshness
     now_ms = int(time.time() * 1000)
     drift_ms = abs(now_ms - timestamp)
     max_drift_ms = settings.max_timestamp_drift_seconds * 1000
-    return drift_ms <= max_drift_ms
+    if drift_ms > max_drift_ms:
+        logger.warning(
+            "HMAC verify failed: token expired. drift=%dms (max=%dms), "
+            "token_ts=%d, server_now=%d, user=%s",
+            drift_ms, max_drift_ms, timestamp, now_ms, username
+        )
+        return False
+    return True
 
 
 @dataclass
