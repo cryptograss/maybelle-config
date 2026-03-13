@@ -107,7 +107,10 @@ async def generate_torrent(
         result = create_torrent(
             directory=album_dir,
             name=cid,
-            webseeds=[f"https://ipfs.io/ipfs/{cid}/"],
+            webseeds=[
+                f"{settings.ipfs_gateway_url}/ipfs/{cid}/",
+                f"https://ipfs.io/ipfs/{cid}/",
+            ],
         )
 
         if not result.success:
