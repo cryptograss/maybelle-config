@@ -128,9 +128,6 @@
                 - IPFS_API_URL=http://ipfs:5001
                 - IPFS_GATEWAY_URL=https://{{ ipfs_gateway_domain }}
                 - STAGING_DIR=/staging
-                - WIKI_BOT_USER={{ BLUERAILROAD_BOT_USERNAME }}
-                - WIKI_BOT_PASSWORD={{ BLUERAILROAD_BOT_PASSWORD }}
-                - WIKI_API_URL=https://pickipedia.xyz/api.php
               volumes:
                 - /mnt/storage-box/staging:/staging
               ports:

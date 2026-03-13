@@ -17,6 +17,3 @@ pydantic-settings>=2.1.0
 
 # Audio processing
 pydub>=0.25.1
-
-# YAML parsing (release enrichment)
-pyyaml>=6.0
