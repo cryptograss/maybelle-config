@@ -17,3 +17,6 @@ pydantic-settings>=2.1.0
 
 # Audio processing
 pydub>=0.25.1
+
+# Reconciliation script
+requests>=2.31.0
