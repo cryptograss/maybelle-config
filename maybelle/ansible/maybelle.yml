@@ -169,6 +169,7 @@
           GITHUB_REPO_URL: "{{ github_repo_url }}"
           BLUERAILROAD_BOT_USERNAME: "{{ BLUERAILROAD_BOT_USERNAME }}"
           BLUERAILROAD_BOT_PASSWORD: "{{ BLUERAILROAD_BOT_PASSWORD }}"
+          DELIVERY_KID_API_KEY: "{{ delivery_kid_api_key }}"
         ports:
           - "8080:8080"
         networks:
