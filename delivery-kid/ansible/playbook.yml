@@ -128,6 +128,9 @@
                 - IPFS_API_URL=http://ipfs:5001
                 - IPFS_GATEWAY_URL=https://{{ ipfs_gateway_domain }}
                 - STAGING_DIR=/staging
+                - WIKI_BOT_USER={{ BLUERAILROAD_BOT_USERNAME }}
+                - WIKI_BOT_PASSWORD={{ BLUERAILROAD_BOT_PASSWORD }}
+                - WIKI_API_URL=https://pickipedia.xyz/api.php
               volumes:
                 - /mnt/storage-box/staging:/staging
               ports:
@@ -343,6 +346,7 @@
                   reverse_proxy /draft-album* localhost:3001
                   reverse_proxy /draft-content* localhost:3001
                   reverse_proxy /unpin/* localhost:3001
+                  reverse_proxy /enrich* localhost:3001
                   respond "delivery-kid pinning service" 200
               }
           }
