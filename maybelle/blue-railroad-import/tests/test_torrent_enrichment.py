@@ -173,6 +173,39 @@ class TestEnrichReleases:
         # Original content preserved
         assert saved_content.startswith("title: Test Album\nipfs_cid: QmTestCID\n")
 
+        # Verify title was sent to delivery-kid
+        request_call = mock_request_cls.call_args
+        sent_body = json.loads(request_call[1]["data"] if "data" in request_call[1] else request_call[0][1])
+        assert sent_body["name"] == "Test Album"
+
+    @patch("blue_railroad_import.torrent_enrichment.urllib.request.urlopen")
+    @patch("blue_railroad_import.torrent_enrichment.urllib.request.Request")
+    def test_sends_no_name_when_title_missing(self, mock_request_cls, mock_urlopen):
+        """When release has no title, name is not sent (falls back to CID on server)."""
+        existing_yaml = "ipfs_cid: QmNoTitle\n"
+
+        wiki = DryRunClient(existing_pages={
+            "Release:QmNoTitle": existing_yaml,
+        })
+
+        releases = [{"page_title": "QmNoTitle", "ipfs_cid": "QmNoTitle"}]
+
+        mock_urlopen.side_effect = [
+            self._mock_releases_response(releases),
+            self._mock_torrent_response("QmNoTitle", "aaa111", SAMPLE_TRACKERS),
+        ]
+
+        enrich_releases(
+            wiki=wiki,
+            wiki_api_url="https://pickipedia.xyz/api.php",
+            delivery_kid_url="https://delivery-kid.cryptograss.live",
+            delivery_kid_api_key="test-key",
+        )
+
+        request_call = mock_request_cls.call_args
+        sent_body = json.loads(request_call[1]["data"] if "data" in request_call[1] else request_call[0][1])
+        assert "name" not in sent_body
+
     @patch("blue_railroad_import.torrent_enrichment.urllib.request.urlopen")
     def test_no_releases_missing_torrent(self, mock_urlopen):
         """When no releases need enrichment, nothing happens."""

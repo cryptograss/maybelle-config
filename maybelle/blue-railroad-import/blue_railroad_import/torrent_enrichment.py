@@ -40,13 +40,17 @@ def generate_torrent_for_cid(
     cid: str,
     delivery_kid_url: str,
     api_key: str,
+    name: Optional[str] = None,
 ) -> Optional[dict]:
     """Call delivery-kid's /enrich/torrent endpoint for a CID.
 
     Returns the response dict on success, None on failure.
     """
     url = f"{delivery_kid_url}/enrich/torrent"
-    payload = json.dumps({"cid": cid}).encode("utf-8")
+    body = {"cid": cid}
+    if name:
+        body["name"] = name
+    payload = json.dumps(body).encode("utf-8")
 
     req = urllib.request.Request(
         url,
@@ -136,6 +140,7 @@ def enrich_releases(
         # Call delivery-kid for torrent generation
         torrent = generate_torrent_for_cid(
             cid, delivery_kid_url, delivery_kid_api_key,
+            name=release.get("title"),
         )
 
         if torrent is None:
