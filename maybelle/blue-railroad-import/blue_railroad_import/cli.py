@@ -8,6 +8,7 @@ from pathlib import Path
 from .importer import BlueRailroadImporter
 from .wiki_client import MWClientWrapper, DryRunClient
 from .submission import update_submission_cid, update_submission_token_id
+from .torrent_enrichment import enrich_releases
 
 
 def get_version() -> str:
@@ -156,6 +157,42 @@ def cmd_convert_releases(args):
         sys.exit(1)
 
 
+def cmd_enrich_torrents(args):
+    """Enrich Release pages with BitTorrent metadata via delivery-kid."""
+    wiki_client = create_wiki_client(args)
+
+    if not args.delivery_kid_api_key:
+        print("Error: --delivery-kid-api-key required", file=sys.stderr)
+        sys.exit(1)
+
+    # Build wiki API URL from wiki-url
+    wiki_api_url = args.wiki_url.rstrip('/') + '/api.php'
+
+    results = enrich_releases(
+        wiki=wiki_client,
+        wiki_api_url=wiki_api_url,
+        delivery_kid_url=args.delivery_kid_url.rstrip('/'),
+        delivery_kid_api_key=args.delivery_kid_api_key,
+        verbose=args.verbose or args.dry_run,
+    )
+
+    updated = [r for r in results if r.action == 'updated']
+    created = [r for r in results if r.action == 'created']
+    unchanged = [r for r in results if r.action == 'unchanged']
+    errors = [r for r in results if r.action == 'error']
+
+    print(f"\nTorrent enrichment complete:")
+    print(f"  Updated: {len(updated)}")
+    print(f"  Unchanged: {len(unchanged)}")
+    print(f"  Errors: {len(errors)}")
+
+    for r in errors:
+        print(f"  ERROR: {r.page_title}: {r.message}")
+
+    if errors:
+        sys.exit(1)
+
+
 def add_common_args(parser):
     """Add common arguments to a parser."""
     parser.add_argument(
@@ -275,6 +312,23 @@ def main():
     )
     add_common_args(convert_parser)
     convert_parser.set_defaults(func=cmd_convert_releases)
+
+    # Enrich torrents command
+    torrent_parser = subparsers.add_parser(
+        'enrich-torrents',
+        help='Enrich Release pages with BitTorrent metadata from delivery-kid'
+    )
+    add_common_args(torrent_parser)
+    torrent_parser.add_argument(
+        '--delivery-kid-url',
+        default='https://delivery-kid.cryptograss.live',
+        help='Delivery Kid service URL (default: https://delivery-kid.cryptograss.live)',
+    )
+    torrent_parser.add_argument(
+        '--delivery-kid-api-key',
+        help='API key for delivery-kid service',
+    )
+    torrent_parser.set_defaults(func=cmd_enrich_torrents)
 
     args = parser.parse_args()
 
