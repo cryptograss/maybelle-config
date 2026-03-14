@@ -157,6 +157,33 @@ def cmd_convert_releases(args):
         sys.exit(1)
 
 
+def cmd_fix_bot_proposes(args):
+    """Fix Release pages that still have Bot_proposes wikitext content."""
+    wiki_client = create_wiki_client(args)
+
+    from .release_page import fix_bot_proposes_pages
+
+    wiki_api_url = args.wiki_url.rstrip('/') + '/api.php'
+    results = fix_bot_proposes_pages(
+        wiki=wiki_client,
+        wiki_api_url=wiki_api_url,
+        verbose=args.verbose or args.dry_run,
+    )
+
+    updated = [r for r in results if r.action in ('updated', 'created')]
+    errors = [r for r in results if r.action == 'error']
+
+    print(f"\nBot_proposes fix complete:")
+    print(f"  Fixed: {len(updated)}")
+    print(f"  Errors: {len(errors)}")
+
+    for r in errors:
+        print(f"  ERROR: {r.page_title}: {r.message}")
+
+    if errors:
+        sys.exit(1)
+
+
 def cmd_enrich_torrents(args):
     """Enrich Release pages with BitTorrent metadata via delivery-kid."""
     wiki_client = create_wiki_client(args)
@@ -312,6 +339,14 @@ def main():
     )
     add_common_args(convert_parser)
     convert_parser.set_defaults(func=cmd_convert_releases)
+
+    # Fix Bot_proposes pages
+    fix_parser = subparsers.add_parser(
+        'fix-bot-proposes',
+        help='Replace Bot_proposes wikitext with proper YAML on Release pages'
+    )
+    add_common_args(fix_parser)
+    fix_parser.set_defaults(func=cmd_fix_bot_proposes)
 
     # Enrich torrents command
     torrent_parser = subparsers.add_parser(
