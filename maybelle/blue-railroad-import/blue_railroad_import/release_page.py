@@ -6,6 +6,7 @@ PickiPedia with basic metadata, and enriches existing pages that are
 missing metadata like file_type.
 """
 
+import re
 import yaml
 from typing import Optional
 
@@ -206,6 +207,19 @@ def convert_releases_to_yaml(wiki, verbose: bool = False) -> list[SaveResult]:
 
         # Try to parse existing content as YAML to preserve metadata
         existing_data = _parse_existing_yaml(existing_content) if existing_content else {}
+
+        # If YAML parsing got nothing, check for Bot_proposes template
+        # Format: # {{Bot_proposes|Title Here|by=Magent}}
+        if not existing_data and existing_content:
+            match = re.search(
+                r'\{\{Bot_proposes\|([^|]+)\|',
+                existing_content,
+            )
+            if match:
+                extracted_title = match.group(1).strip()
+                existing_data['title'] = extracted_title
+                if verbose:
+                    print(f"    Extracted title from Bot_proposes: {extracted_title}")
 
         # Ensure ipfs_cid is set
         if not existing_data.get('ipfs_cid'):
