@@ -43,8 +43,12 @@ class TorrentResponse(BaseModel):
     error: str | None = None
 
 
-async def fetch_ipfs_directory(cid: str, ipfs_api_url: str) -> Path | None:
-    """Fetch a CID directory from local IPFS to a temp dir."""
+async def fetch_ipfs_content(cid: str, ipfs_api_url: str) -> Path | None:
+    """Fetch a CID from local IPFS to a temp dir.
+
+    Handles both directory CIDs (albums) and single-file CIDs (videos).
+    For single files, wraps them in a directory so create_torrent works.
+    """
     tmpdir = Path(tempfile.mkdtemp(prefix="enrich-"))
     try:
         async with httpx.AsyncClient(timeout=300.0) as client:
@@ -66,12 +70,21 @@ async def fetch_ipfs_directory(cid: str, ipfs_api_url: str) -> Path | None:
         )
         tar_path.unlink()
 
-        # Find extracted directory
-        for child in tmpdir.iterdir():
-            if child.is_dir():
-                return child
-        shutil.rmtree(tmpdir)
-        return None
+        # Find extracted content — could be a directory or a single file
+        children = list(tmpdir.iterdir())
+        if not children:
+            shutil.rmtree(tmpdir)
+            return None
+
+        child = children[0]
+        if child.is_dir():
+            return child
+
+        # Single file — wrap in a directory for create_torrent
+        wrapper = tmpdir / "content"
+        wrapper.mkdir()
+        child.rename(wrapper / child.name)
+        return wrapper
     except Exception as e:
         logger.error("Error fetching %s: %s", cid, e)
         shutil.rmtree(tmpdir, ignore_errors=True)
@@ -96,7 +109,7 @@ async def generate_torrent(
     """
     cid = req.cid
 
-    album_dir = await fetch_ipfs_directory(cid, settings.ipfs_api_url)
+    album_dir = await fetch_ipfs_content(cid, settings.ipfs_api_url)
     if album_dir is None:
         return TorrentResponse(
             success=False,
