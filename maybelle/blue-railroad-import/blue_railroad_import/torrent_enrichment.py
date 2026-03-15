@@ -81,6 +81,7 @@ def append_torrent_fields(
     infohash: str,
     trackers: list[str],
     webseeds: list[str] | None = None,
+    torrent_url: str | None = None,
 ) -> str:
     """Append bittorrent fields to existing Release YAML without reformatting.
 
@@ -104,6 +105,8 @@ def append_torrent_fields(
     }
     if webseeds:
         new_fields["bittorrent_webseeds"] = webseeds
+    if torrent_url:
+        new_fields["bittorrent_torrent_url"] = torrent_url
     suffix = yaml.dump(new_fields, default_flow_style=False, allow_unicode=True)
 
     # Ensure there's a newline before appending
@@ -157,6 +160,7 @@ def enrich_releases(
         infohash = torrent["infohash"]
         trackers = torrent["trackers"]
         webseeds = torrent.get("webseeds") or []
+        torrent_url = torrent.get("torrent_url")
 
         if verbose:
             print(f"    Infohash: {infohash}")
@@ -169,7 +173,7 @@ def enrich_releases(
             continue
 
         # Append torrent fields
-        new_content = append_torrent_fields(existing_content, infohash, trackers, webseeds)
+        new_content = append_torrent_fields(existing_content, infohash, trackers, webseeds, torrent_url)
 
         if new_content == existing_content:
             results.append(SaveResult(page_title, "unchanged", "Already has infohash"))
