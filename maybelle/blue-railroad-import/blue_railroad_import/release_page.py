@@ -6,6 +6,7 @@ PickiPedia with basic metadata, and enriches existing pages that are
 missing metadata like file_type.
 """
 
+import re
 import yaml
 from typing import Optional
 
@@ -207,6 +208,19 @@ def convert_releases_to_yaml(wiki, verbose: bool = False) -> list[SaveResult]:
         # Try to parse existing content as YAML to preserve metadata
         existing_data = _parse_existing_yaml(existing_content) if existing_content else {}
 
+        # If YAML parsing got nothing, check for Bot_proposes template
+        # Format: # {{Bot_proposes|Title Here|by=Magent}}
+        if not existing_data and existing_content:
+            match = re.search(
+                r'\{\{Bot_proposes\|([^|]+)\|',
+                existing_content,
+            )
+            if match:
+                extracted_title = match.group(1).strip()
+                existing_data['title'] = extracted_title
+                if verbose:
+                    print(f"    Extracted title from Bot_proposes: {extracted_title}")
+
         # Ensure ipfs_cid is set
         if not existing_data.get('ipfs_cid'):
             existing_data['ipfs_cid'] = cid
@@ -223,6 +237,87 @@ def convert_releases_to_yaml(wiki, verbose: bool = False) -> list[SaveResult]:
             results.append(SaveResult(title, 'updated', f'Converted from {content_model}'))
         except Exception as e:
             results.append(SaveResult(title, 'error', str(e)))
+
+    return results
+
+
+def fix_bot_proposes_pages(
+    wiki: WikiClientProtocol,
+    wiki_api_url: str,
+    verbose: bool = False,
+) -> list[SaveResult]:
+    """Replace Bot_proposes wikitext with proper YAML on Release pages.
+
+    Some Release pages already have content model 'release-yaml' but their
+    content is still wikitext like '# {{Bot_proposes|Title|by=Magent}}'.
+    The YAML parser sees this as a comment (returns None), so enrichment
+    skips them. This function replaces that content with proper YAML.
+
+    Args:
+        wiki: Wiki client instance
+        wiki_api_url: Full URL to api.php (e.g. https://pickipedia.xyz/api.php)
+        verbose: Print progress
+
+    Returns:
+        List of SaveResult for each page processed.
+    """
+    import urllib.request
+    import urllib.parse
+    import json
+
+    results = []
+
+    # Query all Release pages
+    url = f"{wiki_api_url}?action=query&list=allpages&apnamespace=3004&aplimit=500&format=json"
+    with urllib.request.urlopen(url, timeout=30) as response:
+        data = json.loads(response.read().decode('utf-8'))
+
+    all_pages = data.get('query', {}).get('allpages', [])
+
+    if verbose:
+        print(f"Found {len(all_pages)} Release pages, checking for Bot_proposes content...")
+
+    for page_info in all_pages:
+        title = page_info['title']
+        content = wiki.get_page_content(title)
+
+        if not content:
+            continue
+
+        # Check if this page has Bot_proposes template content
+        match = re.search(r'\{\{Bot_proposes\|([^|]+)\|', content)
+        if not match:
+            continue
+
+        extracted_title = match.group(1).strip()
+        cid = title.split(':', 1)[1] if ':' in title else title
+
+        # Skip titles that are just template defaults
+        if extracted_title == 'Optional metadata':
+            if verbose:
+                print(f"  Skipping {title} (template default, no real title)")
+            # Still replace with minimal YAML so enrichment can process it
+            new_content = yaml.dump(
+                {'ipfs_cid': cid},
+                default_flow_style=False, allow_unicode=True,
+            )
+        else:
+            new_content = yaml.dump(
+                {'title': extracted_title, 'ipfs_cid': cid},
+                default_flow_style=False, allow_unicode=True,
+            )
+
+        if verbose:
+            print(f"  {title}")
+            print(f"    Was: {content.strip()[:80]}")
+            print(f"    Now: {new_content.strip()[:80]}")
+
+        summary = f'Replace Bot_proposes wikitext with YAML (title: {extracted_title[:40]})'
+        result = wiki.save_page(title, new_content, summary)
+        results.append(result)
+
+    if verbose:
+        print(f"\nProcessed {len(results)} Bot_proposes pages")
 
     return results
 
