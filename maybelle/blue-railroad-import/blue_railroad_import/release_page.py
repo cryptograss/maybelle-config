@@ -365,7 +365,7 @@ def clear_torrent_fields(
             if line.startswith('bittorrent_infohash:') or line.startswith('bittorrent_trackers:'):
                 skip_list_items = line.startswith('bittorrent_trackers:')
                 continue
-            if skip_list_items and line.startswith('  - '):
+            if skip_list_items and (line.startswith('- ') or line.startswith('  - ')):
                 continue
             skip_list_items = False
             new_lines.append(line)
