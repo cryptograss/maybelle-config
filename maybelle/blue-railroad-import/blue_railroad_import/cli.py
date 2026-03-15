@@ -184,6 +184,29 @@ def cmd_fix_bot_proposes(args):
         sys.exit(1)
 
 
+def cmd_clear_torrents(args):
+    """Clear BitTorrent fields from all Release pages for regeneration."""
+    wiki_client = create_wiki_client(args)
+
+    from .release_page import clear_torrent_fields
+
+    wiki_api_url = args.wiki_url.rstrip('/') + '/api.php'
+    results = clear_torrent_fields(
+        wiki=wiki_client,
+        wiki_api_url=wiki_api_url,
+        verbose=args.verbose or args.dry_run,
+    )
+
+    print(f"\nClear complete: {len(results)} pages cleared")
+
+    errors = [r for r in results if r.action == 'error']
+    for r in errors:
+        print(f"  ERROR: {r.page_title}: {r.message}")
+
+    if errors:
+        sys.exit(1)
+
+
 def cmd_enrich_torrents(args):
     """Enrich Release pages with BitTorrent metadata via delivery-kid."""
     wiki_client = create_wiki_client(args)
@@ -347,6 +370,14 @@ def main():
     )
     add_common_args(fix_parser)
     fix_parser.set_defaults(func=cmd_fix_bot_proposes)
+
+    # Clear torrent fields for regeneration
+    clear_parser = subparsers.add_parser(
+        'clear-torrents',
+        help='Clear BitTorrent metadata from Release pages (for regeneration)'
+    )
+    add_common_args(clear_parser)
+    clear_parser.set_defaults(func=cmd_clear_torrents)
 
     # Enrich torrents command
     torrent_parser = subparsers.add_parser(

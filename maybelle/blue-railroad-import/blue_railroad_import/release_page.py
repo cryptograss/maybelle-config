@@ -322,6 +322,74 @@ def fix_bot_proposes_pages(
     return results
 
 
+def clear_torrent_fields(
+    wiki: WikiClientProtocol,
+    wiki_api_url: str,
+    verbose: bool = False,
+) -> list[SaveResult]:
+    """Remove bittorrent_infohash and bittorrent_trackers from all Release pages.
+
+    Used when the torrent format changes (e.g. switching to single-file format)
+    so that the enrichment job regenerates all infohashes.
+
+    Preserves all other YAML fields by string manipulation — removes lines
+    starting with 'bittorrent_infohash:' and 'bittorrent_trackers:' plus
+    any continuation lines (list items starting with '  - ').
+    """
+    import urllib.request
+    import urllib.parse
+    import json
+
+    results = []
+
+    url = f"{wiki_api_url}?action=query&list=allpages&apnamespace=3004&aplimit=500&format=json"
+    with urllib.request.urlopen(url, timeout=30) as response:
+        data = json.loads(response.read().decode('utf-8'))
+
+    all_pages = data.get('query', {}).get('allpages', [])
+
+    if verbose:
+        print(f"Found {len(all_pages)} Release pages, checking for torrent fields...")
+
+    for page_info in all_pages:
+        title = page_info['title']
+        content = wiki.get_page_content(title)
+
+        if not content or 'bittorrent_infohash' not in content:
+            continue
+
+        # Remove torrent fields by filtering lines
+        new_lines = []
+        skip_list_items = False
+        for line in content.split('\n'):
+            if line.startswith('bittorrent_infohash:') or line.startswith('bittorrent_trackers:'):
+                skip_list_items = line.startswith('bittorrent_trackers:')
+                continue
+            if skip_list_items and line.startswith('  - '):
+                continue
+            skip_list_items = False
+            new_lines.append(line)
+
+        new_content = '\n'.join(new_lines)
+        # Clean up trailing whitespace
+        new_content = new_content.rstrip('\n') + '\n'
+
+        if new_content == content:
+            continue
+
+        if verbose:
+            print(f"  Clearing torrent fields from {title}")
+
+        summary = 'Clear BitTorrent metadata for regeneration'
+        result = wiki.save_page(title, new_content, summary)
+        results.append(result)
+
+    if verbose:
+        print(f"\nCleared torrent fields from {len(results)} pages")
+
+    return results
+
+
 def ensure_release_for_submission(
     wiki: WikiClientProtocol,
     submission: Submission,
