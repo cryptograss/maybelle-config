@@ -20,6 +20,7 @@ from .submission import (
     update_submission_token_ids,
 )
 from .release_page import ensure_release_for_token, ensure_release_for_submission
+from .release_draft import process_release_drafts
 
 
 CONFIG_PAGE = 'PickiPedia:BlueRailroadConfig'
@@ -32,6 +33,7 @@ class ImportResults:
     leaderboard_pages: list[SaveResult] = field(default_factory=list)
     submission_pages: list[SaveResult] = field(default_factory=list)
     release_pages: list[SaveResult] = field(default_factory=list)
+    draft_promotions: list[SaveResult] = field(default_factory=list)
 
     def _by_action(self, results: list[SaveResult], action: str) -> list[SaveResult]:
         return [r for r in results if r.action == action]
@@ -97,10 +99,22 @@ class ImportResults:
         return self._by_action(self.submission_pages, 'error')
 
     @property
+    def draft_promotions_created(self) -> list[SaveResult]:
+        return self._by_action(self.draft_promotions, 'created')
+
+    @property
+    def draft_promotions_unchanged(self) -> list[SaveResult]:
+        return self._by_action(self.draft_promotions, 'unchanged')
+
+    @property
+    def draft_promotions_error(self) -> list[SaveResult]:
+        return self._by_action(self.draft_promotions, 'error')
+
+    @property
     def errors(self) -> list[str]:
         return [
             f"{r.page_title}: {r.message}"
-            for r in self.token_pages + self.leaderboard_pages + self.submission_pages + self.release_pages
+            for r in self.token_pages + self.leaderboard_pages + self.submission_pages + self.release_pages + self.draft_promotions
             if r.action == 'error'
         ]
 
@@ -399,6 +413,16 @@ class BlueRailroadImporter:
         self.log(f"  Updated: {len(results.release_pages_updated)}")
         self.log(f"  Unchanged: {len(results.release_pages_unchanged)}")
         self.log(f"  Errors: {len(results.release_pages_error)}")
+
+        # Promote completed ReleaseDrafts to Release pages
+        self.log("\nProcessing ReleaseDraft pages...")
+        draft_results = process_release_drafts(self.wiki, verbose=self.verbose)
+        results.draft_promotions.extend(draft_results)
+
+        self.log(f"\nDraft promotion summary:")
+        self.log(f"  Created: {len(results.draft_promotions_created)}")
+        self.log(f"  Already exist: {len(results.draft_promotions_unchanged)}")
+        self.log(f"  Errors: {len(results.draft_promotions_error)}")
 
         # Generate leaderboards (using ALL aggregated tokens)
         self.log(f"\nGenerating leaderboards from {len(all_tokens)} total tokens...")
