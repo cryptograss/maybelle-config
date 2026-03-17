@@ -26,6 +26,96 @@ from .wiki_client import WikiClientProtocol, SaveResult
 NS_RELEASEDRAFT = 3006
 
 
+# -- Draft type classes --
+# Each draft type knows how to build its own Release page YAML.
+# The type field is set by whichever Special page or bot created the draft:
+#   Special:UploadAlbum   → type: record
+#   Special:UploadContent → type: other
+#   Blue Railroad bot     → type: blue-railroad
+
+
+class DraftType:
+    """Base class for draft type handlers."""
+
+    name: str = 'unknown'
+
+    def build_release(self, draft_data: dict) -> dict:
+        """Build Release page fields from draft data. Override in subclasses."""
+        return {}
+
+
+class RecordDraft(DraftType):
+    """Album, EP, single — any collection of tracks."""
+
+    name = 'record'
+
+    def build_release(self, draft_data: dict) -> dict:
+        release = {}
+        album = draft_data.get('album', {})
+        artist = album.get('artist', '')
+        title = album.get('title', '')
+        version = album.get('version', '')
+
+        full_title = f"{artist} - {title}" if artist and title else title or ''
+        if version:
+            full_title += f" ({version})"
+
+        if full_title:
+            release['title'] = full_title
+        if album.get('description'):
+            release['description'] = album['description']
+
+        return release
+
+
+class BlueRailroadDraft(DraftType):
+    """Video from a Blue Railroad on-chain submission."""
+
+    name = 'blue-railroad'
+
+    def build_release(self, draft_data: dict) -> dict:
+        release = {}
+        if draft_data.get('submission_id'):
+            release['title'] = f"Blue Railroad Submission {draft_data['submission_id']}"
+            release['description'] = f"Video from Blue Railroad Submission #{draft_data['submission_id']}"
+        release['file_type'] = 'video/webm'
+        return release
+
+
+class OtherDraft(DraftType):
+    """Catch-all for uploads that aren't records or Blue Railroad submissions."""
+
+    name = 'other'
+
+    def build_release(self, draft_data: dict) -> dict:
+        release = {}
+        content = draft_data.get('content', {})
+        if content.get('title'):
+            release['title'] = content['title']
+        if content.get('description'):
+            release['description'] = content['description']
+        if content.get('file_type'):
+            release['file_type'] = content['file_type']
+        if content.get('subsequent_to'):
+            release['subsequent_to'] = content['subsequent_to']
+        return release
+
+
+DRAFT_TYPES: dict[str, DraftType] = {
+    'record': RecordDraft(),
+    'album': RecordDraft(),  # legacy alias
+    'blue-railroad': BlueRailroadDraft(),
+    'other': OtherDraft(),
+    'content': OtherDraft(),  # legacy alias
+}
+
+
+def get_draft_handler(draft_data: dict) -> DraftType:
+    """Get the appropriate handler for a draft's type."""
+    type_name = draft_data.get('type', 'other')
+    return DRAFT_TYPES.get(type_name, OtherDraft())
+
+
 def fetch_release_drafts(wiki, verbose: bool = False) -> list[dict]:
     """Fetch all ReleaseDraft pages and their content.
 
@@ -56,8 +146,12 @@ def fetch_release_drafts(wiki, verbose: bool = False) -> list[dict]:
         try:
             data = yaml.safe_load(content)
             if not isinstance(data, dict):
+                if verbose:
+                    print(f"  {title}: YAML parsed but not a dict, skipping")
                 continue
-        except yaml.YAMLError:
+        except yaml.YAMLError as e:
+            if verbose:
+                print(f"  {title}: invalid YAML, skipping: {e}")
             continue
 
         drafts.append({
@@ -102,40 +196,8 @@ def find_cid_from_history(wiki, page_title: str, verbose: bool = False) -> Optio
 
 def build_release_from_draft(draft_data: dict) -> str:
     """Build Release page YAML from a ReleaseDraft's data."""
-    release = {}
-    draft_type = draft_data.get('type', 'content')
-
-    if draft_type == 'album':
-        album = draft_data.get('album', {})
-        artist = album.get('artist', '')
-        title = album.get('title', '')
-        version = album.get('version', '')
-
-        full_title = f"{artist} - {title}" if artist and title else title or ''
-        if version:
-            full_title += f" ({version})"
-
-        if full_title:
-            release['title'] = full_title
-        if album.get('description'):
-            release['description'] = album['description']
-
-    elif draft_type == 'content':
-        content = draft_data.get('content', {})
-        if content.get('title'):
-            release['title'] = content['title']
-        if content.get('description'):
-            release['description'] = content['description']
-        if content.get('file_type'):
-            release['file_type'] = content['file_type']
-        if content.get('subsequent_to'):
-            release['subsequent_to'] = content['subsequent_to']
-
-    elif draft_type == 'blue-railroad':
-        if draft_data.get('submission_id'):
-            release['title'] = f"Blue Railroad Submission {draft_data['submission_id']}"
-            release['description'] = f"Video from Blue Railroad Submission #{draft_data['submission_id']}"
-        release['file_type'] = 'video/webm'
+    handler = get_draft_handler(draft_data)
+    release = handler.build_release(draft_data)
 
     if draft_data.get('blockheight'):
         release['blockheight'] = draft_data['blockheight']
@@ -191,8 +253,8 @@ def process_release_drafts(
         if verbose:
             print(f"  {title}: creating {release_title}")
 
-        draft_type = data.get('type', 'content')
-        summary = f"Release created from {draft_type} draft (via bot)"
+        handler = get_draft_handler(data)
+        summary = f"Release created from {handler.name} draft (via bot)"
         result = wiki.save_page(release_title, release_yaml, summary)
         results.append(result)
 
