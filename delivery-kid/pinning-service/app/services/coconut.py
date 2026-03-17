@@ -66,7 +66,11 @@ async def submit_to_coconut(
         source_url: Public URL of the source video (IPFS gateway URL)
         api_key: Coconut API key
         webhook_url: URL Coconut will POST to on completion
-        qualities: List of output heights, e.g. [720, 480]
+        qualities: List of output heights for HLS variants. Each gets its
+            own AV1+Opus stream. Common values: 2160 (4K), 1080, 720, 480, 360.
+            Default [720, 480]. Higher values increase Coconut processing time
+            and cost. Can be passed from the UI via ContentFinalizeRequest's
+            transcoding_qualities field.
 
     Returns:
         Coconut API response dict

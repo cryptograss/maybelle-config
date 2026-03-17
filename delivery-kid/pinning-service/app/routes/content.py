@@ -312,7 +312,7 @@ async def finalize_sse_generator(
                     source_url=source_url,
                     api_key=settings.coconut_api_key,
                     webhook_url=webhook_url,
-                    qualities=[720, 480],
+                    qualities=request.transcoding_qualities,
                 )
                 coconut_job_id = coconut_result.get("id")
                 logger.info("[content:%s] Coconut job created: %s", draft_id[:8], coconut_job_id)
