@@ -29,9 +29,10 @@ NS_RELEASEDRAFT = 3006
 # -- Draft type classes --
 # Each draft type knows how to build its own Release page YAML.
 # The type field is set by whichever Special page or bot created the draft:
-#   Special:UploadAlbum   → type: record
-#   Special:UploadContent → type: other
-#   Blue Railroad bot     → type: blue-railroad
+#   Special:DeliverRecord       → type: record
+#   Special:DeliverOtherContent → type: other
+#   Special:DeliverVideo        → type: video
+#   Blue Railroad bot           → type: blue-railroad
 
 
 class DraftType:
@@ -101,10 +102,32 @@ class OtherDraft(DraftType):
         return release
 
 
+class VideoDraft(DraftType):
+    """Video upload with venue and performer metadata."""
+
+    name = 'video'
+
+    def build_release(self, draft_data: dict) -> dict:
+        release = {}
+        content = draft_data.get('content', {})
+        if content.get('title'):
+            release['title'] = content['title']
+        if content.get('description'):
+            release['description'] = content['description']
+        if content.get('file_type'):
+            release['file_type'] = content['file_type']
+        if content.get('venue'):
+            release['venue'] = content['venue']
+        if content.get('performers'):
+            release['performers'] = content['performers']
+        return release
+
+
 DRAFT_TYPES: dict[str, DraftType] = {
     'record': RecordDraft(),
     'album': RecordDraft(),  # legacy alias
     'blue-railroad': BlueRailroadDraft(),
+    'video': VideoDraft(),
     'other': OtherDraft(),
     'content': OtherDraft(),  # legacy alias
 }
