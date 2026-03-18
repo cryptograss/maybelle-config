@@ -137,9 +137,11 @@ def fetch_release_drafts(wiki, verbose: bool = False) -> list[dict]:
         print(f"  Found {len(all_pages)} ReleaseDraft page(s)")
 
     drafts = []
+    content_calls = 0
     for page_info in all_pages:
         title = page_info['title']
         content = wiki.get_page_content(title)
+        content_calls += 1
         if not content:
             continue
 
@@ -158,6 +160,9 @@ def fetch_release_drafts(wiki, verbose: bool = False) -> list[dict]:
             'title': title,
             'data': data,
         })
+
+    if verbose:
+        print(f"  ReleaseDraft API calls: 1 allpages + {content_calls} content = {1 + content_calls} total")
 
     return drafts
 
@@ -227,12 +232,14 @@ def process_release_drafts(
 
     drafts = fetch_release_drafts(wiki, verbose=verbose)
 
+    history_calls = 0
     for draft in drafts:
         title = draft['title']
         data = draft['data']
 
         # Try to find the CID from edit history
         cid = find_cid_from_history(wiki, title, verbose=verbose)
+        history_calls += 1
 
         if not cid:
             if verbose:
@@ -264,5 +271,12 @@ def process_release_drafts(
         elif result.action == 'error':
             if verbose:
                 print(f"    ERROR: {result.message}")
+
+    if verbose:
+        n_drafts = len(drafts)
+        allpages_calls = 1
+        content_calls = n_drafts
+        total = allpages_calls + content_calls + history_calls
+        print(f"  ReleaseDraft API calls: {allpages_calls} allpages + {content_calls} content + {history_calls} history = {total} total")
 
     return results
