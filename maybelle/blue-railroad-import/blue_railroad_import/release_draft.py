@@ -229,6 +229,8 @@ def build_release_from_draft(draft_data: dict) -> str:
 
     if draft_data.get('blockheight'):
         release['blockheight'] = draft_data['blockheight']
+    if draft_data.get('upload_blockheight'):
+        release['upload_blockheight'] = draft_data['upload_blockheight']
 
     release['pinned_on'] = ['delivery-kid']
 
