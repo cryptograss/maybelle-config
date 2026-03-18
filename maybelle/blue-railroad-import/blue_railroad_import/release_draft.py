@@ -70,16 +70,37 @@ class RecordDraft(DraftType):
 
 
 class BlueRailroadDraft(DraftType):
-    """Video from a Blue Railroad on-chain submission."""
+    """Video from a Blue Railroad exercise submission.
+
+    Created by Special:DeliverBlueRailroad or the on-chain submission bot.
+    Content block contains exercise, venue, recorder, notes, participants.
+    """
 
     name = 'blue-railroad'
 
     def build_release(self, draft_data: dict) -> dict:
         release = {}
-        if draft_data.get('submission_id'):
+        content = draft_data.get('content', {})
+
+        exercise = content.get('exercise', '')
+        if exercise:
+            release['title'] = exercise
+        elif draft_data.get('submission_id'):
             release['title'] = f"Blue Railroad Submission {draft_data['submission_id']}"
-            release['description'] = f"Video from Blue Railroad Submission #{draft_data['submission_id']}"
-        release['file_type'] = 'video/webm'
+
+        release['file_type'] = content.get('file_type', 'video')
+
+        if content.get('venue'):
+            release['venue'] = content['venue']
+        if content.get('recorder'):
+            release['recorder'] = content['recorder']
+        if content.get('notes'):
+            release['description'] = content['notes']
+        if content.get('participants'):
+            release['participants'] = content['participants']
+        if draft_data.get('submission_id'):
+            release['submission_id'] = draft_data['submission_id']
+
         return release
 
 
