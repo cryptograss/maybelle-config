@@ -9,7 +9,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .config import get_settings
-from .routes import health, albums, drafts, content, enrich, torrent, coconut
+from .routes import health, albums, drafts, content, enrich, torrent, coconut, staging
 from .services import cleanup
 from .services.seeder import init_seeder, stop_seeder
 
@@ -93,6 +93,7 @@ app.include_router(content.router)
 app.include_router(enrich.router)
 app.include_router(torrent.router)
 app.include_router(coconut.router)
+app.include_router(staging.router)
 
 
 @app.get("/")
