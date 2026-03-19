@@ -10,7 +10,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, File, UploadFile, HTTPException
 from sse_starlette.sse import EventSourceResponse
 
-from ..auth import require_auth
+from ..auth import require_auth, require_finalize_auth
 from ..config import get_settings, get_commit, Settings
 from ..models.content import (
     ContentFile, ContentDraftState, ContentDraftResponse, ContentFinalizeRequest
@@ -464,7 +464,7 @@ async def finalize_sse_generator(
 async def finalize_content_draft(
     draft_id: str,
     request: ContentFinalizeRequest,
-    wallet_address: str = Depends(require_auth),
+    wallet_address: str = Depends(require_finalize_auth),
     settings: Settings = Depends(get_settings)
 ):
     """
