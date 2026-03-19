@@ -173,11 +173,7 @@ def cmd_fix_bot_proposes(args):
 
     from .release_page import fix_bot_proposes_pages
 
-    wiki_api_url = args.wiki_url.rstrip('/') + '/api.php'
-    results = fix_bot_proposes_pages(
-        wiki=wiki_client,
-        wiki_api_url=wiki_api_url,
-    )
+    results = fix_bot_proposes_pages(wiki=wiki_client)
 
     updated = [r for r in results if r.action in ('updated', 'created')]
     errors = [r for r in results if r.action == 'error']
@@ -200,11 +196,7 @@ def cmd_clear_torrents(args):
 
     from .release_page import clear_torrent_fields
 
-    wiki_api_url = args.wiki_url.rstrip('/') + '/api.php'
-    results = clear_torrent_fields(
-        wiki=wiki_client,
-        wiki_api_url=wiki_api_url,
-    )
+    results = clear_torrent_fields(wiki=wiki_client)
 
     print(f"\nClear complete: {len(results)} pages cleared")
 
@@ -225,12 +217,8 @@ def cmd_enrich_torrents(args):
         print("Error: --delivery-kid-api-key required", file=sys.stderr)
         sys.exit(1)
 
-    # Build wiki API URL from wiki-url
-    wiki_api_url = args.wiki_url.rstrip('/') + '/api.php'
-
     results = enrich_releases(
         wiki=wiki_client,
-        wiki_api_url=wiki_api_url,
         delivery_kid_url=args.delivery_kid_url.rstrip('/'),
         delivery_kid_api_key=args.delivery_kid_api_key,
     )

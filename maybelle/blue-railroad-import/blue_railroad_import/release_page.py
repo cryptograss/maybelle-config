@@ -6,10 +6,14 @@ PickiPedia with basic metadata, and enriches existing pages that are
 missing metadata like file_type.
 """
 
+import json
 import logging
 import re
-import yaml
+import urllib.request
+import urllib.parse
 from typing import Optional
+
+import yaml
 
 from .wiki_client import WikiClientProtocol, SaveResult
 from .models import Token, Submission
@@ -158,14 +162,10 @@ def convert_releases_to_yaml(wiki) -> list[SaveResult]:
     Returns:
         List of SaveResult for each page processed.
     """
-    import urllib.request
-    import urllib.parse
-    import json
-
     results = []
 
     # Query all Release pages with their content model
-    api_url = f"{wiki._api_url}?action=query&list=allpages&apnamespace=3004&aplimit=500&format=json"
+    api_url = f"{wiki.api_url}?action=query&list=allpages&apnamespace=3004&aplimit=500&format=json"
     with urllib.request.urlopen(api_url, timeout=30) as response:
         data = json.loads(response.read().decode('utf-8'))
 
@@ -178,7 +178,7 @@ def convert_releases_to_yaml(wiki) -> list[SaveResult]:
 
         # Check content model via page info query
         info_url = (
-            f"{wiki._api_url}?action=query&titles={urllib.parse.quote(title)}"
+            f"{wiki.api_url}?action=query&titles={urllib.parse.quote(title)}"
             f"&prop=info&format=json"
         )
         with urllib.request.urlopen(info_url, timeout=30) as response:
@@ -237,7 +237,6 @@ def convert_releases_to_yaml(wiki) -> list[SaveResult]:
 
 def fix_bot_proposes_pages(
     wiki: WikiClientProtocol,
-    wiki_api_url: str,
 ) -> list[SaveResult]:
     """Replace Bot_proposes wikitext with proper YAML on Release pages.
 
@@ -248,19 +247,14 @@ def fix_bot_proposes_pages(
 
     Args:
         wiki: Wiki client instance
-        wiki_api_url: Full URL to api.php (e.g. https://pickipedia.xyz/api.php)
 
     Returns:
         List of SaveResult for each page processed.
     """
-    import urllib.request
-    import urllib.parse
-    import json
-
     results = []
 
     # Query all Release pages
-    url = f"{wiki_api_url}?action=query&list=allpages&apnamespace=3004&aplimit=500&format=json"
+    url = f"{wiki.api_url}?action=query&list=allpages&apnamespace=3004&aplimit=500&format=json"
     with urllib.request.urlopen(url, timeout=30) as response:
         data = json.loads(response.read().decode('utf-8'))
 
@@ -312,7 +306,6 @@ def fix_bot_proposes_pages(
 
 def clear_torrent_fields(
     wiki: WikiClientProtocol,
-    wiki_api_url: str,
 ) -> list[SaveResult]:
     """Remove bittorrent_infohash and bittorrent_trackers from all Release pages.
 
@@ -323,13 +316,9 @@ def clear_torrent_fields(
     starting with 'bittorrent_infohash:' and 'bittorrent_trackers:' plus
     any continuation lines (list items starting with '  - ').
     """
-    import urllib.request
-    import urllib.parse
-    import json
-
     results = []
 
-    url = f"{wiki_api_url}?action=query&list=allpages&apnamespace=3004&aplimit=500&format=json"
+    url = f"{wiki.api_url}?action=query&list=allpages&apnamespace=3004&aplimit=500&format=json"
     with urllib.request.urlopen(url, timeout=30) as response:
         data = json.loads(response.read().decode('utf-8'))
 

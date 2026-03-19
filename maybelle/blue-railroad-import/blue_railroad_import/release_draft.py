@@ -107,10 +107,8 @@ class BlueRailroadDraft(DraftType):
         return release
 
 
-class OtherDraft(DraftType):
-    """Catch-all for uploads that aren't records or Blue Railroad submissions."""
-
-    name = 'other'
+class ContentDraft(DraftType):
+    """Base for draft types that store metadata in a content block."""
 
     def build_release(self, draft_data: dict) -> dict:
         release = {}
@@ -121,12 +119,23 @@ class OtherDraft(DraftType):
             release['description'] = content['description']
         if content.get('file_type'):
             release['file_type'] = content['file_type']
+        return release
+
+
+class OtherDraft(ContentDraft):
+    """Catch-all for uploads that aren't records or Blue Railroad submissions."""
+
+    name = 'other'
+
+    def build_release(self, draft_data: dict) -> dict:
+        release = super().build_release(draft_data)
+        content = draft_data.get('content', {})
         if content.get('subsequent_to'):
             release['subsequent_to'] = content['subsequent_to']
         return release
 
 
-class VideoDraft(OtherDraft):
+class VideoDraft(ContentDraft):
     """Video upload with venue and performer metadata."""
 
     name = 'video'
@@ -162,7 +171,7 @@ def fetch_release_drafts(wiki) -> list[dict]:
 
     Returns list of dicts with 'title' and 'data' (parsed YAML).
     """
-    api_url = f"{wiki._api_url}?action=query&list=allpages&apnamespace={NS_RELEASEDRAFT}&aplimit=500&format=json"
+    api_url = f"{wiki.api_url}?action=query&list=allpages&apnamespace={NS_RELEASEDRAFT}&aplimit=500&format=json"
 
     try:
         with urllib.request.urlopen(api_url, timeout=30) as response:
@@ -211,7 +220,7 @@ def find_cid_from_history(wiki, page_title: str) -> Optional[str]:
     # Use the revisions API to get recent edit summaries
     encoded_title = urllib.parse.quote(page_title)
     url = (
-        f"{wiki._api_url}?action=query&titles={encoded_title}"
+        f"{wiki.api_url}?action=query&titles={encoded_title}"
         f"&prop=revisions&rvprop=comment&rvlimit=10&format=json"
     )
 

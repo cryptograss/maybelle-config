@@ -116,7 +116,6 @@ def append_torrent_fields(
 
 def enrich_releases(
     wiki: WikiClientProtocol,
-    wiki_api_url: str,
     delivery_kid_url: str,
     delivery_kid_api_key: str,
 ) -> list[SaveResult]:
@@ -131,7 +130,7 @@ def enrich_releases(
     """
     results = []
 
-    releases = get_releases_missing_torrent(wiki_api_url)
+    releases = get_releases_missing_torrent(wiki.api_url)
     logger.info("Found %d releases missing BitTorrent metadata", len(releases))
 
     if not releases:
