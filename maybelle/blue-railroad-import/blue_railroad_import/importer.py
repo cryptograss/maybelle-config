@@ -1,8 +1,11 @@
 """Main import orchestration."""
 
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 from .models import BotConfig, Token, Submission
 from .chain_data import load_chain_data, aggregate_tokens_from_sources, load_ens_mapping
@@ -127,55 +130,48 @@ class BlueRailroadImporter:
         wiki_client: WikiClientProtocol,
         chain_data_path: Path,
         config_page: str = CONFIG_PAGE,
-        verbose: bool = False,
     ):
         self.wiki = wiki_client
         self.chain_data_path = chain_data_path
         self.config_page = config_page
-        self.verbose = verbose
-
-    def log(self, message: str):
-        """Log a message if verbose mode is enabled."""
-        if self.verbose:
-            print(message)
 
     def load_config(self) -> BotConfig:
         """Load configuration from wiki page or use defaults."""
-        self.log(f"Loading config from: {self.config_page}")
+        logger.info(f"Loading config from: {self.config_page}")
 
         wiki_content = self.wiki.get_page_content(self.config_page)
         if wiki_content:
             config = parse_config_from_wikitext(wiki_content)
             if config:
-                self.log(f"  Found {len(config.sources)} source(s)")
-                self.log(f"  Found {len(config.leaderboards)} leaderboard(s)")
+                logger.info(f"  Found {len(config.sources)} source(s)")
+                logger.info(f"  Found {len(config.leaderboards)} leaderboard(s)")
                 return config
 
-        self.log("  Using default configuration")
+        logger.info("  Using default configuration")
         return get_default_config()
 
     def load_chain_data(self) -> dict:
         """Load raw chain data from file."""
-        self.log(f"Loading chain data from: {self.chain_data_path}")
+        logger.info(f"Loading chain data from: {self.chain_data_path}")
         return load_chain_data(self.chain_data_path)
 
     def load_tokens(self, chain_data: dict, config: BotConfig) -> dict[str, Token]:
         """Aggregate all tokens from chain data."""
         tokens = aggregate_tokens_from_sources(chain_data, config.sources)
-        self.log(f"  Loaded {len(tokens)} total tokens from {len(config.sources)} source(s)")
+        logger.info(f"  Loaded {len(tokens)} total tokens from {len(config.sources)} source(s)")
         return tokens
 
     def get_ens_mapping(self, chain_data: dict) -> dict[str, str]:
         """Extract ENS name -> address mapping from chain data."""
         ens_mapping = load_ens_mapping(chain_data)
-        self.log(f"  Loaded {len(ens_mapping)} ENS -> address mappings")
+        logger.info(f"  Loaded {len(ens_mapping)} ENS -> address mappings")
         return ens_mapping
 
     def load_submissions(self) -> list[Submission]:
         """Load all submissions from the wiki."""
-        self.log("Loading submissions from wiki...")
-        submissions = fetch_all_submissions(self.wiki, verbose=self.verbose)
-        self.log(f"  Loaded {len(submissions)} submission(s)")
+        logger.info("Loading submissions from wiki...")
+        submissions = fetch_all_submissions(self.wiki)
+        logger.info(f"  Loaded {len(submissions)} submission(s)")
         return submissions
 
     def ensure_thumbnail(self, token: Token) -> bool:
@@ -188,21 +184,21 @@ class BlueRailroadImporter:
         the same video will share the same thumbnail file.
         """
         if not token.ipfs_cid:
-            self.log(f"  No IPFS CID for token {token.token_id}, skipping thumbnail")
+            logger.info(f"  No IPFS CID for token {token.token_id}, skipping thumbnail")
             return False
 
         filename = get_thumbnail_filename(token.ipfs_cid)
 
         # Check if thumbnail already exists (may have been uploaded for another token)
         if self.wiki.file_exists(filename):
-            self.log(f"  Thumbnail already exists: {filename}")
+            logger.info(f"  Thumbnail already exists: {filename}")
             return True
 
         # Generate thumbnail
-        self.log(f"  Generating thumbnail for video {token.ipfs_cid}...")
+        logger.info(f"  Generating thumbnail for video {token.ipfs_cid}...")
         thumb_path = generate_thumbnail(token.ipfs_cid)
         if not thumb_path:
-            self.log(f"  Failed to generate thumbnail for video {token.ipfs_cid}")
+            logger.info(f"  Failed to generate thumbnail for video {token.ipfs_cid}")
             return False
 
         # Upload thumbnail
@@ -218,9 +214,9 @@ class BlueRailroadImporter:
             pass
 
         if success:
-            self.log(f"  Uploaded thumbnail: {filename}")
+            logger.info(f"  Uploaded thumbnail: {filename}")
         else:
-            self.log(f"  Failed to upload thumbnail: {filename}")
+            logger.info(f"  Failed to upload thumbnail: {filename}")
 
         return success
 
@@ -292,12 +288,12 @@ class BlueRailroadImporter:
         # This populates ipfs_cid on submissions that don't have it yet
         cid_sync_results = sync_submission_cids_from_tokens(
             self.wiki, all_tokens, all_submissions,
-            ens_mapping=ens_mapping, verbose=self.verbose
+            ens_mapping=ens_mapping,
         )
         for result in cid_sync_results:
             results.submission_pages.append(result)
             if result.action in ('created', 'updated'):
-                self.log(f"  Synced CID to submission: {result.page_title}")
+                logger.info(f"  Synced CID to submission: {result.page_title}")
 
         # Reload submissions if any CIDs were synced (to get updated data)
         if cid_sync_results:
@@ -310,7 +306,7 @@ class BlueRailroadImporter:
         if not token_to_submission:
             token_to_submission = match_tokens_by_blockheight_and_participant(
                 all_tokens, all_submissions,
-                ens_mapping=ens_mapping, verbose=self.verbose
+                ens_mapping=ens_mapping,
             )
 
         # Build reverse lookup: token_id -> submission_id
@@ -319,12 +315,12 @@ class BlueRailroadImporter:
             for tid in token_ids:
                 token_submission_map[str(tid)] = sub_id
 
-        self.log(f"  Matched {len(token_submission_map)} token(s) to {len(token_to_submission)} submission(s)")
+        logger.info(f"  Matched {len(token_submission_map)} token(s) to {len(token_to_submission)} submission(s)")
 
         # Import individual token pages
-        self.log("\nImporting token pages...")
+        logger.info("\nImporting token pages...")
         if generate_thumbnails:
-            self.log("  (thumbnail generation enabled)")
+            logger.info("  (thumbnail generation enabled)")
         for key, token in all_tokens.items():
             submission_id = token_submission_map.get(key)
             result = self.import_token(
@@ -335,42 +331,41 @@ class BlueRailroadImporter:
             results.token_pages.append(result)
 
             if result.action == 'created':
-                self.log(f"  Created: Blue Railroad Token {token.token_id}")
+                logger.info(f"  Created: Blue Railroad Token {token.token_id}")
             elif result.action == 'updated':
                 fields = ', '.join(result.changed_fields) if result.changed_fields else 'unknown'
-                self.log(f"  Updated: Blue Railroad Token {token.token_id} ({fields})")
+                logger.info(f"  Updated: Blue Railroad Token {token.token_id} ({fields})")
             elif result.action == 'error':
-                self.log(f"  ERROR: Blue Railroad Token {token.token_id}: {result.message}")
+                logger.info(f"  ERROR: Blue Railroad Token {token.token_id}: {result.message}")
 
-        self.log(f"\nToken page summary:")
-        self.log(f"  Created: {len(results.token_pages_created)}")
-        self.log(f"  Updated: {len(results.token_pages_updated)}")
-        self.log(f"  Unchanged: {len(results.token_pages_unchanged)}")
-        self.log(f"  Errors: {len(results.token_pages_error)}")
+        logger.info(f"\nToken page summary:")
+        logger.info(f"  Created: {len(results.token_pages_created)}")
+        logger.info(f"  Updated: {len(results.token_pages_updated)}")
+        logger.info(f"  Unchanged: {len(results.token_pages_unchanged)}")
+        logger.info(f"  Errors: {len(results.token_pages_error)}")
 
         # Update submission pages with token IDs
-        self.log("\nUpdating submission pages with token links...")
+        logger.info("\nUpdating submission pages with token links...")
         for sub_id, token_ids in token_to_submission.items():
             result = update_submission_token_ids(
                 self.wiki,
                 sub_id,
                 token_ids,
-                verbose=self.verbose,
             )
             results.submission_pages.append(result)
 
             if result.action == 'updated':
-                self.log(f"  Updated: Blue Railroad Submission/{sub_id} (tokens: {token_ids})")
+                logger.info(f"  Updated: Blue Railroad Submission/{sub_id} (tokens: {token_ids})")
             elif result.action == 'error':
-                self.log(f"  ERROR: Blue Railroad Submission/{sub_id}: {result.message}")
+                logger.info(f"  ERROR: Blue Railroad Submission/{sub_id}: {result.message}")
 
-        self.log(f"\nSubmission page summary:")
-        self.log(f"  Updated: {len(results.submission_pages_updated)}")
-        self.log(f"  Unchanged: {len(results.submission_pages_unchanged)}")
-        self.log(f"  Errors: {len(results.submission_pages_error)}")
+        logger.info(f"\nSubmission page summary:")
+        logger.info(f"  Updated: {len(results.submission_pages_updated)}")
+        logger.info(f"  Unchanged: {len(results.submission_pages_unchanged)}")
+        logger.info(f"  Errors: {len(results.submission_pages_error)}")
 
         # Ensure Release pages exist for tokens with IPFS CIDs
-        self.log("\nEnsuring Release pages for token videos...")
+        logger.info("\nEnsuring Release pages for token videos...")
         seen_cids: set[str] = set()
         for key, token in all_tokens.items():
             if not token.ipfs_cid or token.ipfs_cid in seen_cids:
@@ -380,16 +375,15 @@ class BlueRailroadImporter:
             result = ensure_release_for_token(
                 self.wiki, token,
                 submission_id=submission_id,
-                verbose=self.verbose,
             )
             if result:
                 results.release_pages.append(result)
                 if result.action == 'created':
-                    self.log(f"  Created: {result.page_title}")
+                    logger.info(f"  Created: {result.page_title}")
                 elif result.action == 'updated':
-                    self.log(f"  Enriched: {result.page_title}")
+                    logger.info(f"  Enriched: {result.page_title}")
                 elif result.action == 'error':
-                    self.log(f"  ERROR: {result.page_title}: {result.message}")
+                    logger.info(f"  ERROR: {result.page_title}: {result.message}")
 
         # Ensure Release pages for submissions with CIDs not already covered by tokens
         for sub in all_submissions:
@@ -397,53 +391,53 @@ class BlueRailroadImporter:
                 continue
             seen_cids.add(sub.ipfs_cid)
             result = ensure_release_for_submission(
-                self.wiki, sub, verbose=self.verbose,
+                self.wiki, sub,
             )
             if result:
                 results.release_pages.append(result)
                 if result.action == 'created':
-                    self.log(f"  Created: {result.page_title}")
+                    logger.info(f"  Created: {result.page_title}")
                 elif result.action == 'updated':
-                    self.log(f"  Enriched: {result.page_title}")
+                    logger.info(f"  Enriched: {result.page_title}")
                 elif result.action == 'error':
-                    self.log(f"  ERROR: {result.page_title}: {result.message}")
+                    logger.info(f"  ERROR: {result.page_title}: {result.message}")
 
-        self.log(f"\nRelease page summary:")
-        self.log(f"  Created: {len(results.release_pages_created)}")
-        self.log(f"  Updated: {len(results.release_pages_updated)}")
-        self.log(f"  Unchanged: {len(results.release_pages_unchanged)}")
-        self.log(f"  Errors: {len(results.release_pages_error)}")
+        logger.info(f"\nRelease page summary:")
+        logger.info(f"  Created: {len(results.release_pages_created)}")
+        logger.info(f"  Updated: {len(results.release_pages_updated)}")
+        logger.info(f"  Unchanged: {len(results.release_pages_unchanged)}")
+        logger.info(f"  Errors: {len(results.release_pages_error)}")
 
         # Promote completed ReleaseDrafts to Release pages
-        self.log("\nProcessing ReleaseDraft pages...")
-        draft_results = process_release_drafts(self.wiki, verbose=self.verbose)
+        logger.info("\nProcessing ReleaseDraft pages...")
+        draft_results = process_release_drafts(self.wiki)
         results.draft_promotions.extend(draft_results)
 
-        self.log(f"\nDraft promotion summary:")
-        self.log(f"  Created: {len(results.draft_promotions_created)}")
-        self.log(f"  Already exist: {len(results.draft_promotions_unchanged)}")
-        self.log(f"  Errors: {len(results.draft_promotions_error)}")
+        logger.info(f"\nDraft promotion summary:")
+        logger.info(f"  Created: {len(results.draft_promotions_created)}")
+        logger.info(f"  Already exist: {len(results.draft_promotions_unchanged)}")
+        logger.info(f"  Errors: {len(results.draft_promotions_error)}")
 
         # Generate leaderboards (using ALL aggregated tokens)
-        self.log(f"\nGenerating leaderboards from {len(all_tokens)} total tokens...")
+        logger.info(f"\nGenerating leaderboards from {len(all_tokens)} total tokens...")
         for lb_config in config.leaderboards:
             result = self.generate_leaderboard(all_tokens, lb_config)
             results.leaderboard_pages.append(result)
 
             if result.action == 'created':
-                self.log(f"  Created: {lb_config.page}")
+                logger.info(f"  Created: {lb_config.page}")
             elif result.action == 'updated':
                 fields = ', '.join(result.changed_fields) if result.changed_fields else 'content changed'
-                self.log(f"  Updated: {lb_config.page} ({fields})")
+                logger.info(f"  Updated: {lb_config.page} ({fields})")
             elif result.action == 'unchanged':
-                self.log(f"  Unchanged: {lb_config.page}")
+                logger.info(f"  Unchanged: {lb_config.page}")
             elif result.action == 'error':
-                self.log(f"  ERROR: {lb_config.page}: {result.message}")
+                logger.info(f"  ERROR: {lb_config.page}: {result.message}")
 
-        self.log(f"\nLeaderboard page summary:")
-        self.log(f"  Created: {len(results.leaderboard_pages_created)}")
-        self.log(f"  Updated: {len(results.leaderboard_pages_updated)}")
-        self.log(f"  Unchanged: {len(results.leaderboard_pages_unchanged)}")
-        self.log(f"  Errors: {len(results.leaderboard_pages_error)}")
+        logger.info(f"\nLeaderboard page summary:")
+        logger.info(f"  Created: {len(results.leaderboard_pages_created)}")
+        logger.info(f"  Updated: {len(results.leaderboard_pages_updated)}")
+        logger.info(f"  Unchanged: {len(results.leaderboard_pages_unchanged)}")
+        logger.info(f"  Errors: {len(results.leaderboard_pages_error)}")
 
         return results

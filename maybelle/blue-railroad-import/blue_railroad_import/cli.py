@@ -1,6 +1,7 @@
 """Command-line interface for the Blue Railroad import bot."""
 
 import argparse
+import logging
 import subprocess
 import sys
 from pathlib import Path
@@ -45,8 +46,19 @@ def create_wiki_client(args) -> MWClientWrapper | DryRunClient:
             sys.exit(1)
 
 
+def _configure_logging(args):
+    """Set up logging based on --verbose / --dry-run flags."""
+    level = logging.INFO if (args.verbose or args.dry_run) else logging.WARNING
+    logging.basicConfig(
+        level=level,
+        format='%(message)s',
+    )
+
+
 def cmd_import(args):
     """Run the import command."""
+    _configure_logging(args)
+
     # Validate chain data exists
     if not args.chain_data.exists():
         print(f"Error: Chain data file not found: {args.chain_data}", file=sys.stderr)
@@ -59,7 +71,6 @@ def cmd_import(args):
         wiki_client=wiki_client,
         chain_data_path=args.chain_data,
         config_page=args.config_page,
-        verbose=args.verbose or args.dry_run,
     )
 
     try:
@@ -87,13 +98,13 @@ def cmd_import(args):
 
 def cmd_update_submission(args):
     """Run the update-submission command."""
+    _configure_logging(args)
     wiki_client = create_wiki_client(args)
 
     result = update_submission_cid(
         wiki_client=wiki_client,
         submission_id=args.id,
         ipfs_cid=args.ipfs_cid,
-        verbose=args.verbose or args.dry_run,
     )
 
     if result.action == 'error':
@@ -111,6 +122,7 @@ def cmd_update_submission(args):
 
 def cmd_mark_minted(args):
     """Run the mark-minted command."""
+    _configure_logging(args)
     wiki_client = create_wiki_client(args)
 
     result = update_submission_token_id(
@@ -118,7 +130,6 @@ def cmd_mark_minted(args):
         submission_id=args.id,
         participant_wallet=args.wallet,
         token_id=args.token_id,
-        verbose=args.verbose or args.dry_run,
     )
 
     if result.action == 'error':
@@ -133,13 +144,11 @@ def cmd_mark_minted(args):
 
 def cmd_convert_releases(args):
     """Convert Release pages from wikitext to release-yaml content model."""
+    _configure_logging(args)
     wiki_client = create_wiki_client(args)
 
     from .release_page import convert_releases_to_yaml
-    results = convert_releases_to_yaml(
-        wiki_client,
-        verbose=args.verbose or args.dry_run,
-    )
+    results = convert_releases_to_yaml(wiki_client)
 
     converted = [r for r in results if r.action == 'updated']
     skipped = [r for r in results if r.action == 'unchanged']
@@ -159,6 +168,7 @@ def cmd_convert_releases(args):
 
 def cmd_fix_bot_proposes(args):
     """Fix Release pages that still have Bot_proposes wikitext content."""
+    _configure_logging(args)
     wiki_client = create_wiki_client(args)
 
     from .release_page import fix_bot_proposes_pages
@@ -167,7 +177,6 @@ def cmd_fix_bot_proposes(args):
     results = fix_bot_proposes_pages(
         wiki=wiki_client,
         wiki_api_url=wiki_api_url,
-        verbose=args.verbose or args.dry_run,
     )
 
     updated = [r for r in results if r.action in ('updated', 'created')]
@@ -186,6 +195,7 @@ def cmd_fix_bot_proposes(args):
 
 def cmd_clear_torrents(args):
     """Clear BitTorrent fields from all Release pages for regeneration."""
+    _configure_logging(args)
     wiki_client = create_wiki_client(args)
 
     from .release_page import clear_torrent_fields
@@ -194,7 +204,6 @@ def cmd_clear_torrents(args):
     results = clear_torrent_fields(
         wiki=wiki_client,
         wiki_api_url=wiki_api_url,
-        verbose=args.verbose or args.dry_run,
     )
 
     print(f"\nClear complete: {len(results)} pages cleared")
@@ -209,6 +218,7 @@ def cmd_clear_torrents(args):
 
 def cmd_enrich_torrents(args):
     """Enrich Release pages with BitTorrent metadata via delivery-kid."""
+    _configure_logging(args)
     wiki_client = create_wiki_client(args)
 
     if not args.delivery_kid_api_key:
@@ -223,7 +233,6 @@ def cmd_enrich_torrents(args):
         wiki_api_url=wiki_api_url,
         delivery_kid_url=args.delivery_kid_url.rstrip('/'),
         delivery_kid_api_key=args.delivery_kid_api_key,
-        verbose=args.verbose or args.dry_run,
     )
 
     updated = [r for r in results if r.action == 'updated']
