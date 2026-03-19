@@ -92,6 +92,11 @@ def _diff_wikitext(old: Optional[str], new: str) -> list[str]:
 class WikiClientProtocol(Protocol):
     """Protocol for wiki client operations (for testing)."""
 
+    @property
+    def api_url(self) -> str:
+        """The MediaWiki API URL (e.g. https://pickipedia.xyz/api.php)."""
+        ...
+
     def get_page_content(self, title: str) -> Optional[str]:
         """Get the current content of a page, or None if it doesn't exist."""
         ...
@@ -148,6 +153,10 @@ class MWClientWrapper:
         self.site = mwclient.Site(host, scheme=scheme, path='/')
         self.site.login(username, password)
         self._api_url = f"{scheme}://{host}/api.php"
+
+    @property
+    def api_url(self) -> str:
+        return self._api_url
 
     def get_page_content(self, title: str) -> Optional[str]:
         """Get the current content of a page, or None if it doesn't exist."""
@@ -266,6 +275,10 @@ class DryRunClient:
             host, scheme = _parse_site_url(wiki_url)
             self._site = mwclient.Site(host, scheme=scheme, path='/')
             self._api_url = f"{scheme}://{host}/api.php"
+
+    @property
+    def api_url(self) -> Optional[str]:
+        return self._api_url
 
     def _read_from_wiki(self, title: str) -> Optional[str]:
         """Read a page from the wiki (anonymous, cached)."""

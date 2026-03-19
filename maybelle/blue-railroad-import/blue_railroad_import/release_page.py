@@ -6,12 +6,19 @@ PickiPedia with basic metadata, and enriches existing pages that are
 missing metadata like file_type.
 """
 
+import json
+import logging
 import re
-import yaml
+import urllib.request
+import urllib.parse
 from typing import Optional
+
+import yaml
 
 from .wiki_client import WikiClientProtocol, SaveResult
 from .models import Token, Submission
+
+logger = logging.getLogger(__name__)
 
 
 def build_release_yaml(
@@ -57,7 +64,6 @@ def _enrich_existing(
     title: Optional[str] = None,
     description: Optional[str] = None,
     file_type: Optional[str] = None,
-    verbose: bool = False,
 ) -> SaveResult:
     """Check if an existing Release page needs enrichment.
 
@@ -91,8 +97,7 @@ def _enrich_existing(
 
     yaml_content = yaml.dump(existing_data, default_flow_style=False, allow_unicode=True)
 
-    if verbose:
-        print(f"  Enriching release page: {page_title}")
+    logger.info("  Enriching release page: %s", page_title)
 
     summary = 'Enrich release metadata (via Blue Railroad import)'
     return wiki.save_page(page_title, yaml_content, summary)
@@ -102,7 +107,6 @@ def ensure_release_for_token(
     wiki: WikiClientProtocol,
     token: Token,
     submission_id: Optional[int] = None,
-    verbose: bool = False,
 ) -> Optional[SaveResult]:
     """Ensure a Release page exists for a token's video CID.
 
@@ -129,7 +133,7 @@ def ensure_release_for_token(
         return _enrich_existing(
             wiki, page_title, cid,
             title=title, description=description,
-            file_type='video/webm', verbose=verbose,
+            file_type='video/webm',
         )
 
     yaml_content = build_release_yaml(
@@ -139,14 +143,13 @@ def ensure_release_for_token(
         file_type='video/webm',
     )
 
-    if verbose:
-        print(f"  Creating release page: {page_title}")
+    logger.info("  Creating release page: %s", page_title)
 
     summary = f'Create release for {title} (via Blue Railroad import)'
     return wiki.save_page(page_title, yaml_content, summary)
 
 
-def convert_releases_to_yaml(wiki, verbose: bool = False) -> list[SaveResult]:
+def convert_releases_to_yaml(wiki) -> list[SaveResult]:
     """Convert Release pages from wikitext to release-yaml content model.
 
     Queries all pages in the Release namespace (3004), checks their content
@@ -155,33 +158,27 @@ def convert_releases_to_yaml(wiki, verbose: bool = False) -> list[SaveResult]:
 
     Args:
         wiki: MWClientWrapper instance (needs .site access)
-        verbose: Print progress
 
     Returns:
         List of SaveResult for each page processed.
     """
-    import urllib.request
-    import urllib.parse
-    import json
-
     results = []
 
     # Query all Release pages with their content model
-    api_url = f"{wiki._api_url}?action=query&list=allpages&apnamespace=3004&aplimit=500&format=json"
+    api_url = f"{wiki.api_url}?action=query&list=allpages&apnamespace=3004&aplimit=500&format=json"
     with urllib.request.urlopen(api_url, timeout=30) as response:
         data = json.loads(response.read().decode('utf-8'))
 
     all_pages = data.get('query', {}).get('allpages', [])
 
-    if verbose:
-        print(f"Found {len(all_pages)} Release pages")
+    logger.info("Found %d Release pages", len(all_pages))
 
     for page_info in all_pages:
         title = page_info['title']
 
         # Check content model via page info query
         info_url = (
-            f"{wiki._api_url}?action=query&titles={urllib.parse.quote(title)}"
+            f"{wiki.api_url}?action=query&titles={urllib.parse.quote(title)}"
             f"&prop=info&format=json"
         )
         with urllib.request.urlopen(info_url, timeout=30) as response:
@@ -191,13 +188,11 @@ def convert_releases_to_yaml(wiki, verbose: bool = False) -> list[SaveResult]:
         content_model = page_data.get('contentmodel', 'unknown')
 
         if content_model == 'release-yaml':
-            if verbose:
-                print(f"  Already release-yaml: {title}")
+            logger.info("  Already release-yaml: %s", title)
             results.append(SaveResult(title, 'unchanged', 'Already release-yaml'))
             continue
 
-        if verbose:
-            print(f"  Converting: {title} (was {content_model})")
+        logger.info("  Converting: %s (was %s)", title, content_model)
 
         # Read existing content
         existing_content = wiki.get_page_content(title)
@@ -218,8 +213,7 @@ def convert_releases_to_yaml(wiki, verbose: bool = False) -> list[SaveResult]:
             if match:
                 extracted_title = match.group(1).strip()
                 existing_data['title'] = extracted_title
-                if verbose:
-                    print(f"    Extracted title from Bot_proposes: {extracted_title}")
+                logger.info("    Extracted title from Bot_proposes: %s", extracted_title)
 
         # Ensure ipfs_cid is set
         if not existing_data.get('ipfs_cid'):
@@ -243,8 +237,6 @@ def convert_releases_to_yaml(wiki, verbose: bool = False) -> list[SaveResult]:
 
 def fix_bot_proposes_pages(
     wiki: WikiClientProtocol,
-    wiki_api_url: str,
-    verbose: bool = False,
 ) -> list[SaveResult]:
     """Replace Bot_proposes wikitext with proper YAML on Release pages.
 
@@ -255,27 +247,20 @@ def fix_bot_proposes_pages(
 
     Args:
         wiki: Wiki client instance
-        wiki_api_url: Full URL to api.php (e.g. https://pickipedia.xyz/api.php)
-        verbose: Print progress
 
     Returns:
         List of SaveResult for each page processed.
     """
-    import urllib.request
-    import urllib.parse
-    import json
-
     results = []
 
     # Query all Release pages
-    url = f"{wiki_api_url}?action=query&list=allpages&apnamespace=3004&aplimit=500&format=json"
+    url = f"{wiki.api_url}?action=query&list=allpages&apnamespace=3004&aplimit=500&format=json"
     with urllib.request.urlopen(url, timeout=30) as response:
         data = json.loads(response.read().decode('utf-8'))
 
     all_pages = data.get('query', {}).get('allpages', [])
 
-    if verbose:
-        print(f"Found {len(all_pages)} Release pages, checking for Bot_proposes content...")
+    logger.info("Found %d Release pages, checking for Bot_proposes content...", len(all_pages))
 
     for page_info in all_pages:
         title = page_info['title']
@@ -294,8 +279,7 @@ def fix_bot_proposes_pages(
 
         # Skip titles that are just template defaults
         if extracted_title == 'Optional metadata':
-            if verbose:
-                print(f"  Skipping {title} (template default, no real title)")
+            logger.info("  Skipping %s (template default, no real title)", title)
             # Still replace with minimal YAML so enrichment can process it
             new_content = yaml.dump(
                 {'ipfs_cid': cid},
@@ -307,25 +291,21 @@ def fix_bot_proposes_pages(
                 default_flow_style=False, allow_unicode=True,
             )
 
-        if verbose:
-            print(f"  {title}")
-            print(f"    Was: {content.strip()[:80]}")
-            print(f"    Now: {new_content.strip()[:80]}")
+        logger.info("  %s", title)
+        logger.info("    Was: %s", content.strip()[:80])
+        logger.info("    Now: %s", new_content.strip()[:80])
 
         summary = f'Replace Bot_proposes wikitext with YAML (title: {extracted_title[:40]})'
         result = wiki.save_page(title, new_content, summary)
         results.append(result)
 
-    if verbose:
-        print(f"\nProcessed {len(results)} Bot_proposes pages")
+    logger.info("Processed %d Bot_proposes pages", len(results))
 
     return results
 
 
 def clear_torrent_fields(
     wiki: WikiClientProtocol,
-    wiki_api_url: str,
-    verbose: bool = False,
 ) -> list[SaveResult]:
     """Remove bittorrent_infohash and bittorrent_trackers from all Release pages.
 
@@ -336,20 +316,15 @@ def clear_torrent_fields(
     starting with 'bittorrent_infohash:' and 'bittorrent_trackers:' plus
     any continuation lines (list items starting with '  - ').
     """
-    import urllib.request
-    import urllib.parse
-    import json
-
     results = []
 
-    url = f"{wiki_api_url}?action=query&list=allpages&apnamespace=3004&aplimit=500&format=json"
+    url = f"{wiki.api_url}?action=query&list=allpages&apnamespace=3004&aplimit=500&format=json"
     with urllib.request.urlopen(url, timeout=30) as response:
         data = json.loads(response.read().decode('utf-8'))
 
     all_pages = data.get('query', {}).get('allpages', [])
 
-    if verbose:
-        print(f"Found {len(all_pages)} Release pages, checking for torrent fields...")
+    logger.info("Found %d Release pages, checking for torrent fields...", len(all_pages))
 
     for page_info in all_pages:
         title = page_info['title']
@@ -377,15 +352,13 @@ def clear_torrent_fields(
         if new_content == content:
             continue
 
-        if verbose:
-            print(f"  Clearing torrent fields from {title}")
+        logger.info("  Clearing torrent fields from %s", title)
 
         summary = 'Clear BitTorrent metadata for regeneration'
         result = wiki.save_page(title, new_content, summary)
         results.append(result)
 
-    if verbose:
-        print(f"\nCleared torrent fields from {len(results)} pages")
+    logger.info("Cleared torrent fields from %d pages", len(results))
 
     return results
 
@@ -393,7 +366,6 @@ def clear_torrent_fields(
 def ensure_release_for_submission(
     wiki: WikiClientProtocol,
     submission: Submission,
-    verbose: bool = False,
 ) -> Optional[SaveResult]:
     """Ensure a Release page exists for a submission's CID.
 
@@ -414,7 +386,7 @@ def ensure_release_for_submission(
         return _enrich_existing(
             wiki, page_title, cid,
             title=title, description=description,
-            file_type='video/webm', verbose=verbose,
+            file_type='video/webm',
         )
 
     yaml_content = build_release_yaml(
@@ -424,8 +396,7 @@ def ensure_release_for_submission(
         file_type='video/webm',
     )
 
-    if verbose:
-        print(f"  Creating release page: {page_title}")
+    logger.info("  Creating release page: %s", page_title)
 
     summary = f'Create release for {title} (via Blue Railroad import)'
     return wiki.save_page(page_title, yaml_content, summary)

@@ -116,10 +116,8 @@ def append_torrent_fields(
 
 def enrich_releases(
     wiki: WikiClientProtocol,
-    wiki_api_url: str,
     delivery_kid_url: str,
     delivery_kid_api_key: str,
-    verbose: bool = False,
 ) -> list[SaveResult]:
     """Find releases missing torrents and enrich them.
 
@@ -132,9 +130,8 @@ def enrich_releases(
     """
     results = []
 
-    releases = get_releases_missing_torrent(wiki_api_url)
-    if verbose:
-        print(f"Found {len(releases)} releases missing BitTorrent metadata")
+    releases = get_releases_missing_torrent(wiki.api_url)
+    logger.info("Found %d releases missing BitTorrent metadata", len(releases))
 
     if not releases:
         return results
@@ -144,8 +141,7 @@ def enrich_releases(
         page_title = f"Release:{release['page_title']}"
         title = release.get("title") or cid
 
-        if verbose:
-            print(f"  Processing: {title} ({cid[:16]}...)")
+        logger.info("  Processing: %s (%s...)", title, cid[:16])
 
         # Call delivery-kid for torrent generation
         torrent = generate_torrent_for_cid(
@@ -162,9 +158,8 @@ def enrich_releases(
         webseeds = torrent.get("webseeds") or []
         torrent_url = torrent.get("torrent_url")
 
-        if verbose:
-            print(f"    Infohash: {infohash}")
-            print(f"    Files: {torrent.get('file_count')}, Size: {torrent.get('total_size')}")
+        logger.info("    Infohash: %s", infohash)
+        logger.info("    Files: %s, Size: %s", torrent.get('file_count'), torrent.get('total_size'))
 
         # Read current page content
         existing_content = wiki.get_page_content(page_title)
@@ -177,8 +172,7 @@ def enrich_releases(
 
         if new_content == existing_content:
             results.append(SaveResult(page_title, "unchanged", "Already has infohash"))
-            if verbose:
-                print(f"    Skipped (already has infohash)")
+            logger.info("    Skipped (already has infohash)")
             continue
 
         # Save via wiki client
@@ -186,7 +180,6 @@ def enrich_releases(
         result = wiki.save_page(page_title, new_content, summary)
         results.append(result)
 
-        if verbose:
-            print(f"    {result.action}: {result.message or page_title}")
+        logger.info("    %s: %s", result.action, result.message or page_title)
 
     return results

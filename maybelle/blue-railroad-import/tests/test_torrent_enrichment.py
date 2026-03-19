@@ -157,7 +157,7 @@ class TestEnrichReleases:
 
         results = enrich_releases(
             wiki=wiki,
-            wiki_api_url="https://pickipedia.xyz/api.php",
+
             delivery_kid_url="https://delivery-kid.cryptograss.live",
             delivery_kid_api_key="test-key",
         )
@@ -197,7 +197,7 @@ class TestEnrichReleases:
 
         enrich_releases(
             wiki=wiki,
-            wiki_api_url="https://pickipedia.xyz/api.php",
+
             delivery_kid_url="https://delivery-kid.cryptograss.live",
             delivery_kid_api_key="test-key",
         )
@@ -214,7 +214,7 @@ class TestEnrichReleases:
 
         results = enrich_releases(
             wiki=wiki,
-            wiki_api_url="https://pickipedia.xyz/api.php",
+
             delivery_kid_url="https://delivery-kid.cryptograss.live",
             delivery_kid_api_key="test-key",
         )
@@ -248,7 +248,7 @@ class TestEnrichReleases:
 
         results = enrich_releases(
             wiki=wiki,
-            wiki_api_url="https://pickipedia.xyz/api.php",
+
             delivery_kid_url="https://delivery-kid.cryptograss.live",
             delivery_kid_api_key="test-key",
         )
@@ -276,7 +276,7 @@ class TestEnrichReleases:
 
         results = enrich_releases(
             wiki=wiki,
-            wiki_api_url="https://pickipedia.xyz/api.php",
+
             delivery_kid_url="https://delivery-kid.cryptograss.live",
             delivery_kid_api_key="test-key",
         )

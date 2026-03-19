@@ -1,5 +1,6 @@
 """Operations for Blue Railroad submission pages."""
 
+import logging
 import re
 from typing import Optional, Tuple
 
@@ -7,6 +8,8 @@ import mwparserfromhell
 
 from .models import Submission, Token
 from .wiki_client import WikiClientProtocol, SaveResult
+
+logger = logging.getLogger(__name__)
 
 
 SUBMISSION_PAGE_PREFIX = 'Blue Railroad Submission/'
@@ -65,7 +68,6 @@ def update_submission_cid(
     wiki_client: WikiClientProtocol,
     submission_id: int,
     ipfs_cid: str,
-    verbose: bool = False,
 ) -> SaveResult:
     """Update a submission page with the IPFS CID.
 
@@ -73,15 +75,12 @@ def update_submission_cid(
         wiki_client: Wiki client for reading/writing pages
         submission_id: The submission number (e.g., 1 for "Blue Railroad Submission/1")
         ipfs_cid: The IPFS CID to add (e.g., "bafybeif...")
-        verbose: Print progress messages
 
     Returns:
         SaveResult indicating what happened
     """
     page_title = get_submission_page_title(submission_id)
-
-    if verbose:
-        print(f"Updating {page_title} with IPFS CID: {ipfs_cid}")
+    logger.info("Updating %s with IPFS CID: %s", page_title, ipfs_cid)
 
     # Get current page content
     current_content = wiki_client.get_page_content(page_title)
@@ -110,7 +109,6 @@ def update_submission_token_id(
     submission_id: int,
     participant_wallet: str,
     token_id: int,
-    verbose: bool = False,
 ) -> SaveResult:
     """Update a submission page to record a minted token for a participant.
 
@@ -122,15 +120,12 @@ def update_submission_token_id(
         submission_id: The submission number
         participant_wallet: The wallet address that received the token
         token_id: The minted token ID
-        verbose: Print progress messages
 
     Returns:
         SaveResult indicating what happened
     """
     page_title = get_submission_page_title(submission_id)
-
-    if verbose:
-        print(f"Recording mint for {page_title}: Token #{token_id} to {participant_wallet}")
+    logger.info("Recording mint for %s: Token #%d to %s", page_title, token_id, participant_wallet)
 
     current_content = wiki_client.get_page_content(page_title)
 
@@ -231,7 +226,6 @@ def fetch_submission(
 def fetch_all_submissions(
     wiki_client: WikiClientProtocol,
     max_id: int = MAX_SUBMISSION_ID,
-    verbose: bool = False,
 ) -> list[Submission]:
     """Fetch all submissions from the wiki (pages 1 through max_id)."""
     submissions = []
@@ -240,8 +234,7 @@ def fetch_all_submissions(
         submission = fetch_submission(wiki_client, i)
         if submission:
             submissions.append(submission)
-            if verbose:
-                print(f"  Loaded submission #{i}: {submission.exercise}")
+            logger.info("  Loaded submission #%d: %s", i, submission.exercise)
 
     return submissions
 
@@ -250,7 +243,6 @@ def update_submission_token_ids(
     wiki_client: WikiClientProtocol,
     submission_id: int,
     token_ids: list[int],
-    verbose: bool = False,
 ) -> SaveResult:
     """Update a submission page with the list of minted token IDs.
 
@@ -260,15 +252,12 @@ def update_submission_token_ids(
         wiki_client: Wiki client for reading/writing pages
         submission_id: The submission number
         token_ids: List of token IDs minted from this submission
-        verbose: Print progress messages
 
     Returns:
         SaveResult indicating what happened
     """
     page_title = get_submission_page_title(submission_id)
-
-    if verbose:
-        print(f"Updating {page_title} with token IDs: {token_ids}")
+    logger.info("Updating %s with token IDs: %s", page_title, token_ids)
 
     current_content = wiki_client.get_page_content(page_title)
 
@@ -378,7 +367,6 @@ def find_tokens_for_submission(
 def match_submissions_via_smw(
     wiki_client: WikiClientProtocol,
     submissions: list[Submission],
-    verbose: bool = False,
 ) -> dict[int, list[int]]:
     """Match tokens to submissions using Semantic MediaWiki queries.
 
@@ -398,8 +386,7 @@ def match_submissions_via_smw(
         if tokens:
             token_ids = [int(t.token_id) for t in tokens]
             result[sub.id] = sorted(token_ids)
-            if verbose:
-                print(f"  Submission {sub.id}: found {len(tokens)} tokens via SMW")
+            logger.info("  Submission %d: found %d tokens via SMW", sub.id, len(tokens))
 
     return result
 
@@ -408,7 +395,6 @@ def match_tokens_by_blockheight_and_participant(
     tokens: dict[str, Token],
     submissions: list[Submission],
     ens_mapping: Optional[dict[str, str]] = None,
-    verbose: bool = False,
 ) -> dict[int, list[int]]:
     """Match tokens to submissions using blockheight + participant wallet.
 
@@ -424,7 +410,6 @@ def match_tokens_by_blockheight_and_participant(
         tokens: Dict of token_id -> Token
         submissions: List of submissions to match against
         ens_mapping: Optional dict mapping ENS names to addresses
-        verbose: Print progress messages
 
     Returns a dict mapping submission_id -> list of token_ids.
     """
@@ -447,10 +432,9 @@ def match_tokens_by_blockheight_and_participant(
                 if address:
                     key = (sub.block_height, address.lower())
                     blockheight_address_map[key] = sub
-                    if verbose:
-                        print(f"  Resolved {wallet} -> {address}")
-                elif verbose:
-                    print(f"  Could not resolve ENS: {wallet}")
+                    logger.info("  Resolved %s -> %s", wallet, address)
+                else:
+                    logger.info("  Could not resolve ENS: %s", wallet)
             else:
                 # Assume it's already an address
                 key = (sub.block_height, wallet_lower)
@@ -469,8 +453,7 @@ def match_tokens_by_blockheight_and_participant(
             if sub.id not in result:
                 result[sub.id] = []
             result[sub.id].append(int(token_id_str))
-            if verbose:
-                print(f"  Token {token_id_str} -> Submission {sub.id} (blockheight {token.blockheight})")
+            logger.info("  Token %s -> Submission %d (blockheight %s)", token_id_str, sub.id, token.blockheight)
 
     # Sort token IDs for each submission
     for sub_id in result:
@@ -484,7 +467,6 @@ def sync_submission_cids_from_tokens(
     tokens: dict[str, Token],
     submissions: list[Submission],
     ens_mapping: Optional[dict[str, str]] = None,
-    verbose: bool = False,
 ) -> list[SaveResult]:
     """Sync IPFS CIDs from matched tokens to submissions.
 
@@ -496,13 +478,12 @@ def sync_submission_cids_from_tokens(
         tokens: Dict of token_id -> Token
         submissions: List of submissions to sync
         ens_mapping: Optional dict mapping ENS names to addresses
-        verbose: Print progress messages
 
     Returns list of SaveResults for updated submissions.
     """
     results = []
     matches = match_tokens_by_blockheight_and_participant(
-        tokens, submissions, ens_mapping=ens_mapping, verbose=verbose
+        tokens, submissions, ens_mapping=ens_mapping,
     )
 
     for sub_id, token_ids in matches.items():
@@ -519,9 +500,8 @@ def sync_submission_cids_from_tokens(
 
         # Update submission CID if not already set
         if sub.ipfs_cid != token.ipfs_cid:
-            if verbose:
-                print(f"  Setting CID for submission {sub_id}: {token.ipfs_cid}")
-            result = update_submission_cid(wiki_client, sub_id, token.ipfs_cid, verbose=False)
+            logger.info("  Setting CID for submission %d: %s", sub_id, token.ipfs_cid)
+            result = update_submission_cid(wiki_client, sub_id, token.ipfs_cid)
             results.append(result)
 
     return results
