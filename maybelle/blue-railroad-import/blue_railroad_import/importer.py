@@ -137,14 +137,14 @@ class BlueRailroadImporter:
 
     def load_config(self) -> BotConfig:
         """Load configuration from wiki page or use defaults."""
-        logger.info(f"Loading config from: {self.config_page}")
+        logger.info("Loading config from: %s", self.config_page)
 
         wiki_content = self.wiki.get_page_content(self.config_page)
         if wiki_content:
             config = parse_config_from_wikitext(wiki_content)
             if config:
-                logger.info(f"  Found {len(config.sources)} source(s)")
-                logger.info(f"  Found {len(config.leaderboards)} leaderboard(s)")
+                logger.info("  Found %s source(s)", len(config.sources))
+                logger.info("  Found %s leaderboard(s)", len(config.leaderboards))
                 return config
 
         logger.info("  Using default configuration")
@@ -152,26 +152,26 @@ class BlueRailroadImporter:
 
     def load_chain_data(self) -> dict:
         """Load raw chain data from file."""
-        logger.info(f"Loading chain data from: {self.chain_data_path}")
+        logger.info("Loading chain data from: %s", self.chain_data_path)
         return load_chain_data(self.chain_data_path)
 
     def load_tokens(self, chain_data: dict, config: BotConfig) -> dict[str, Token]:
         """Aggregate all tokens from chain data."""
         tokens = aggregate_tokens_from_sources(chain_data, config.sources)
-        logger.info(f"  Loaded {len(tokens)} total tokens from {len(config.sources)} source(s)")
+        logger.info("  Loaded %s total tokens from %s source(s)", len(tokens), len(config.sources))
         return tokens
 
     def get_ens_mapping(self, chain_data: dict) -> dict[str, str]:
         """Extract ENS name -> address mapping from chain data."""
         ens_mapping = load_ens_mapping(chain_data)
-        logger.info(f"  Loaded {len(ens_mapping)} ENS -> address mappings")
+        logger.info("  Loaded %s ENS -> address mappings", len(ens_mapping))
         return ens_mapping
 
     def load_submissions(self) -> list[Submission]:
         """Load all submissions from the wiki."""
         logger.info("Loading submissions from wiki...")
         submissions = fetch_all_submissions(self.wiki)
-        logger.info(f"  Loaded {len(submissions)} submission(s)")
+        logger.info("  Loaded %s submission(s)", len(submissions))
         return submissions
 
     def ensure_thumbnail(self, token: Token) -> bool:
@@ -184,21 +184,21 @@ class BlueRailroadImporter:
         the same video will share the same thumbnail file.
         """
         if not token.ipfs_cid:
-            logger.info(f"  No IPFS CID for token {token.token_id}, skipping thumbnail")
+            logger.info("  No IPFS CID for token %s, skipping thumbnail", token.token_id)
             return False
 
         filename = get_thumbnail_filename(token.ipfs_cid)
 
         # Check if thumbnail already exists (may have been uploaded for another token)
         if self.wiki.file_exists(filename):
-            logger.info(f"  Thumbnail already exists: {filename}")
+            logger.info("  Thumbnail already exists: %s", filename)
             return True
 
         # Generate thumbnail
-        logger.info(f"  Generating thumbnail for video {token.ipfs_cid}...")
+        logger.info("  Generating thumbnail for video %s...", token.ipfs_cid)
         thumb_path = generate_thumbnail(token.ipfs_cid)
         if not thumb_path:
-            logger.info(f"  Failed to generate thumbnail for video {token.ipfs_cid}")
+            logger.info("  Failed to generate thumbnail for video %s", token.ipfs_cid)
             return False
 
         # Upload thumbnail
@@ -214,9 +214,9 @@ class BlueRailroadImporter:
             pass
 
         if success:
-            logger.info(f"  Uploaded thumbnail: {filename}")
+            logger.info("  Uploaded thumbnail: %s", filename)
         else:
-            logger.info(f"  Failed to upload thumbnail: {filename}")
+            logger.info("  Failed to upload thumbnail: %s", filename)
 
         return success
 
@@ -293,7 +293,7 @@ class BlueRailroadImporter:
         for result in cid_sync_results:
             results.submission_pages.append(result)
             if result.action in ('created', 'updated'):
-                logger.info(f"  Synced CID to submission: {result.page_title}")
+                logger.info("  Synced CID to submission: %s", result.page_title)
 
         # Reload submissions if any CIDs were synced (to get updated data)
         if cid_sync_results:
@@ -315,7 +315,7 @@ class BlueRailroadImporter:
             for tid in token_ids:
                 token_submission_map[str(tid)] = sub_id
 
-        logger.info(f"  Matched {len(token_submission_map)} token(s) to {len(token_to_submission)} submission(s)")
+        logger.info("  Matched %s token(s) to %s submission(s)", len(token_submission_map), len(token_to_submission))
 
         # Import individual token pages
         logger.info("\nImporting token pages...")
@@ -331,18 +331,18 @@ class BlueRailroadImporter:
             results.token_pages.append(result)
 
             if result.action == 'created':
-                logger.info(f"  Created: Blue Railroad Token {token.token_id}")
+                logger.info("  Created: Blue Railroad Token %s", token.token_id)
             elif result.action == 'updated':
                 fields = ', '.join(result.changed_fields) if result.changed_fields else 'unknown'
-                logger.info(f"  Updated: Blue Railroad Token {token.token_id} ({fields})")
+                logger.info("  Updated: Blue Railroad Token %s (%s)", token.token_id, fields)
             elif result.action == 'error':
-                logger.info(f"  ERROR: Blue Railroad Token {token.token_id}: {result.message}")
+                logger.info("  ERROR: Blue Railroad Token %s: %s", token.token_id, result.message)
 
-        logger.info(f"\nToken page summary:")
-        logger.info(f"  Created: {len(results.token_pages_created)}")
-        logger.info(f"  Updated: {len(results.token_pages_updated)}")
-        logger.info(f"  Unchanged: {len(results.token_pages_unchanged)}")
-        logger.info(f"  Errors: {len(results.token_pages_error)}")
+        logger.info("\nToken page summary:")
+        logger.info("  Created: %s", len(results.token_pages_created))
+        logger.info("  Updated: %s", len(results.token_pages_updated))
+        logger.info("  Unchanged: %s", len(results.token_pages_unchanged))
+        logger.info("  Errors: %s", len(results.token_pages_error))
 
         # Update submission pages with token IDs
         logger.info("\nUpdating submission pages with token links...")
@@ -355,14 +355,14 @@ class BlueRailroadImporter:
             results.submission_pages.append(result)
 
             if result.action == 'updated':
-                logger.info(f"  Updated: Blue Railroad Submission/{sub_id} (tokens: {token_ids})")
+                logger.info("  Updated: Blue Railroad Submission/%s (tokens: %s)", sub_id, token_ids)
             elif result.action == 'error':
-                logger.info(f"  ERROR: Blue Railroad Submission/{sub_id}: {result.message}")
+                logger.info("  ERROR: Blue Railroad Submission/%s: %s", sub_id, result.message)
 
-        logger.info(f"\nSubmission page summary:")
-        logger.info(f"  Updated: {len(results.submission_pages_updated)}")
-        logger.info(f"  Unchanged: {len(results.submission_pages_unchanged)}")
-        logger.info(f"  Errors: {len(results.submission_pages_error)}")
+        logger.info("\nSubmission page summary:")
+        logger.info("  Updated: %s", len(results.submission_pages_updated))
+        logger.info("  Unchanged: %s", len(results.submission_pages_unchanged))
+        logger.info("  Errors: %s", len(results.submission_pages_error))
 
         # Ensure Release pages exist for tokens with IPFS CIDs
         logger.info("\nEnsuring Release pages for token videos...")
@@ -379,11 +379,11 @@ class BlueRailroadImporter:
             if result:
                 results.release_pages.append(result)
                 if result.action == 'created':
-                    logger.info(f"  Created: {result.page_title}")
+                    logger.info("  Created: %s", result.page_title)
                 elif result.action == 'updated':
-                    logger.info(f"  Enriched: {result.page_title}")
+                    logger.info("  Enriched: %s", result.page_title)
                 elif result.action == 'error':
-                    logger.info(f"  ERROR: {result.page_title}: {result.message}")
+                    logger.info("  ERROR: %s: %s", result.page_title, result.message)
 
         # Ensure Release pages for submissions with CIDs not already covered by tokens
         for sub in all_submissions:
@@ -396,48 +396,48 @@ class BlueRailroadImporter:
             if result:
                 results.release_pages.append(result)
                 if result.action == 'created':
-                    logger.info(f"  Created: {result.page_title}")
+                    logger.info("  Created: %s", result.page_title)
                 elif result.action == 'updated':
-                    logger.info(f"  Enriched: {result.page_title}")
+                    logger.info("  Enriched: %s", result.page_title)
                 elif result.action == 'error':
-                    logger.info(f"  ERROR: {result.page_title}: {result.message}")
+                    logger.info("  ERROR: %s: %s", result.page_title, result.message)
 
-        logger.info(f"\nRelease page summary:")
-        logger.info(f"  Created: {len(results.release_pages_created)}")
-        logger.info(f"  Updated: {len(results.release_pages_updated)}")
-        logger.info(f"  Unchanged: {len(results.release_pages_unchanged)}")
-        logger.info(f"  Errors: {len(results.release_pages_error)}")
+        logger.info("\nRelease page summary:")
+        logger.info("  Created: %s", len(results.release_pages_created))
+        logger.info("  Updated: %s", len(results.release_pages_updated))
+        logger.info("  Unchanged: %s", len(results.release_pages_unchanged))
+        logger.info("  Errors: %s", len(results.release_pages_error))
 
         # Promote completed ReleaseDrafts to Release pages
         logger.info("\nProcessing ReleaseDraft pages...")
         draft_results = process_release_drafts(self.wiki)
         results.draft_promotions.extend(draft_results)
 
-        logger.info(f"\nDraft promotion summary:")
-        logger.info(f"  Created: {len(results.draft_promotions_created)}")
-        logger.info(f"  Already exist: {len(results.draft_promotions_unchanged)}")
-        logger.info(f"  Errors: {len(results.draft_promotions_error)}")
+        logger.info("\nDraft promotion summary:")
+        logger.info("  Created: %s", len(results.draft_promotions_created))
+        logger.info("  Already exist: %s", len(results.draft_promotions_unchanged))
+        logger.info("  Errors: %s", len(results.draft_promotions_error))
 
         # Generate leaderboards (using ALL aggregated tokens)
-        logger.info(f"\nGenerating leaderboards from {len(all_tokens)} total tokens...")
+        logger.info("\nGenerating leaderboards from %s total tokens...", len(all_tokens))
         for lb_config in config.leaderboards:
             result = self.generate_leaderboard(all_tokens, lb_config)
             results.leaderboard_pages.append(result)
 
             if result.action == 'created':
-                logger.info(f"  Created: {lb_config.page}")
+                logger.info("  Created: %s", lb_config.page)
             elif result.action == 'updated':
                 fields = ', '.join(result.changed_fields) if result.changed_fields else 'content changed'
-                logger.info(f"  Updated: {lb_config.page} ({fields})")
+                logger.info("  Updated: %s (%s)", lb_config.page, fields)
             elif result.action == 'unchanged':
-                logger.info(f"  Unchanged: {lb_config.page}")
+                logger.info("  Unchanged: %s", lb_config.page)
             elif result.action == 'error':
-                logger.info(f"  ERROR: {lb_config.page}: {result.message}")
+                logger.info("  ERROR: %s: %s", lb_config.page, result.message)
 
-        logger.info(f"\nLeaderboard page summary:")
-        logger.info(f"  Created: {len(results.leaderboard_pages_created)}")
-        logger.info(f"  Updated: {len(results.leaderboard_pages_updated)}")
-        logger.info(f"  Unchanged: {len(results.leaderboard_pages_unchanged)}")
-        logger.info(f"  Errors: {len(results.leaderboard_pages_error)}")
+        logger.info("\nLeaderboard page summary:")
+        logger.info("  Created: %s", len(results.leaderboard_pages_created))
+        logger.info("  Updated: %s", len(results.leaderboard_pages_updated))
+        logger.info("  Unchanged: %s", len(results.leaderboard_pages_unchanged))
+        logger.info("  Errors: %s", len(results.leaderboard_pages_error))
 
         return results

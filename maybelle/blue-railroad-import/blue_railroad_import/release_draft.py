@@ -126,20 +126,14 @@ class OtherDraft(DraftType):
         return release
 
 
-class VideoDraft(DraftType):
+class VideoDraft(OtherDraft):
     """Video upload with venue and performer metadata."""
 
     name = 'video'
 
     def build_release(self, draft_data: dict) -> dict:
-        release = {}
+        release = super().build_release(draft_data)
         content = draft_data.get('content', {})
-        if content.get('title'):
-            release['title'] = content['title']
-        if content.get('description'):
-            release['description'] = content['description']
-        if content.get('file_type'):
-            release['file_type'] = content['file_type']
         if content.get('venue'):
             release['venue'] = content['venue']
         if content.get('performers'):
