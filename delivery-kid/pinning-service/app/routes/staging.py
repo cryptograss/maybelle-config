@@ -20,6 +20,7 @@ from fastapi.responses import FileResponse
 
 from ..auth import require_auth, verify_upload_token
 from ..config import get_settings, Settings
+from ..models.content import ContentDraftState
 
 router = APIRouter(prefix="/staging", tags=["staging"])
 
@@ -36,55 +37,61 @@ for _ext, _mime in _MEDIA_TYPES.items():
     mimetypes.add_type(_mime, _ext)
 
 
-async def require_staging_auth(
-    request: Request,
-    token: Optional[str] = Query(None),
-    user: Optional[str] = Query(None),
-    timestamp: Optional[str] = Query(None),
-    settings: Settings = Depends(get_settings),
-) -> str:
-    """Authenticate via headers (standard) or query params (for <video src>).
-
-    Query param auth uses the same HMAC verification as header auth,
-    just sourced from ?token=&user=&timestamp= instead of X-Upload-* headers.
-    """
-    # Try header auth first (X-Upload-Token, X-API-Key, or X-Signature).
-    # If it fails, fall through to query param auth below.
+def _check_preview_token(draft_id: str, preview_token: str, settings: Settings) -> bool:
+    """Validate a preview_token against the draft state on disk."""
+    import json
+    draft_json = Path(settings.staging_dir) / "drafts" / draft_id / "draft.json"
+    if not draft_json.exists():
+        return False
     try:
-        return await require_auth(request, settings)
-    except HTTPException:
-        pass
+        data = json.loads(draft_json.read_text())
+        return data.get("preview_token") == preview_token and preview_token
+    except (json.JSONDecodeError, OSError):
+        return False
 
-    # Fall back to query param auth
-    if token and user and timestamp:
-        try:
-            ts = int(timestamp)
-        except (ValueError, TypeError):
-            raise HTTPException(status_code=401, detail="Invalid timestamp")
-
-        if verify_upload_token(token, user, ts, settings, action="upload"):
-            return f"wiki:{user}"
-
-    raise HTTPException(
-        status_code=401,
-        detail="Authentication required (via headers or query params)"
-    )
 
 
 @router.get("/drafts/{draft_id}/{filename}")
 async def get_staging_file(
     draft_id: str,
     filename: str,
-    identity: str = Depends(require_staging_auth),
+    request: Request,
+    token: Optional[str] = Query(None),
+    user: Optional[str] = Query(None),
+    timestamp: Optional[str] = Query(None),
+    preview_token: Optional[str] = Query(None),
     settings: Settings = Depends(get_settings),
 ):
     """Serve a file from a staging draft for preview.
 
     Used by the ReleaseDraft page to embed video/audio players.
+    Also used by Coconut to fetch source video for transcoding (via preview_token).
+
+    Auth: HMAC headers, HMAC query params, or preview_token query param.
     """
     # Sanitize path components to prevent traversal
     if ".." in draft_id or "/" in draft_id or ".." in filename or "/" in filename:
         raise HTTPException(status_code=400, detail="Invalid path")
+
+    # Auth: preview_token (for Coconut), then headers, then HMAC query params
+    authenticated = False
+    if preview_token and _check_preview_token(draft_id, preview_token, settings):
+        authenticated = True
+    if not authenticated:
+        try:
+            await require_auth(request, settings)
+            authenticated = True
+        except HTTPException:
+            pass
+    if not authenticated and token and user and timestamp:
+        try:
+            ts = int(timestamp)
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=401, detail="Invalid timestamp")
+        if verify_upload_token(token, user, ts, settings, action="upload"):
+            authenticated = True
+    if not authenticated:
+        raise HTTPException(status_code=401, detail="Authentication required")
 
     file_path = Path(settings.staging_dir) / "drafts" / draft_id / "upload" / filename
 
