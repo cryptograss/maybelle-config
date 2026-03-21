@@ -61,6 +61,7 @@ async def submit_to_coconut(
     qualities: list[int] | None = None,
     trim_start: float | None = None,
     trim_end: float | None = None,
+    include_preview: bool = False,
 ) -> dict:
     """Submit a video to Coconut for AV1 HLS transcoding.
 
@@ -116,6 +117,28 @@ async def submit_to_coconut(
             "variants": [f"hls_av1_{q}p" for q in qualities],
         },
     }
+
+    # Optional 480p H.264 preview MP4 — lightweight, plays natively in all browsers
+    if include_preview:
+        preview_output = {
+            "path": "/output/preview.mp4",
+            "video": {
+                "codec": "h264",
+                "height": 480,
+                "bitrate": "800k",
+            },
+            "audio": {
+                "codec": "aac",
+                "bitrate": "96k",
+            },
+        }
+        if trim_start is not None:
+            preview_output["offset"] = trim_start
+        if trim_start is not None and trim_end is not None:
+            preview_output["duration"] = trim_end - trim_start
+        elif trim_end is not None:
+            preview_output["duration"] = trim_end
+        outputs["mp4_preview"] = preview_output
 
     job_config = {
         "input": {"url": source_url},
@@ -208,9 +231,10 @@ async def process_completed_job(
     ipfs_api_url: str,
     pinata_jwt: str = "",
 ) -> Optional[str]:
-    """Process a completed Coconut job: download HLS, pin to IPFS.
+    """Process a completed Coconut job: download HLS + preview, pin to IPFS.
 
     Returns the HLS directory CID, or None on failure.
+    Also pins the preview MP4 if present and stores its CID in job["previewCid"].
     """
     job_id = job["id"]
     hls_dir = staging_dir / f"hls-{job_id}"
@@ -219,7 +243,27 @@ async def process_completed_job(
         # Download all HLS outputs
         await download_hls_outputs(outputs, hls_dir)
 
-        # Pin to IPFS
+        # Download preview MP4 if present
+        preview_output = outputs.get("mp4_preview", {})
+        preview_url = preview_output.get("url")
+        if preview_url:
+            preview_path = staging_dir / f"preview-{job_id}.mp4"
+            try:
+                async with httpx.AsyncClient(timeout=120.0) as client:
+                    resp = await client.get(preview_url)
+                    if resp.is_success:
+                        preview_path.write_bytes(resp.content)
+                        logger.info("[%s] Preview MP4 downloaded (%d bytes)", job_id, len(resp.content))
+                        # Pin preview to IPFS
+                        preview_result = await ipfs.add_file(preview_path)
+                        if preview_result.success:
+                            job["previewCid"] = preview_result.cid
+                            logger.info("[%s] Preview pinned: %s", job_id, preview_result.cid)
+                        preview_path.unlink(missing_ok=True)
+            except Exception as e:
+                logger.warning("[%s] Preview download/pin failed: %s", job_id, e)
+
+        # Pin HLS to IPFS
         logger.info("[%s] Pinning HLS directory to IPFS...", job_id)
         result = await ipfs.add_directory(hls_dir)
 

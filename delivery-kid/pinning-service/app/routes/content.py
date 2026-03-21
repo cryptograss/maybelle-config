@@ -2,7 +2,9 @@
 
 import asyncio
 import json
+import logging
 import shutil
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -16,7 +18,9 @@ from ..models.content import (
     ContentFile, ContentDraftState, ContentDraftResponse, ContentFinalizeRequest
 )
 from ..services import analyze, ipfs, transcode
-from ..services.coconut import submit_to_coconut, save_job
+from ..services.coconut import submit_to_coconut, save_job, load_job
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/draft-content", tags=["content"])
 
@@ -138,6 +142,10 @@ async def create_content_draft(
         now = datetime.now(timezone.utc)
         expires_at = now + timedelta(hours=settings.draft_ttl_hours)
 
+        # Determine if this is a single-video upload that should get a preview
+        video_files = [f for f in draft_files if f.media_type == "video"]
+        should_preview = len(draft_files) == 1 and len(video_files) == 1 and settings.coconut_api_key
+
         state = ContentDraftState(
             draft_id=draft_id,
             draft_type="content",
@@ -145,14 +153,22 @@ async def create_content_draft(
             expires_at=expires_at,
             uploaded_by=wallet_address,
             files=draft_files,
+            preview_status="pending" if should_preview else "none",
         )
         save_draft_state(draft_dir, state)
+
+        # Kick off background preview transcoding for video uploads
+        if should_preview:
+            asyncio.create_task(
+                _submit_preview_transcode(draft_id, state, settings)
+            )
 
         return ContentDraftResponse(
             draft_id=draft_id,
             expires_at=expires_at,
             files=draft_files,
             commit=get_commit(),
+            preview_status=state.preview_status,
         )
 
     except HTTPException:
@@ -190,6 +206,9 @@ async def get_content_draft(
         files=state.files,
         metadata=state.metadata,
         commit=get_commit(),
+        preview_status=state.preview_status,
+        preview_cid=state.preview_cid,
+        preview_mp4_cid=state.preview_mp4_cid,
     )
 
 
@@ -212,6 +231,70 @@ async def delete_content_draft(
 
     shutil.rmtree(draft_dir)
     return {"message": "Draft deleted", "draft_id": draft_id}
+
+
+async def _submit_preview_transcode(
+    draft_id: str, state: ContentDraftState, settings: Settings
+) -> None:
+    """Background task: submit video to Coconut for AV1 HLS preview.
+
+    Coconut fetches the source from our staging endpoint via preview_token,
+    transcodes to AV1 HLS, and delivers via webhook. The webhook handler
+    pins the HLS output to IPFS and updates draft state with the CID.
+    """
+    staging_dir = Path(settings.staging_dir)
+    draft_dir = get_draft_dir(staging_dir, draft_id)
+
+    try:
+        video_file = state.files[0]
+
+        # Build the source URL: Coconut will fetch from our staging endpoint
+        # using the preview_token for auth (no IPFS pin of the original needed)
+        base_url = settings.ipfs_gateway_url.replace("ipfs.", "", 1)
+        source_url = (
+            f"{base_url}/staging/drafts/{draft_id}/{video_file.original_filename}"
+            f"?preview_token={state.preview_token}"
+        )
+
+        # Build webhook URL — reuses existing /webhook/coconut handler
+        job_id = f"preview-{draft_id[:12]}-{int(time.time())}"
+        webhook_url = f"{base_url}/webhook/coconut?job_id={job_id}"
+
+        logger.info("[preview:%s] Submitting to Coconut, source=%s", draft_id[:8], source_url[:80])
+
+        coconut_result = await submit_to_coconut(
+            source_url=source_url,
+            api_key=settings.coconut_api_key,
+            webhook_url=webhook_url,
+            include_preview=True,
+        )
+        coconut_job_id = coconut_result.get("id")
+        logger.info("[preview:%s] Coconut job created: %s", draft_id[:8], coconut_job_id)
+
+        # Save job state for the webhook handler
+        job_state = {
+            "id": job_id,
+            "coconutJobId": coconut_job_id,
+            "status": "processing",
+            "draftId": draft_id,
+            "isPreview": True,
+            "createdAt": datetime.now(timezone.utc).isoformat(),
+            "identity": state.uploaded_by,
+        }
+        save_job(staging_dir, job_id, job_state)
+
+        # Update draft state
+        state.preview_status = "processing"
+        state.preview_job_id = job_id
+        save_draft_state(draft_dir, state)
+
+    except Exception as e:
+        logger.error("[preview:%s] Failed to submit preview: %s", draft_id[:8], e)
+        try:
+            state.preview_status = "failed"
+            save_draft_state(draft_dir, state)
+        except Exception:
+            pass
 
 
 def _should_use_coconut(request: ContentFinalizeRequest, settings: Settings) -> bool:
@@ -247,18 +330,16 @@ async def finalize_sse_generator(
 ):
     """SSE generator for content finalization — transcode if needed, then pin.
 
-    For video with transcoding enabled:
-    - Tries Coconut.co cloud transcoding first (AV1+Opus HLS, async via webhook)
-    - Falls back to local ffmpeg if Coconut is unavailable
-    - Coconut path: pins source to IPFS, submits job, returns job_id for polling
-    - Local path: synchronous transcode via SSE progress events
-    """
-    import logging
-    import time
-    logger = logging.getLogger(__name__)
+    Fast path: if preview transcoding already produced an HLS CID and no trim
+    is requested, finalization is instant — just emit the existing CID.
 
+    Slow path (trim requested or no preview): Coconut cloud transcoding first,
+    local ffmpeg fallback. Coconut fetches source from staging via preview_token.
+    """
     async def send_event(event: str, data: dict):
         return {"event": event, "data": json.dumps(data)}
+
+    has_trim = request.trim_start_seconds is not None or request.trim_end_seconds is not None
 
     try:
         upload_dir = draft_dir / "upload"
@@ -271,34 +352,53 @@ async def finalize_sse_generator(
             "progress": 5
         })
 
+        # Preserve original file if requested
+        if request.preserve_original:
+            originals_dir = Path(settings.staging_dir) / "originals" / draft_id
+            originals_dir.mkdir(parents=True, exist_ok=True)
+            for f in state.files:
+                src = upload_dir / f.original_filename
+                if src.exists():
+                    shutil.copy2(src, originals_dir / f.original_filename)
+            logger.info("[content:%s] Original files preserved to %s", draft_id[:8], originals_dir)
+
         video_files = [f for f in state.files if f.media_type == "video"]
         wants_transcode = len(state.files) == 1 and video_files and _should_transcode_video(request)
 
+        # === Fast path: preview already done, no trim ===
+        if wants_transcode and state.preview_cid and not has_trim:
+            logger.info("[content:%s] Using existing preview HLS: %s", draft_id[:8], state.preview_cid)
+            yield await send_event("progress", {
+                "stage": "transcode",
+                "message": "AV1 HLS already transcoded — using preview.",
+                "progress": 80
+            })
+
+            gateway_url = f"{settings.ipfs_gateway_url}/ipfs/{state.preview_cid}"
+
+            yield await send_event("complete", {
+                "cid": state.preview_cid,
+                "gateway_url": gateway_url,
+                "title": request.title,
+                "file_type": request.file_type,
+                "subsequent_to": request.subsequent_to,
+            })
+            return
+
+        # === Coconut cloud transcoding (with trim, or no preview available) ===
         if wants_transcode and _should_use_coconut(request, settings):
-            # === Coconut cloud transcoding path (async) ===
             video_file = video_files[0]
             src_path = upload_dir / video_file.original_filename
 
-            yield await send_event("progress", {
-                "stage": "ipfs",
-                "message": "Pinning source video to IPFS...",
-                "progress": 10
-            })
-
-            # Pin source to IPFS so Coconut can fetch it via gateway
-            pin_result = await ipfs.add_file(src_path)
-            if not pin_result.success:
-                yield await send_event("error", {
-                    "message": f"Failed to pin source video: {pin_result.error}"
-                })
-                return
-
-            source_cid = pin_result.cid
-            source_url = f"{settings.ipfs_gateway_url}/ipfs/{source_cid}"
-            logger.info("[content:%s] Source pinned: %s", draft_id[:8], source_cid)
+            # Build source URL — Coconut fetches from staging via preview_token
+            base_url = settings.ipfs_gateway_url.replace("ipfs.", "", 1)
+            source_url = (
+                f"{base_url}/staging/drafts/{draft_id}/{video_file.original_filename}"
+                f"?preview_token={state.preview_token}"
+            )
 
             trim_msg = ""
-            if request.trim_start_seconds is not None or request.trim_end_seconds is not None:
+            if has_trim:
                 s = request.trim_start_seconds or 0
                 e = request.trim_end_seconds
                 trim_msg = f" (trimming {s:.1f}s–{e:.1f}s)" if e else f" (trimming from {s:.1f}s)"
@@ -308,8 +408,6 @@ async def finalize_sse_generator(
                 "progress": 30
             })
 
-            # Build webhook URL
-            base_url = settings.ipfs_gateway_url.replace("ipfs.", "", 1)
             job_id = f"coconut-{int(time.time())}-{id(src_path) % 100000:05d}"
             webhook_url = f"{base_url}/webhook/coconut?job_id={job_id}"
 
@@ -325,13 +423,11 @@ async def finalize_sse_generator(
                 coconut_job_id = coconut_result.get("id")
                 logger.info("[content:%s] Coconut job created: %s", draft_id[:8], coconut_job_id)
 
-                # Save job state for webhook handler
                 job_state = {
                     "id": job_id,
                     "coconutJobId": coconut_job_id,
                     "status": "processing",
-                    "sourceCid": source_cid,
-                    "keepOriginal": False,
+                    "keepOriginal": request.preserve_original,
                     "title": request.title,
                     "fileType": request.file_type,
                     "subsequentTo": request.subsequent_to,
@@ -340,16 +436,14 @@ async def finalize_sse_generator(
                 }
                 save_job(Path(settings.staging_dir), job_id, job_state)
 
-                # Clean up draft dir — source is on IPFS now
-                shutil.rmtree(draft_dir, ignore_errors=True)
+                # Don't delete draft dir yet — source file still needed if Coconut
+                # hasn't fetched it. Draft TTL cleanup handles it.
 
                 yield await send_event("transcoding-submitted", {
-                    "sourceCid": source_cid,
                     "jobId": job_id,
                     "coconutJobId": coconut_job_id,
                     "message": "Video submitted for AV1 cloud transcoding. HLS output will be pinned automatically when complete.",
                     "pollUrl": f"/job/{job_id}",
-                    "gatewayUrl": f"{settings.ipfs_gateway_url}/ipfs/{source_cid}",
                     "title": request.title,
                     "fileType": request.file_type,
                     "subsequentTo": request.subsequent_to,
@@ -366,7 +460,6 @@ async def finalize_sse_generator(
                     "message": "Cloud transcoding unavailable, using local ffmpeg...",
                     "progress": 15
                 })
-                # Fall through to local transcoding below
 
         if wants_transcode:
             # === Local ffmpeg transcoding path (sync) ===
