@@ -1,5 +1,6 @@
 """Pydantic models for general content drafts (video, audio, arbitrary files)."""
 
+import secrets
 from datetime import datetime
 from typing import Optional
 from pydantic import BaseModel, Field
@@ -35,6 +36,13 @@ class ContentDraftState(BaseModel):
     uploaded_by: str = Field(description="Wallet address that created the draft")
     files: list[ContentFile]
     metadata: dict = Field(default_factory=dict, description="User-supplied metadata")
+    # Preview transcoding (background, after upload)
+    preview_token: str = Field(default_factory=lambda: secrets.token_urlsafe(32),
+                               description="One-time token for Coconut to fetch source video from staging")
+    preview_status: str = Field(default="none", description="none, pending, processing, ready, failed")
+    preview_job_id: Optional[str] = Field(default=None, description="Coconut job ID for preview transcode")
+    preview_cid: Optional[str] = Field(default=None, description="IPFS CID of AV1 HLS output")
+    preview_mp4_cid: Optional[str] = Field(default=None, description="IPFS CID of 480p H.264 preview MP4")
 
 
 class ContentDraftResponse(BaseModel):
@@ -45,6 +53,9 @@ class ContentDraftResponse(BaseModel):
     files: list[ContentFile]
     metadata: dict = Field(default_factory=dict)
     commit: str = Field(default="unknown", description="Git commit hash of the build that created this draft")
+    preview_status: str = Field(default="none", description="none, pending, processing, ready, failed")
+    preview_cid: Optional[str] = Field(default=None, description="IPFS CID of AV1 HLS output")
+    preview_mp4_cid: Optional[str] = Field(default=None, description="IPFS CID of 480p preview MP4")
 
 
 class ContentFinalizeRequest(BaseModel):
@@ -69,4 +80,7 @@ class ContentFinalizeRequest(BaseModel):
     )
     trim_end_seconds: Optional[float] = Field(
         default=None, description="End time in seconds for trimming the video"
+    )
+    preserve_original: bool = Field(
+        default=False, description="Save the original source file to permanent storage instead of deleting it"
     )

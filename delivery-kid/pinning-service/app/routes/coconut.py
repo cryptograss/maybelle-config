@@ -6,6 +6,7 @@ GET  /job/{job_id}        — check job status
 GET  /jobs                — list recent jobs
 """
 
+import json
 import logging
 import time
 from datetime import datetime, timezone
@@ -16,6 +17,7 @@ from pydantic import BaseModel
 
 from ..auth import require_auth
 from ..config import get_settings, Settings
+from ..models.content import ContentDraftState
 from ..services import ipfs
 from ..services.coconut import (
     submit_to_coconut,
@@ -28,6 +30,31 @@ from ..services.coconut import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["coconut"])
+
+
+def _update_draft_preview(staging_dir: Path, job: dict) -> None:
+    """Update a content draft's preview state after Coconut webhook."""
+    draft_id = job["draftId"]
+    draft_json = staging_dir / "drafts" / draft_id / "draft.json"
+    if not draft_json.exists():
+        logger.warning("[%s] Preview draft not found: %s", job["id"], draft_id)
+        return
+    try:
+        data = json.loads(draft_json.read_text())
+        if job["status"] == "complete" and job.get("hlsCid"):
+            data["preview_status"] = "ready"
+            data["preview_cid"] = job["hlsCid"]
+            # previewCid = 480p MP4 for the video player on the ReleaseDraft page
+            if job.get("previewCid"):
+                data["preview_mp4_cid"] = job["previewCid"]
+            logger.info("[%s] Draft %s preview ready: hls=%s mp4=%s",
+                        job["id"], draft_id[:8], job["hlsCid"], job.get("previewCid", "none"))
+        else:
+            data["preview_status"] = "failed"
+            logger.warning("[%s] Draft %s preview failed", job["id"], draft_id[:8])
+        draft_json.write_text(json.dumps(data, indent=2, default=str))
+    except Exception as e:
+        logger.error("[%s] Failed to update draft preview state: %s", job["id"], e)
 
 
 class TranscodeRequest(BaseModel):
@@ -174,6 +201,10 @@ async def webhook_coconut(request: Request, settings: Settings = Depends(get_set
             job["failedAt"] = datetime.now(timezone.utc).isoformat()
 
         save_job(staging_dir, job_id, job)
+
+        # If this is a preview job, update the draft state
+        if job.get("isPreview") and job.get("draftId"):
+            _update_draft_preview(staging_dir, job)
         return {"received": True}
 
     except Exception as e:
