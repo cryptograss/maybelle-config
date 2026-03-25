@@ -4,7 +4,7 @@ import asyncio
 import json
 import shutil
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, UploadFile, HTTPException
@@ -41,11 +41,6 @@ def save_draft_state(draft_dir: Path, state: DraftState) -> None:
     draft_json = draft_dir / "draft.json"
     with open(draft_json, "w") as f:
         json.dump(state.model_dump(mode="json"), f, indent=2, default=str)
-
-
-def is_draft_expired(state: DraftState) -> bool:
-    """Check if a draft has expired."""
-    return datetime.now(timezone.utc) > state.expires_at
 
 
 @router.post("", response_model=DraftResponse)
@@ -129,12 +124,10 @@ async def create_draft(
 
         # Create and save draft state
         now = datetime.now(timezone.utc)
-        expires_at = now + timedelta(hours=settings.draft_ttl_hours)
 
         state = DraftState(
             draft_id=draft_id,
             created_at=now,
-            expires_at=expires_at,
             uploaded_by=wallet_address,
             files=draft_files
         )
@@ -142,7 +135,6 @@ async def create_draft(
 
         return DraftResponse(
             draft_id=draft_id,
-            expires_at=expires_at,
             files=draft_files,
             commit=get_commit(),
         )
@@ -178,15 +170,8 @@ async def get_draft(
     if state.uploaded_by.lower() != wallet_address.lower():
         raise HTTPException(status_code=403, detail="Not your draft")
 
-    # Check expiration
-    if is_draft_expired(state):
-        # Cleanup expired draft
-        shutil.rmtree(draft_dir)
-        raise HTTPException(status_code=410, detail="Draft has expired")
-
     return DraftResponse(
         draft_id=state.draft_id,
-        expires_at=state.expires_at,
         files=state.files,
         commit=get_commit(),
     )
@@ -532,11 +517,6 @@ async def finalize_draft(
     # Verify ownership
     if state.uploaded_by.lower() != wallet_address.lower():
         raise HTTPException(status_code=403, detail="Not your draft")
-
-    # Check expiration
-    if is_draft_expired(state):
-        shutil.rmtree(draft_dir)
-        raise HTTPException(status_code=410, detail="Draft has expired")
 
     # Validate all requested files exist in draft
     draft_filenames = {f.original_filename for f in state.files}

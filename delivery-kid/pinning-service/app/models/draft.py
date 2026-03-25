@@ -21,7 +21,7 @@ class DraftState(BaseModel):
     """Internal state of a draft album, saved to disk as draft.json."""
     draft_id: str
     created_at: datetime
-    expires_at: datetime
+    expires_at: Optional[datetime] = None  # Legacy field, no longer used for expiry
     uploaded_by: str = Field(description="Wallet address that created the draft")
     files: list[DraftFile]
 
@@ -29,7 +29,6 @@ class DraftState(BaseModel):
 class DraftResponse(BaseModel):
     """Response returned when creating or retrieving a draft."""
     draft_id: str
-    expires_at: datetime
     files: list[DraftFile]
     commit: str = Field(default="unknown", description="Git commit hash of the build that created this draft")
 

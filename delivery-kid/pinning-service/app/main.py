@@ -27,8 +27,8 @@ async def lifespan(app: FastAPI):
     Lifespan context manager for startup/shutdown tasks.
 
     On startup:
-    - Run initial cleanup of expired drafts
-    - Start periodic cleanup background task
+    - Run initial cleanup of orphaned drafts
+    - Start periodic orphan cleanup background task
 
     On shutdown:
     - Cancel background cleanup task
