@@ -38,7 +38,7 @@ class Settings(BaseSettings):
     max_files_per_upload: int = 50
 
     # Draft settings
-    draft_ttl_hours: int = 24  # How long drafts live before auto-cleanup
+    # draft_ttl_hours removed — drafts persist until explicitly finalized or deleted
     max_staging_size_gb: int = 10  # Maximum total size of staging directory
 
     # CORS

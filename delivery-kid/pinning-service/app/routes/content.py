@@ -4,7 +4,7 @@ import asyncio
 import json
 import shutil
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, UploadFile, HTTPException
@@ -49,10 +49,6 @@ def save_draft_state(draft_dir: Path, state: ContentDraftState) -> None:
     draft_json = draft_dir / "draft.json"
     with open(draft_json, "w") as f:
         json.dump(state.model_dump(mode="json"), f, indent=2, default=str)
-
-
-def is_draft_expired(state: ContentDraftState) -> bool:
-    return datetime.now(timezone.utc) > state.expires_at
 
 
 @router.post("", response_model=ContentDraftResponse)
@@ -135,13 +131,11 @@ async def create_content_draft(
 
         # Create and save draft state
         now = datetime.now(timezone.utc)
-        expires_at = now + timedelta(hours=settings.draft_ttl_hours)
 
         state = ContentDraftState(
             draft_id=draft_id,
             draft_type="content",
             created_at=now,
-            expires_at=expires_at,
             uploaded_by=wallet_address,
             files=draft_files,
         )
@@ -149,7 +143,6 @@ async def create_content_draft(
 
         return ContentDraftResponse(
             draft_id=draft_id,
-            expires_at=expires_at,
             files=draft_files,
             commit=get_commit(),
         )
@@ -179,13 +172,8 @@ async def get_content_draft(
     if state.uploaded_by.lower() != wallet_address.lower():
         raise HTTPException(status_code=403, detail="Not your draft")
 
-    if is_draft_expired(state):
-        shutil.rmtree(draft_dir)
-        raise HTTPException(status_code=410, detail="Draft has expired")
-
     return ContentDraftResponse(
         draft_id=state.draft_id,
-        expires_at=state.expires_at,
         files=state.files,
         metadata=state.metadata,
         commit=get_commit(),
@@ -481,10 +469,6 @@ async def finalize_content_draft(
 
     if state.uploaded_by.lower() != wallet_address.lower():
         raise HTTPException(status_code=403, detail="Not your draft")
-
-    if is_draft_expired(state):
-        shutil.rmtree(draft_dir)
-        raise HTTPException(status_code=410, detail="Draft has expired")
 
     return EventSourceResponse(
         finalize_sse_generator(draft_id, request, draft_dir, state, settings),
