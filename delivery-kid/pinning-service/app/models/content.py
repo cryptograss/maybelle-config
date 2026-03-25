@@ -32,7 +32,7 @@ class ContentDraftState(BaseModel):
     draft_id: str
     draft_type: str = Field(default="content", description="Draft type: 'content' (vs 'album')")
     created_at: datetime
-    expires_at: datetime
+    expires_at: Optional[datetime] = None  # Legacy field, no longer used for expiry
     uploaded_by: str = Field(description="Wallet address that created the draft")
     files: list[ContentFile]
     metadata: dict = Field(default_factory=dict, description="User-supplied metadata")
@@ -49,7 +49,6 @@ class ContentDraftResponse(BaseModel):
     """Response returned when creating or retrieving a content draft."""
     draft_id: str
     draft_type: str = "content"
-    expires_at: datetime
     files: list[ContentFile]
     metadata: dict = Field(default_factory=dict)
     commit: str = Field(default="unknown", description="Git commit hash of the build that created this draft")
