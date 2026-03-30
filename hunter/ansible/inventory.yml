@@ -51,7 +51,7 @@ all:
         full_name: "Fibonacci Emery Holmes"
         email: "fibonacci@justinholmes.com"
         github_username: "fibonacci-frames"
-        ssh_pubkey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOlf87hTbZhfhX0IbeMvs97DikhFbw92ZaMqg134uSbb fibonacci@fibonacci-Latitude-5410"
+        ssh_pubkey: "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQDbQ0hWCNI7qykJT9pngOxts0FdN8MJsGTL4IDduvv+9sgnwLVEFEUsqrT9m0kSikDOw8oQB2gzHhTG+6jUzc5c7ydLefMzKZo8UbAXni3q+hrMVulI3PWpnRjhkSVAjU9p1GBaBxJoJaJkqu7qUFixWai0whhlQ10xVhqb7AwrUMReBl8NG8fFvirGqloWb5Sx5qwdabS3O3QyjvlTcWAM6f8G68BIZIqufWA1PHX0DjsAx6j6Np9Fud1mY+xCeugYoJjX7e9itCqHgoPSM0ZLzooyVWkc/VspwCEkcvDQHPtPVnxPqoBoYj9Za+dDXd5HpFhoyrn5NVy3XnjPeqGiUHsGgt6l6c93b9luLworrO4V5aUX13OO79hqqJ2ptHXkq1K1duAxlYMWTEgmGRGk99beDRVaHX/HgKb5DciVjji9dRSmnODzHi7k0+qIo9UbdihH7+wQVo/lA3DzOX+i/sbWcbjuIkpDU1f8ixyLbbw9Z8bE8R52I3ld8Tf5rRk= jmyles@lurkover"
         ssh_port: 2225
         port_range_start: 14030
         code_server_password: "{{ code_server_password }}"
