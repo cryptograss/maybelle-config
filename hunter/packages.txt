@@ -43,3 +43,7 @@ imagemagick
 jp2a
 caca-utils
 libaa-bin
+mesa-utils
+ffmpeg
+unzip
+wget
