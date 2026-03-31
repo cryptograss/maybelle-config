@@ -10,8 +10,8 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, File, UploadFile, HTTPException
 from sse_starlette.sse import EventSourceResponse
 
-from ..auth import require_auth
-from ..config import get_settings, Settings
+from ..auth import require_auth, require_finalize_auth
+from ..config import get_settings, get_commit, Settings
 from ..models.draft import DraftFile, DraftState, DraftResponse, FinalizeRequest
 from ..services import analyze, ipfs, transcode
 
@@ -143,7 +143,8 @@ async def create_draft(
         return DraftResponse(
             draft_id=draft_id,
             expires_at=expires_at,
-            files=draft_files
+            files=draft_files,
+            commit=get_commit(),
         )
 
     except HTTPException:
@@ -186,7 +187,8 @@ async def get_draft(
     return DraftResponse(
         draft_id=state.draft_id,
         expires_at=state.expires_at,
-        files=state.files
+        files=state.files,
+        commit=get_commit(),
     )
 
 
@@ -509,7 +511,7 @@ async def finalize_sse_generator(
 async def finalize_draft(
     draft_id: str,
     request: FinalizeRequest,
-    wallet_address: str = Depends(require_auth),
+    wallet_address: str = Depends(require_finalize_auth),
     settings: Settings = Depends(get_settings)
 ):
     """
