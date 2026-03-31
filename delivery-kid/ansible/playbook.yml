@@ -128,10 +128,13 @@
                 - IPFS_API_URL=http://ipfs:5001
                 - IPFS_GATEWAY_URL=https://{{ ipfs_gateway_domain }}
                 - STAGING_DIR=/staging
+                - COCONUT_API_KEY={{ coconut_api_key | default('') }}
               volumes:
                 - /mnt/storage-box/staging:/staging
               ports:
                 - "127.0.0.1:3001:3001"
+                - "6881:6881"      # BitTorrent TCP
+                - "6881:6881/udp"  # BitTorrent UDP
               networks:
                 - delivery-kid-net
               restart: unless-stopped
@@ -329,6 +332,14 @@
         dest: /etc/caddy/Caddyfile
         content: |
           {{ domain_name }} {
+              route /webseed/* {
+                  # BEP 19 webseed rewrite: BT clients request
+                  # /webseed/{cid}/{torrent_name}/{file_path}
+                  # Strip the torrent name and proxy to IPFS gateway as
+                  # /ipfs/{cid}/{file_path}
+                  uri path_regexp ^/webseed/([^/]+)/[^/]+/(.+)$ /ipfs/$1/$2
+                  reverse_proxy localhost:8080
+              }
               route {
                   reverse_proxy /health localhost:3001
                   reverse_proxy /version localhost:3001
@@ -344,6 +355,7 @@
                   reverse_proxy /draft-content* localhost:3001
                   reverse_proxy /unpin/* localhost:3001
                   reverse_proxy /enrich* localhost:3001
+                  reverse_proxy /torrent* localhost:3001
                   respond "delivery-kid pinning service" 200
               }
           }

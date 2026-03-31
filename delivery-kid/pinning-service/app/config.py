@@ -1,5 +1,6 @@
 """Configuration settings loaded from environment variables."""
 
+import os
 from pydantic_settings import BaseSettings
 from functools import lru_cache
 
@@ -19,8 +20,14 @@ class Settings(BaseSettings):
     # Staging directory for uploads and transcoding
     staging_dir: str = "/staging"
 
+    # Seeding directory for BitTorrent (persistent, on storage box)
+    seeding_dir: str = "/staging/seeding"
+
     # Authorized wallets (comma-separated)
     authorized_wallets: str = ""
+
+    # Coconut.co cloud transcoding
+    coconut_api_key: str = ""
 
     # Auth settings
     max_timestamp_drift_seconds: int = 3600  # 1 hour — token generated at page load, user may browse before uploading
@@ -56,3 +63,8 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
+
+
+def get_commit() -> str:
+    """Return the git commit hash baked into this build."""
+    return os.environ.get("GIT_COMMIT", "unknown")

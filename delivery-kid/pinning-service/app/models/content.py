@@ -43,6 +43,7 @@ class ContentDraftResponse(BaseModel):
     expires_at: datetime
     files: list[ContentFile]
     metadata: dict = Field(default_factory=dict)
+    commit: str = Field(default="unknown", description="Git commit hash of the build that created this draft")
 
 
 class ContentFinalizeRequest(BaseModel):
@@ -51,5 +52,14 @@ class ContentFinalizeRequest(BaseModel):
     description: Optional[str] = None
     file_type: Optional[str] = Field(default=None, description="MIME type override (e.g., video/webm)")
     metadata: dict = Field(default_factory=dict, description="Arbitrary metadata for Release page")
-    transcode_hls: bool = Field(default=False, description="Transcode video to HLS before pinning")
+    transcode_hls: bool = Field(default=False, description="Transcode video to HLS before pinning (legacy, use transcoding_strategy)")
+    transcoding_strategy: str = Field(
+        default="auto",
+        description="Transcoding strategy for video: 'auto' (Coconut first, local fallback), 'coconut', 'local', 'none'"
+    )
     subsequent_to: Optional[str] = Field(default=None, description="CID this content supersedes")
+    transcoding_qualities: Optional[list[int]] = Field(
+        default=None,
+        description="Output video heights for HLS transcoding, e.g. [1080, 720, 480]. "
+                    "Default [720, 480]. Common values: 2160 (4K), 1080, 720, 480, 360."
+    )
