@@ -119,6 +119,21 @@
     - "{{ mediawiki_root }}/images"
     - "{{ mediawiki_root }}/cache"
 
+- name: Install MediaUploader extension
+  git:
+    repo: https://github.com/wikimedia/mediawiki-extensions-MediaUploader.git
+    dest: "{{ mediawiki_root }}/extensions/MediaUploader"
+    version: REL1_43
+    force: yes
+  become_user: www-data
+
+- name: Install MediaUploader composer dependencies
+  command:
+    cmd: composer install --no-dev --no-interaction
+    chdir: "{{ mediawiki_root }}/extensions/MediaUploader"
+  become_user: www-data
+  changed_when: false
+
 - name: Create migration import script
   copy:
     dest: /usr/local/bin/import-pickipedia-backup.sh
