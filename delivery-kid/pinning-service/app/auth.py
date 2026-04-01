@@ -16,20 +16,35 @@ from .config import get_settings, Settings
 logger = logging.getLogger(__name__)
 
 
-def create_upload_token(api_key: str, username: str, timestamp: int) -> str:
-    """Create an HMAC upload token for wiki-authenticated users."""
-    message = f"upload:{username}:{timestamp}"
+def create_upload_token(api_key: str, username: str, timestamp: int, action: str = "upload") -> str:
+    """Create an HMAC token for wiki-authenticated users.
+
+    Args:
+        api_key: Shared secret between wiki and delivery-kid.
+        username: Wiki username.
+        timestamp: Millisecond timestamp.
+        action: Token action prefix — "upload" for staging, "finalize" for pinning.
+    """
+    message = f"{action}:{username}:{timestamp}"
     return hmac.new(api_key.encode(), message.encode(), hashlib.sha256).hexdigest()
 
 
-def verify_upload_token(token: str, username: str, timestamp: int, settings: Settings) -> bool:
-    """Verify an HMAC upload token."""
+def verify_upload_token(token: str, username: str, timestamp: int, settings: Settings, action: str = "upload") -> bool:
+    """Verify an HMAC token.
+
+    Args:
+        token: The HMAC token to verify.
+        username: Wiki username claimed.
+        timestamp: Millisecond timestamp claimed.
+        settings: App settings.
+        action: Expected action prefix — "upload" or "finalize".
+    """
     if not settings.api_key:
         logger.warning("HMAC verify failed: no api_key configured")
         return False
-    expected = create_upload_token(settings.api_key, username, timestamp)
+    expected = create_upload_token(settings.api_key, username, timestamp, action=action)
     if not hmac.compare_digest(token, expected):
-        logger.warning("HMAC verify failed: token mismatch for user=%s", username)
+        logger.warning("HMAC verify failed: token mismatch for user=%s action=%s", username, action)
         return False
     # Check timestamp freshness
     now_ms = int(time.time() * 1000)
@@ -38,8 +53,8 @@ def verify_upload_token(token: str, username: str, timestamp: int, settings: Set
     if drift_ms > max_drift_ms:
         logger.warning(
             "HMAC verify failed: token expired. drift=%dms (max=%dms), "
-            "token_ts=%d, server_now=%d, user=%s",
-            drift_ms, max_drift_ms, timestamp, now_ms, username
+            "token_ts=%d, server_now=%d, user=%s, action=%s",
+            drift_ms, max_drift_ms, timestamp, now_ms, username, action
         )
         return False
     return True
@@ -103,6 +118,34 @@ def verify_signature(signature: str, timestamp: int, settings: Settings) -> Auth
     return AuthResult(valid=True, address=address)
 
 
+def _verify_hmac_headers(request: Request, settings: Settings, action: str = "upload") -> str | None:
+    """Verify HMAC upload/finalize token from request headers.
+
+    Returns identity string on success, None if headers not present.
+    Raises HTTPException on invalid token.
+    """
+    upload_token = request.headers.get("X-Upload-Token")
+    if not upload_token:
+        return None
+
+    username = request.headers.get("X-Upload-User", "")
+    timestamp_str = request.headers.get("X-Upload-Timestamp", "")
+    try:
+        timestamp = int(timestamp_str)
+    except (ValueError, TypeError):
+        raise HTTPException(
+            status_code=401,
+            detail={"error": "Invalid upload timestamp"}
+        )
+
+    if not verify_upload_token(upload_token, username, timestamp, settings, action=action):
+        raise HTTPException(
+            status_code=401,
+            detail={"error": "Invalid or expired upload token"}
+        )
+    return f"wiki:{username}"
+
+
 async def require_wallet_auth(
     request: Request,
     settings: Settings = Depends(get_settings)
@@ -153,25 +196,47 @@ async def require_auth(
     Returns an identity string.
     """
     # 1. HMAC upload token (wiki-issued, for direct browser uploads)
-    upload_token = request.headers.get("X-Upload-Token")
-    if upload_token:
-        username = request.headers.get("X-Upload-User", "")
-        timestamp_str = request.headers.get("X-Upload-Timestamp", "")
-        try:
-            timestamp = int(timestamp_str)
-        except (ValueError, TypeError):
-            raise HTTPException(
-                status_code=401,
-                detail={"error": "Invalid upload timestamp"}
-            )
-        if not verify_upload_token(upload_token, username, timestamp, settings):
-            raise HTTPException(
-                status_code=401,
-                detail={"error": "Invalid or expired upload token"}
-            )
-        return f"wiki:{username}"
+    identity = _verify_hmac_headers(request, settings, action="upload")
+    if identity:
+        return identity
 
     # 2. API key (server-to-server)
+    api_key = request.headers.get("X-API-Key")
+    if api_key:
+        if not settings.api_key:
+            raise HTTPException(
+                status_code=500,
+                detail={"error": "API key auth not configured on server"}
+            )
+        if api_key != settings.api_key:
+            raise HTTPException(
+                status_code=401,
+                detail={"error": "Invalid API key"}
+            )
+        return request.headers.get("X-Uploaded-By", "api-user")
+
+    # 3. Wallet signature
+    return await require_wallet_auth(request, settings)
+
+
+async def require_finalize_auth(
+    request: Request,
+    settings: Settings = Depends(get_settings)
+) -> str:
+    """
+    FastAPI dependency for finalization endpoints.
+
+    Requires a finalize-prefixed HMAC token (issued only to users with
+    finalize-release permission), an API key, or a wallet signature.
+
+    Returns an identity string.
+    """
+    # 1. HMAC finalize token (wiki-issued, for finalize-release users)
+    identity = _verify_hmac_headers(request, settings, action="finalize")
+    if identity:
+        return identity
+
+    # 2. API key (server-to-server — always allowed to finalize)
     api_key = request.headers.get("X-API-Key")
     if api_key:
         if not settings.api_key:
