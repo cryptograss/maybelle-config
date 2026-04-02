@@ -125,14 +125,19 @@
     dest: "{{ mediawiki_root }}/extensions/MediaUploader"
     version: REL1_43
     force: yes
-  become_user: www-data
 
 - name: Install MediaUploader composer dependencies
   command:
     cmd: composer install --no-dev --no-interaction
     chdir: "{{ mediawiki_root }}/extensions/MediaUploader"
-  become_user: www-data
   changed_when: false
+
+- name: Set MediaUploader ownership
+  file:
+    path: "{{ mediawiki_root }}/extensions/MediaUploader"
+    owner: www-data
+    group: www-data
+    recurse: yes
 
 - name: Create migration import script
   copy:
