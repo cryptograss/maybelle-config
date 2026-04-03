@@ -44,7 +44,11 @@
 
       {{ domain_name }}, {{ www_domain }} {
           # Reverse proxy to Nginx (which handles PHP-FPM)
-          reverse_proxy 127.0.0.1:8080
+          reverse_proxy 127.0.0.1:8080 {
+              # Buffer requests before forwarding - fixes JS-initiated multipart
+              # uploads where H2/H3 streaming to H1 backend loses the body
+              request_buffers 6MB
+          }
 
           # Security headers
           header {
