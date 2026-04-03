@@ -43,9 +43,9 @@
       # Caddy automatically handles Let's Encrypt certificates
 
       {{ domain_name }}, {{ www_domain }} {
-          # Allow large uploads (for MediaUploader chunked uploads)
+          # No upload size limit at Caddy layer - let PHP/nginx handle limits
           request_body {
-              max_size 2GB
+              max_size 0
           }
 
           # Reverse proxy to Nginx (which handles PHP-FPM)
