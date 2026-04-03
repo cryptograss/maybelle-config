@@ -42,10 +42,7 @@
       # Global options
       {
           servers {
-              # HTTP/1.1 only - Caddy has a known bug where HTTP/2 and HTTP/3
-              # drop multipart POST bodies when reverse proxying to HTTP/1.x backend
-              # See: https://github.com/caddyserver/caddy/issues/3496
-              protocols h1
+              protocols h1 h2
           }
       }
 
