@@ -1,6 +1,7 @@
 ---
-# MediaWiki installation and configuration
-# Downloads MediaWiki, installs composer dependencies, configures for migration
+# MediaWiki configuration and secrets
+# Code is deployed by Jenkins (rsync) and served by Docker container
+# This role handles: directories, secrets, cron jobs
 
 - name: Create web root directory
   file:
@@ -8,30 +9,6 @@
     state: directory
     owner: www-data
     group: www-data
-    mode: '0755'
-
-- name: Download MediaWiki
-  get_url:
-    url: "https://releases.wikimedia.org/mediawiki/1.43/mediawiki-{{ mediawiki_version }}.tar.gz"
-    dest: /tmp/mediawiki-{{ mediawiki_version }}.tar.gz
-    mode: '0644'
-  register: mediawiki_download
-
-- name: Extract MediaWiki
-  unarchive:
-    src: /tmp/mediawiki-{{ mediawiki_version }}.tar.gz
-    dest: "{{ mediawiki_root }}"
-    remote_src: yes
-    extra_opts:
-      - --strip-components=1
-    owner: www-data
-    group: www-data
-  when: mediawiki_download.changed
-
-- name: Install Composer
-  get_url:
-    url: https://getcomposer.org/download/latest-stable/composer.phar
-    dest: /usr/local/bin/composer
     mode: '0755'
 
 - name: Create images directory
@@ -51,8 +28,7 @@
     mode: '0755'
 
 # NOTE: LocalSettings.php is deployed by Jenkins from the pickipedia repo.
-# This ansible role only handles initial VPS provisioning.
-# See: https://github.com/cryptograss/pickipedia/blob/main/Jenkinsfile
+# This ansible role handles secrets in LocalSettings.local.php.
 
 - name: Fetch GlitchTip DSN from maybelle
   uri:
@@ -70,7 +46,7 @@
       <?php
       # PickiPedia secrets - managed by ansible, NOT checked into version control
 
-      # Database
+      # Database (connects via socket mounted into Docker container)
       $wgDBtype = "mysql";
       $wgDBserver = "localhost";
       $wgDBname = "{{ db_name }}";
@@ -90,22 +66,20 @@
     group: www-data
     mode: '0600'
 
-- name: Create job runner script
+- name: Create job runner script (runs inside Docker container)
   copy:
     dest: /usr/local/bin/mediawiki-jobs.sh
     mode: '0755'
     content: |
       #!/bin/bash
-      # Run MediaWiki job queue
-      cd {{ mediawiki_root }}
-      /usr/bin/php maintenance/runJobs.php --maxjobs=50 --maxtime=60 2>&1 | logger -t mediawiki-jobs
+      # Run MediaWiki job queue inside Docker container
+      docker exec pickipedia-wiki php /var/www/html/maintenance/runJobs.php --maxjobs=50 --maxtime=60 2>&1 | logger -t mediawiki-jobs
 
 - name: Schedule MediaWiki job runner
   ansible.builtin.cron:
     name: "mediawiki job queue"
     minute: "*/5"
     job: "/usr/local/bin/mediawiki-jobs.sh"
-    user: www-data
 
 - name: Set permissions on MediaWiki directories
   file:
@@ -118,7 +92,6 @@
   loop:
     - "{{ mediawiki_root }}/images"
     - "{{ mediawiki_root }}/cache"
-
 
 - name: Create migration import script
   copy:
@@ -166,19 +139,18 @@
       # Fix ownership
       chown -R www-data:www-data $MW_ROOT/images
 
-      # Run MediaWiki update
+      # Run MediaWiki update inside container
       echo ""
       echo "Running MediaWiki update script..."
-      cd $MW_ROOT
-      sudo -u www-data php maintenance/update.php --quick
+      docker exec pickipedia-wiki php /var/www/html/maintenance/update.php --quick
+
+      # Restart container to pick up changes
+      docker restart pickipedia-wiki
 
       echo ""
       echo "=== Import Complete ==="
       echo ""
-      echo "Next steps:"
-      echo "1. Copy LocalSettings.local.php.template to LocalSettings.local.php"
-      echo "2. Fill in database password and secret keys"
-      echo "3. Test the wiki: curl -I https://{{ domain_name }}/wiki/Main_Page"
+      echo "Test: curl -I https://{{ domain_name }}/wiki/Main_Page"
 
       # Cleanup
       rm -f /tmp/pickipedia-import.sql.gz

@@ -1,0 +1,12 @@
+services:
+  wiki:
+    build: .
+    container_name: pickipedia-wiki
+    ports:
+      - "127.0.0.1:8080:80"
+    volumes:
+      # MediaWiki code — bind-mounted so Jenkins rsync updates are instant
+      - {{ mediawiki_root }}:/var/www/html
+      # MariaDB socket — avoids TCP config, $wgDBserver stays "localhost"
+      - /var/run/mysqld/mysqld.sock:/var/run/mysqld/mysqld.sock
+    restart: unless-stopped

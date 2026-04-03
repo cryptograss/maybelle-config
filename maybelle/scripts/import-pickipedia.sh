@@ -151,9 +151,11 @@ echo "RUNNING MEDIAWIKI UPDATE"
 echo "============================================================"
 echo ""
 
-ssh -i "$SSH_KEY" "root@$PICKIPEDIA_HOST" bash -s << REMOTE_SCRIPT
-cd $REMOTE_MW_ROOT
-sudo -u www-data php maintenance/update.php --quick
+ssh -i "$SSH_KEY" "root@$PICKIPEDIA_HOST" bash -s << 'REMOTE_SCRIPT'
+# Run update inside Docker container
+docker exec pickipedia-wiki php /var/www/html/maintenance/update.php --quick
+# Restart container to pick up code changes
+docker restart pickipedia-wiki
 REMOTE_SCRIPT
 echo "✓ MediaWiki update complete"
 echo ""
