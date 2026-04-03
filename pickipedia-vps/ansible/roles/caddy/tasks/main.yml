@@ -42,29 +42,9 @@
       # PickiPedia - SSL termination and reverse proxy
       # Caddy automatically handles Let's Encrypt certificates
 
-      # Disable HTTP/3 - chunked uploads break when proxying
-      # HTTP/3 (QUIC) to HTTP/1.x backend (body length mismatch)
-      {
-          servers {
-              protocols h1 h2
-          }
-      }
-
       {{ domain_name }}, {{ www_domain }} {
-          # No upload size limit at Caddy layer - let PHP/nginx handle limits
-          request_body {
-              max_size 0
-          }
-
           # Reverse proxy to Nginx (which handles PHP-FPM)
-          reverse_proxy 127.0.0.1:8080 {
-              flush_interval -1
-              transport http {
-                  response_header_timeout 300s
-                  read_timeout 300s
-                  write_timeout 300s
-              }
-          }
+          reverse_proxy 127.0.0.1:8080
 
           # Security headers
           header {
