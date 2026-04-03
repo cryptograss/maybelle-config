@@ -39,6 +39,14 @@
   copy:
     dest: /etc/caddy/Caddyfile
     content: |
+      # Global options
+      {
+          servers {
+              # Disable HTTP/3 - QUIC POST body not forwarded to HTTP/1.x backend
+              protocols h1 h2
+          }
+      }
+
       # PickiPedia - SSL termination and reverse proxy
       # Caddy automatically handles Let's Encrypt certificates
 
