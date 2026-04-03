@@ -36,33 +36,33 @@ RUN a2enmod rewrite headers
 RUN sed -i '/<Directory \/var\/www\/>/,/<\/Directory>/ s/AllowOverride None/AllowOverride All/' /etc/apache2/apache2.conf
 
 # PHP configuration matching current production settings
-RUN echo "\
-memory_limit = 256M\n\
-upload_max_filesize = 2G\n\
-post_max_size = 2100M\n\
-max_execution_time = 600\n\
-max_input_time = 600\n\
-max_input_vars = 5000\n\
-file_uploads = On\n\
-\n\
-; OPcache\n\
-opcache.enable = 1\n\
-opcache.memory_consumption = 256\n\
-opcache.max_accelerated_files = 10000\n\
-opcache.validate_timestamps = 1\n\
-opcache.revalidate_freq = 60\n\
-\n\
-; APCu\n\
-apc.enabled = 1\n\
-apc.shm_size = 128M\n\
-\n\
-; Error handling\n\
-display_errors = Off\n\
-log_errors = On\n\
-\n\
-; Date/time\n\
-date.timezone = UTC\n\
-" > /usr/local/etc/php/conf.d/mediawiki.ini
+RUN { \
+    echo 'memory_limit = 256M'; \
+    echo 'upload_max_filesize = 2G'; \
+    echo 'post_max_size = 2100M'; \
+    echo 'max_execution_time = 600'; \
+    echo 'max_input_time = 600'; \
+    echo 'max_input_vars = 5000'; \
+    echo 'file_uploads = On'; \
+    echo ''; \
+    echo '; OPcache'; \
+    echo 'opcache.enable = 1'; \
+    echo 'opcache.memory_consumption = 256'; \
+    echo 'opcache.max_accelerated_files = 10000'; \
+    echo 'opcache.validate_timestamps = 1'; \
+    echo 'opcache.revalidate_freq = 60'; \
+    echo ''; \
+    echo '; APCu'; \
+    echo 'apc.enabled = 1'; \
+    echo 'apc.shm_size = 128M'; \
+    echo ''; \
+    echo '; Error handling'; \
+    echo 'display_errors = Off'; \
+    echo 'log_errors = On'; \
+    echo ''; \
+    echo '; Date/time'; \
+    echo 'date.timezone = UTC'; \
+    } > /usr/local/etc/php/conf.d/mediawiki.ini
 
 # No disable_functions or open_basedir — container is the sandbox
 # This is what makes Scribunto (proc_open, shell_exec) work without fuss

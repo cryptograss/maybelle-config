@@ -83,7 +83,7 @@
 
 - name: Start wiki container
   command:
-    cmd: docker compose up -d
+    cmd: docker compose up -d --force-recreate
     chdir: /opt/pickipedia-docker
   register: compose_up
 
