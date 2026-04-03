@@ -1,0 +1,70 @@
+# PickiPedia Production Container
+# Thin image — MediaWiki code is bind-mounted from /var/www/pickipedia
+# MariaDB socket is mounted from host
+
+FROM php:8.2-apache
+
+# Install PHP extensions needed by MediaWiki
+RUN apt-get update && apt-get install -y \
+    libicu-dev \
+    libzip-dev \
+    libpng-dev \
+    libjpeg-dev \
+    libfreetype6-dev \
+    imagemagick \
+    ffmpeg \
+    lua5.4 \
+    liblua5.4-dev \
+    git \
+    unzip \
+    curl \
+    && docker-php-ext-configure gd --with-freetype --with-jpeg \
+    && docker-php-ext-install \
+        intl \
+        mysqli \
+        opcache \
+        gd \
+        zip \
+        calendar \
+        bcmath \
+    && pecl install apcu \
+    && docker-php-ext-enable apcu \
+    && rm -rf /var/lib/apt/lists/*
+
+# Apache configuration
+RUN a2enmod rewrite headers
+RUN sed -i '/<Directory \/var\/www\/>/,/<\/Directory>/ s/AllowOverride None/AllowOverride All/' /etc/apache2/apache2.conf
+
+# PHP configuration matching current production settings
+RUN echo "\
+memory_limit = 256M\n\
+upload_max_filesize = 2G\n\
+post_max_size = 2100M\n\
+max_execution_time = 600\n\
+max_input_time = 600\n\
+max_input_vars = 5000\n\
+file_uploads = On\n\
+\n\
+; OPcache\n\
+opcache.enable = 1\n\
+opcache.memory_consumption = 256\n\
+opcache.max_accelerated_files = 10000\n\
+opcache.validate_timestamps = 1\n\
+opcache.revalidate_freq = 60\n\
+\n\
+; APCu\n\
+apc.enabled = 1\n\
+apc.shm_size = 128M\n\
+\n\
+; Error handling\n\
+display_errors = Off\n\
+log_errors = On\n\
+\n\
+; Date/time\n\
+date.timezone = UTC\n\
+" > /usr/local/etc/php/conf.d/mediawiki.ini
+
+# No disable_functions or open_basedir — container is the sandbox
+# This is what makes Scribunto (proc_open, shell_exec) work without fuss
+
+EXPOSE 80
