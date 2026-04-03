@@ -44,10 +44,7 @@
 
       {{ domain_name }}, {{ www_domain }} {
           # Reverse proxy to Nginx (which handles PHP-FPM)
-          reverse_proxy 127.0.0.1:8080 {
-              header_up -Te
-              header_up -Alt-Used
-          }
+          reverse_proxy 127.0.0.1:8080
 
           # Security headers
           header {
@@ -56,9 +53,6 @@
               Referrer-Policy strict-origin-when-cross-origin
               -Server
           }
-
-          # Compression
-          encode gzip zstd
 
           # Handle www redirect
           @www host {{ www_domain }}
