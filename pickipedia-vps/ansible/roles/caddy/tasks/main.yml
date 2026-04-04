@@ -59,11 +59,32 @@
   copy:
     dest: /etc/caddy/Caddyfile
     content: |
-      # PickiPedia - SSL termination and reverse proxy
-      # Caddy automatically handles Let's Encrypt certificates
+      # Disable HTTP/3 — Firefox drops XHR POST bodies over QUIC
+      # Hunter works because Caddy 2.6.2 doesn't advertise H3 by default
+      {
+          servers {
+              protocols h1 h2
+          }
+      }
 
+      # PickiPedia - SSL termination and reverse proxy
       {{ domain_name }}, {{ www_domain }} {
           reverse_proxy 127.0.0.1:8080
+
+          # Security headers
+          header {
+              X-Content-Type-Options nosniff
+              X-Frame-Options SAMEORIGIN
+              Referrer-Policy strict-origin-when-cross-origin
+              -Server
+          }
+
+          # Compression
+          encode gzip zstd
+
+          # Handle www redirect
+          @www host {{ www_domain }}
+          redir @www https://{{ domain_name }}{uri} permanent
       }
 
       # Health check endpoint (for monitoring from maybelle)
