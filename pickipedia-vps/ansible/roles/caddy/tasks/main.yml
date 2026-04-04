@@ -43,23 +43,7 @@
       # Caddy automatically handles Let's Encrypt certificates
 
       {{ domain_name }}, {{ www_domain }} {
-          # Reverse proxy to Docker wiki container (Apache on port 8080)
           reverse_proxy 127.0.0.1:8080
-
-          # Security headers
-          header {
-              X-Content-Type-Options nosniff
-              X-Frame-Options SAMEORIGIN
-              Referrer-Policy strict-origin-when-cross-origin
-              -Server
-          }
-
-          # Compression
-          encode gzip zstd
-
-          # Handle www redirect
-          @www host {{ www_domain }}
-          redir @www https://{{ domain_name }}{uri} permanent
       }
 
       # Health check endpoint (for monitoring from maybelle)
