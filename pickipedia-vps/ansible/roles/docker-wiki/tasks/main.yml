@@ -95,3 +95,10 @@
   until: wiki_health.status in [200, 301, 302, 404]
   retries: 15
   delay: 2
+
+- name: Rebuild Semantic MediaWiki data
+  command:
+    cmd: docker exec pickipedia-wiki php /var/www/html/maintenance/run.php SMW\Maintenance\RebuildData
+  register: smw_rebuild
+  failed_when: false
+  changed_when: smw_rebuild.rc == 0
