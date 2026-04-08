@@ -248,6 +248,8 @@ def build_release_from_draft(draft_data: dict) -> str:
     handler = get_draft_handler(draft_data)
     release = handler.build_release(draft_data)
 
+    release['release_type'] = handler.name
+
     if draft_data.get('blockheight'):
         release['blockheight'] = draft_data['blockheight']
     if draft_data.get('upload_blockheight'):

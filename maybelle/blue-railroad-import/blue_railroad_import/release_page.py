@@ -26,12 +26,15 @@ def build_release_yaml(
     title: Optional[str] = None,
     description: Optional[str] = None,
     file_type: Optional[str] = None,
+    release_type: Optional[str] = None,
 ) -> str:
     """Build YAML content for a Release page."""
     data = {}
     if title:
         data['title'] = title
     data['ipfs_cid'] = cid
+    if release_type:
+        data['release_type'] = release_type
     if description:
         data['description'] = description
     if file_type:
@@ -64,6 +67,7 @@ def _enrich_existing(
     title: Optional[str] = None,
     description: Optional[str] = None,
     file_type: Optional[str] = None,
+    release_type: Optional[str] = None,
 ) -> SaveResult:
     """Check if an existing Release page needs enrichment.
 
@@ -81,6 +85,9 @@ def _enrich_existing(
     needs_update = False
     if file_type and not existing_data.get('file_type'):
         existing_data['file_type'] = file_type
+        needs_update = True
+    if release_type and not existing_data.get('release_type'):
+        existing_data['release_type'] = release_type
         needs_update = True
     if title and not existing_data.get('title'):
         existing_data['title'] = title
@@ -134,6 +141,7 @@ def ensure_release_for_token(
             wiki, page_title, cid,
             title=title, description=description,
             file_type='video/webm',
+            release_type='blue-railroad',
         )
 
     yaml_content = build_release_yaml(
@@ -141,6 +149,7 @@ def ensure_release_for_token(
         title=title,
         description=description,
         file_type='video/webm',
+        release_type='blue-railroad',
     )
 
     logger.info("  Creating release page: %s", page_title)
@@ -387,6 +396,7 @@ def ensure_release_for_submission(
             wiki, page_title, cid,
             title=title, description=description,
             file_type='video/webm',
+            release_type='blue-railroad',
         )
 
     yaml_content = build_release_yaml(
@@ -394,6 +404,7 @@ def ensure_release_for_submission(
         title=title,
         description=description,
         file_type='video/webm',
+        release_type='blue-railroad',
     )
 
     logger.info("  Creating release page: %s", page_title)
