@@ -9,10 +9,10 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, UploadFile, HTTPException
+from fastapi import APIRouter, Depends, File, Request, UploadFile, HTTPException
 from sse_starlette.sse import EventSourceResponse
 
-from ..auth import require_auth, require_finalize_auth
+from ..auth import require_auth, require_finalize_auth, has_finalize_token
 from ..config import get_settings, get_commit, Settings
 from ..models.content import (
     ContentFile, ContentDraftState, ContentDraftResponse, ContentFinalizeRequest
@@ -175,10 +175,15 @@ async def create_content_draft(
 @router.get("/{draft_id}", response_model=ContentDraftResponse)
 async def get_content_draft(
     draft_id: str,
+    request: Request,
     wallet_address: str = Depends(require_auth),
     settings: Settings = Depends(get_settings)
 ):
-    """Retrieve content draft state by ID."""
+    """Retrieve content draft state by ID.
+
+    Accessible by the original uploader OR any user with finalize-release
+    permission (indicated by a valid finalize-prefixed HMAC token).
+    """
     staging_dir = Path(settings.staging_dir)
     draft_dir = get_draft_dir(staging_dir, draft_id)
 
@@ -186,7 +191,8 @@ async def get_content_draft(
     if state is None:
         raise HTTPException(status_code=404, detail="Content draft not found")
 
-    if state.uploaded_by.lower() != wallet_address.lower():
+    is_owner = state.uploaded_by.lower() == wallet_address.lower()
+    if not is_owner and not has_finalize_token(request, settings):
         raise HTTPException(status_code=403, detail="Not your draft")
 
     return ContentDraftResponse(
