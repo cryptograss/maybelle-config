@@ -195,10 +195,23 @@ async def require_auth(
 
     Returns an identity string.
     """
-    # 1. HMAC upload token (wiki-issued, for direct browser uploads)
-    identity = _verify_hmac_headers(request, settings, action="upload")
-    if identity:
-        return identity
+    # 1. HMAC token (wiki-issued — accept either upload or finalize prefix,
+    #    both prove the user is authenticated via the wiki)
+    upload_token = request.headers.get("X-Upload-Token")
+    if upload_token:
+        username = request.headers.get("X-Upload-User", "")
+        timestamp_str = request.headers.get("X-Upload-Timestamp", "")
+        try:
+            timestamp = int(timestamp_str)
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=401, detail={"error": "Invalid upload timestamp"})
+
+        if verify_upload_token(upload_token, username, timestamp, settings, action="upload"):
+            return f"wiki:{username}"
+        if verify_upload_token(upload_token, username, timestamp, settings, action="finalize"):
+            return f"wiki:{username}"
+
+        raise HTTPException(status_code=401, detail={"error": "Invalid or expired token"})
 
     # 2. API key (server-to-server)
     api_key = request.headers.get("X-API-Key")
@@ -217,6 +230,25 @@ async def require_auth(
 
     # 3. Wallet signature
     return await require_wallet_auth(request, settings)
+
+
+def has_finalize_token(request: Request, settings: Settings) -> bool:
+    """Check if the request carries a valid finalize-prefixed HMAC token.
+
+    Non-throwing — returns False if absent, invalid, or mismatched.
+    Use this to grant elevated access (e.g. viewing other users' drafts)
+    without requiring finalize auth.
+    """
+    upload_token = request.headers.get("X-Upload-Token")
+    if not upload_token:
+        return False
+    username = request.headers.get("X-Upload-User", "")
+    timestamp_str = request.headers.get("X-Upload-Timestamp", "")
+    try:
+        timestamp = int(timestamp_str)
+    except (ValueError, TypeError):
+        return False
+    return verify_upload_token(upload_token, username, timestamp, settings, action="finalize")
 
 
 async def require_finalize_auth(
