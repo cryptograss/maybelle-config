@@ -208,6 +208,34 @@ def cmd_clear_torrents(args):
         sys.exit(1)
 
 
+def cmd_enrich_ipfs(args):
+    """Enrich Release pages with file_size and file_type from IPFS."""
+    _configure_logging(args)
+    wiki_client = create_wiki_client(args)
+
+    from .ipfs_enrichment import enrich_release_metadata
+
+    results = enrich_release_metadata(
+        wiki=wiki_client,
+        gateway_url=args.gateway_url.rstrip('/'),
+    )
+
+    updated = [r for r in results if r.action in ('updated', 'created')]
+    unchanged = [r for r in results if r.action == 'unchanged']
+    errors = [r for r in results if r.action == 'error']
+
+    print(f"\nIPFS enrichment complete:")
+    print(f"  Updated: {len(updated)}")
+    print(f"  Unchanged: {len(unchanged)}")
+    print(f"  Errors: {len(errors)}")
+
+    for r in errors:
+        print(f"  ERROR: {r.page_title}: {r.message}")
+
+    if errors:
+        sys.exit(1)
+
+
 def cmd_enrich_torrents(args):
     """Enrich Release pages with BitTorrent metadata via delivery-kid."""
     _configure_logging(args)
@@ -375,6 +403,19 @@ def main():
     )
     add_common_args(clear_parser)
     clear_parser.set_defaults(func=cmd_clear_torrents)
+
+    # Enrich IPFS metadata (file size, file type)
+    ipfs_parser = subparsers.add_parser(
+        'enrich-ipfs',
+        help='Enrich Release pages with file size and type from IPFS gateway'
+    )
+    add_common_args(ipfs_parser)
+    ipfs_parser.add_argument(
+        '--gateway-url',
+        default='https://ipfs.delivery-kid.cryptograss.live',
+        help='IPFS gateway URL (default: https://ipfs.delivery-kid.cryptograss.live)',
+    )
+    ipfs_parser.set_defaults(func=cmd_enrich_ipfs)
 
     # Enrich torrents command
     torrent_parser = subparsers.add_parser(
