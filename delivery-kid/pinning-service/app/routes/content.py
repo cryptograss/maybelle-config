@@ -8,6 +8,7 @@ import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, Request, UploadFile, HTTPException
 from sse_starlette.sse import EventSourceResponse
@@ -251,7 +252,7 @@ async def _submit_preview_transcode(
         # using the preview_token for auth (no IPFS pin of the original needed)
         base_url = settings.ipfs_gateway_url.replace("ipfs.", "", 1)
         source_url = (
-            f"{base_url}/staging/drafts/{draft_id}/{video_file.original_filename}"
+            f"{base_url}/staging/drafts/{draft_id}/{quote(video_file.original_filename)}"
             f"?preview_token={state.preview_token}"
         )
 
@@ -392,7 +393,7 @@ async def finalize_sse_generator(
             # Build source URL — Coconut fetches from staging via preview_token
             base_url = settings.ipfs_gateway_url.replace("ipfs.", "", 1)
             source_url = (
-                f"{base_url}/staging/drafts/{draft_id}/{video_file.original_filename}"
+                f"{base_url}/staging/drafts/{draft_id}/{quote(video_file.original_filename)}"
                 f"?preview_token={state.preview_token}"
             )
 
