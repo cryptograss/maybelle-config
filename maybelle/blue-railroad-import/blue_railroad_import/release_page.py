@@ -17,6 +17,7 @@ import yaml
 
 from .wiki_client import WikiClientProtocol, SaveResult
 from .models import Token, Submission
+from .leaderboard import EXERCISE_MAP
 
 logger = logging.getLogger(__name__)
 
@@ -89,9 +90,21 @@ def _enrich_existing(
     if release_type and not existing_data.get('release_type'):
         existing_data['release_type'] = release_type
         needs_update = True
-    if title and not existing_data.get('title'):
-        existing_data['title'] = title
-        needs_update = True
+    if title:
+        existing_title = existing_data.get('title', '')
+        # Update title if missing, or if existing title is a generic
+        # "Token N" / "Submission N" pattern and we have a better name
+        is_generic = (
+            not existing_title
+            or existing_title.startswith('Blue Railroad Token ')
+            or existing_title.startswith('Blue Railroad Submission ')
+        )
+        if is_generic and not title.startswith('Blue Railroad Token ') and not title.startswith('Blue Railroad Submission '):
+            existing_data['title'] = title
+            needs_update = True
+        elif not existing_title:
+            existing_data['title'] = title
+            needs_update = True
     if description and not existing_data.get('description'):
         existing_data['description'] = description
         needs_update = True
@@ -128,8 +141,17 @@ def ensure_release_for_token(
 
     page_title = f'Release:{cid}'
 
-    # Build metadata from what we know
-    if submission_id is not None:
+    # Build title from exercise name (song_id) when available
+    exercise_name = None
+    if token.song_id and token.song_id in EXERCISE_MAP:
+        # Strip wiki markup from exercise name
+        raw = EXERCISE_MAP[token.song_id]
+        exercise_name = raw.replace('[[', '').replace(']]', '')
+
+    if exercise_name:
+        title = exercise_name
+        description = f'Blue Railroad Token #{token.token_id} — {exercise_name}'
+    elif submission_id is not None:
         title = f'Blue Railroad Submission {submission_id}'
         description = f'Video from Blue Railroad Submission #{submission_id}'
     else:
