@@ -97,22 +97,15 @@ def _enrich_existing(
     if release_type and not existing_data.get('release_type'):
         existing_data['release_type'] = release_type
         needs_update = True
-    if title:
+    if title and '#' in title:
         existing_title = existing_data.get('title', '')
-        # Update title if missing, or if existing title is a generic
-        # pattern and we have a proper "<song> (<exercise>) #<id>" title
-        is_generic = (
-            not existing_title
-            or existing_title.startswith('Blue Railroad Token ')
-            or existing_title.startswith('Blue Railroad Submission ')
-        )
-        has_proper_title = '#' in title  # proper titles have "#<token_id>"
-        if is_generic and has_proper_title:
+        # Update title if it doesn't already have the "#<id>" format
+        if existing_title != title and '#' not in existing_title:
             existing_data['title'] = title
             needs_update = True
-        elif not existing_title:
-            existing_data['title'] = title
-            needs_update = True
+    elif title and not existing_data.get('title'):
+        existing_data['title'] = title
+        needs_update = True
     if description and not existing_data.get('description'):
         existing_data['description'] = description
         needs_update = True
