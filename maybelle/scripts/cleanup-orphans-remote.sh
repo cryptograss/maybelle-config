@@ -19,11 +19,19 @@ ORPHAN_PINS=(
     "bafybeidsjptidvb6wf6benznq2pxgnt5iyksgtecpmjoimlmswhtx2u5ua"   # dead/unresolvable
     "bafybeifkvoeqol4qyogvjeocehbcv4itonigfzu5txaih2kctpab7n6y2e"   # dupe of Token 2
     "QmSmB9XPMob8D3Y1GYHmXjMPSV4h89UnakBJ7z8EnfDLJt"               # half-uploaded 4masks
+    "bafybeibxaykvwev5ofk6dx77as5borzlhupeilrmg6ozbsykx47e2puwje"   # CIDv1 dupe of Token 12
+    "bafybeifetbpuhslne5kpzwbdxq747le3jybt7vvwg7lldbchhc6s6aofmu"   # CIDv1 dupe of Token 13
+    "bafybeifqvfdhvf6w34rytzukctrgafvwbfh6vcub3ol5antadidxrvmhri"   # CIDv1 dupe of Token 7
 )
 
 # Orphaned seeding directories to remove
 ORPHAN_SEEDS=(
     "Bafybeidh6jwxri3jjwj2eeomxm7b5ofppz7c44sk3mo72s2ggap2nrdd5e"   # dupe of Token 8
+    "Bafybeidsjptidvb6wf6benznq2pxgnt5iyksgtecpmjoimlmswhtx2u5ua"   # dead/unresolvable
+    "Bafybeibxaykvwev5ofk6dx77as5borzlhupeilrmg6ozbsykx47e2puwje"   # CIDv1 dupe of Token 12
+    "Bafybeifetbpuhslne5kpzwbdxq747le3jybt7vvwg7lldbchhc6s6aofmu"   # CIDv1 dupe of Token 13
+    "Bafybeifqvfdhvf6w34rytzukctrgafvwbfh6vcub3ol5antadidxrvmhri"   # CIDv1 dupe of Token 7
+    "Bafybeifkvoeqol4qyogvjeocehbcv4itonigfzu5txaih2kctpab7n6y2e"   # CIDv1 dupe of Token 2
 )
 
 echo "--- Unpinning ${#ORPHAN_PINS[@]} orphaned IPFS pins ---"
