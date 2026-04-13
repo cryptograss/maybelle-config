@@ -12,6 +12,18 @@ CHAIN_DATA="/var/jenkins_home/shared/chain_data/chainData.json"
 
 echo "=== Blue Railroad Import ==="
 
+# Show installed version
+echo -n "blue-railroad-import: "
+docker exec jenkins /opt/blue-railroad-import/bin/pip show blue-railroad-import 2>/dev/null | grep -E "^(Version|Location)" | tr '\n' ' '
+echo ""
+echo -n "has all_token_ids: "
+docker exec jenkins /opt/blue-railroad-import/bin/python -c "
+import inspect
+from blue_railroad_import.release_page import ensure_release_for_token
+print('all_token_ids' in inspect.signature(ensure_release_for_token).parameters)
+" 2>/dev/null || echo "unknown"
+echo ""
+
 # Check chain data exists
 docker exec jenkins test -f "$CHAIN_DATA" || {
     echo "ERROR: Chain data not found at $CHAIN_DATA"
