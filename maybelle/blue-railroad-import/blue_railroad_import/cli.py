@@ -14,17 +14,23 @@ from .torrent_enrichment import enrich_releases
 
 def get_version() -> str:
     """Get the current git commit hash, or 'unknown' if not available."""
-    try:
-        result = subprocess.run(
-            ['git', 'rev-parse', '--short', 'HEAD'],
-            capture_output=True,
-            text=True,
-            cwd=Path(__file__).parent,
-        )
-        if result.returncode == 0:
-            return result.stdout.strip()
-    except Exception:
-        pass
+    # Try from package location, then from source checkout
+    search_dirs = [
+        Path(__file__).parent,
+        Path('/opt/blue-railroad-import-src'),
+    ]
+    for d in search_dirs:
+        try:
+            result = subprocess.run(
+                ['git', 'rev-parse', '--short', 'HEAD'],
+                capture_output=True,
+                text=True,
+                cwd=d,
+            )
+            if result.returncode == 0:
+                return result.stdout.strip()
+        except Exception:
+            continue
     return 'unknown'
 
 
@@ -296,7 +302,9 @@ def add_common_args(parser):
 
 
 def main():
+    import blue_railroad_import
     version = get_version()
+    blue_railroad_import.BOT_VERSION = version
     print(f"Blue Railroad Import Bot (commit: {version})")
 
     parser = argparse.ArgumentParser(

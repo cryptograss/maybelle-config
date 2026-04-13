@@ -13,7 +13,15 @@ import urllib.request
 import urllib.parse
 from typing import Optional
 
+import blue_railroad_import
+
 import yaml
+
+
+def _summary(msg: str) -> str:
+    """Build an edit summary with bot version."""
+    v = blue_railroad_import.BOT_VERSION
+    return f'{msg} (bot: {v})' if v != 'unknown' else msg
 
 from .wiki_client import WikiClientProtocol, SaveResult
 from .models import Token, Submission
@@ -119,7 +127,7 @@ def _enrich_existing(
 
     logger.info("  Enriching release page: %s", page_title)
 
-    summary = 'Enrich release metadata (via Blue Railroad import)'
+    summary = _summary('Enrich release metadata')
     return wiki.save_page(page_title, yaml_content, summary)
 
 
@@ -179,7 +187,7 @@ def ensure_release_for_token(
 
     logger.info("  Creating release page: %s", page_title)
 
-    summary = f'Create release for {title} (via Blue Railroad import)'
+    summary = _summary(f'Create release: {title}')
     return wiki.save_page(page_title, yaml_content, summary)
 
 
@@ -434,5 +442,5 @@ def ensure_release_for_submission(
 
     logger.info("  Creating release page: %s", page_title)
 
-    summary = f'Create release for {title} (via Blue Railroad import)'
+    summary = _summary(f'Create release: {title}')
     return wiki.save_page(page_title, yaml_content, summary)

@@ -166,7 +166,9 @@ def enrich_release_metadata(
             continue
 
         new_content = yaml.dump(data, default_flow_style=False, allow_unicode=True)
-        summary = 'Enrich release with IPFS metadata (file size/type)'
+        import blue_railroad_import
+        v = blue_railroad_import.BOT_VERSION
+        summary = f'Enrich IPFS metadata (bot: {v})' if v != 'unknown' else 'Enrich IPFS metadata'
         result = wiki.save_page(page_title, new_content, summary)
         results.append(result)
 
