@@ -397,9 +397,8 @@ class BlueRailroadImporter:
 
         # Ensure Release pages for submissions with CIDs not already covered by tokens
         for sub in all_submissions:
-            if not sub.has_cid or sub.ipfs_cid in seen_cids:
+            if not sub.has_cid or sub.ipfs_cid in cid_tokens:
                 continue
-            seen_cids.add(sub.ipfs_cid)
             result = ensure_release_for_submission(
                 self.wiki, sub,
             )
