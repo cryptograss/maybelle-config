@@ -128,11 +128,15 @@ def ensure_release_for_token(
     wiki: WikiClientProtocol,
     token: Token,
     submission_id: Optional[int] = None,
+    all_token_ids: Optional[list[int]] = None,
 ) -> Optional[SaveResult]:
     """Ensure a Release page exists for a token's video CID.
 
     If the page exists but is missing metadata (like file_type),
     enriches it with what we know.
+
+    Args:
+        all_token_ids: All token IDs that share this CID (for multi-token titles).
 
     Returns None if token has no CID, or SaveResult with the action taken.
     """
@@ -142,13 +146,15 @@ def ensure_release_for_token(
 
     page_title = f'Release:{cid}'
 
-    # Build title: "<song name> (<exercise>) #<token_id>"
+    # Build title: "<song name> (<exercise>) #<id>, #<id>"
     song_exercise = SONG_EXERCISES.get(token.song_id) if token.song_id else None
+    token_ids = all_token_ids or [int(token.token_id)]
 
     if song_exercise:
         song_name, exercise = song_exercise
-        title = f'{song_name} ({exercise}) #{token.token_id}'
-        description = f'Blue Railroad Token #{token.token_id} — {exercise} to {song_name}'
+        id_str = ', '.join(f'#{tid}' for tid in token_ids)
+        title = f'{song_name} ({exercise}) {id_str}'
+        description = f'Blue Railroad {id_str} — {exercise} to {song_name}'
     elif submission_id is not None:
         title = f'Blue Railroad Submission {submission_id}'
         description = f'Video from Blue Railroad Submission #{submission_id}'

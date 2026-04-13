@@ -364,17 +364,27 @@ class BlueRailroadImporter:
         logger.info("  Unchanged: %s", len(results.submission_pages_unchanged))
         logger.info("  Errors: %s", len(results.submission_pages_error))
 
-        # Ensure Release pages exist for tokens with IPFS CIDs
+        # Ensure Release pages exist for tokens with IPFS CIDs.
+        # Group tokens by CID first so we can list all token IDs in the title.
         logger.info("\nEnsuring Release pages for token videos...")
-        seen_cids: set[str] = set()
+        cid_tokens: dict[str, list] = {}
+        cid_submission: dict[str, int | None] = {}
         for key, token in all_tokens.items():
-            if not token.ipfs_cid or token.ipfs_cid in seen_cids:
+            if not token.ipfs_cid:
                 continue
-            seen_cids.add(token.ipfs_cid)
-            submission_id = token_submission_map.get(key)
+            cid_tokens.setdefault(token.ipfs_cid, []).append(token)
+            if key in token_submission_map and token.ipfs_cid not in cid_submission:
+                cid_submission[token.ipfs_cid] = token_submission_map[key]
+
+        for cid, tokens_for_cid in cid_tokens.items():
+            # Use the first token for song_id, but collect all token IDs
+            first_token = tokens_for_cid[0]
+            all_token_ids = sorted(int(t.token_id) for t in tokens_for_cid)
+            submission_id = cid_submission.get(cid)
             result = ensure_release_for_token(
-                self.wiki, token,
+                self.wiki, first_token,
                 submission_id=submission_id,
+                all_token_ids=all_token_ids,
             )
             if result:
                 results.release_pages.append(result)
