@@ -31,7 +31,7 @@ SONG_EXERCISES = {
     '5': ('Blue Railroad Train', 'Squats'),
     '6': ('Nine Pound Hammer', 'Pushups'),
     '7': ('Blue Railroad Train', 'Squats'),  # legacy
-    '10': ('Ginseng Sullivan', 'Army Crawls'),
+    '8': ('Ginseng Sullivan', 'Army Crawls'),
 }
 
 logger = logging.getLogger(__name__)
