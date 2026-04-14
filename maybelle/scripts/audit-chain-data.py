@@ -15,7 +15,7 @@ SONG_MAP = {
     '5': ('Blue Railroad Train', 'Squats'),
     '6': ('Nine Pound Hammer', 'Pushups'),
     '7': ('Blue Railroad Train', 'Squats'),
-    '10': ('Ginseng Sullivan', 'Army Crawls'),
+    '8': ('Ginseng Sullivan', 'Army Crawls'),
 }
 
 BASE58_ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
