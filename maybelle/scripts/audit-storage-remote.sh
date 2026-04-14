@@ -73,30 +73,73 @@ while IFS= read -r pin_cid; do
 done < /tmp/audit-pins.txt
 echo "  $ORPHAN_PINS orphaned pins (not in any Release page)"
 
-# Check for Release pages with no IPFS pin (skip deleted/unpinned)
-UNPINNED_OUTPUT=$(python3 -c "
-import json, sys, urllib.request
+# Check Release pin state — show unpinned, deleted, and missing pins
+python3 -c "
+import json, sys, urllib.request, yaml
 
 pins = set(line.strip().lower() for line in open('/tmp/audit-pins.txt'))
 releases = json.loads(urllib.request.urlopen('${WIKI_API}?action=releaselist&format=json', timeout=30).read().decode())
-unpinned = 0
+
+# Also fetch page content for each release to check delete/unpin flags
+api = '${WIKI_API}'
+deleted = []
+retired = []  # unpinned by directive
+missing_pin = []
+
 for r in releases.get('releases', []):
-    cid = (r.get('ipfs_cid') or r.get('page_title', '')).lower()
-    # Skip deleted releases — they're intentionally unpinned
-    page_title = 'Release:' + (r.get('ipfs_cid') or r.get('page_title', ''))
-    if cid not in pins:
-        # Check if page has delete: true by looking at pinned_on
-        # Deleted pages have pinned_on cleared and won't have it set
-        # But we need the actual YAML to check delete flag
-        # Use a heuristic: if pinned_on is explicitly empty list, it was deliberately unpinned
-        pinned_on = r.get('pinned_on')
-        if pinned_on is not None and pinned_on == []:
-            continue  # deliberately unpinned
-        print(f'  UNPINNED RELEASE: {r.get(\"ipfs_cid\") or r.get(\"page_title\", \"\")}')
-        unpinned += 1
-print(f'  {unpinned} releases with no IPFS pin')
-" 2>/dev/null)
-echo "$UNPINNED_OUTPUT"
+    cid = r.get('ipfs_cid') or r.get('page_title', '')
+    title = r.get('title', cid[:16])
+    cid_lower = cid.lower()
+    is_pinned = cid_lower in pins
+    pinned_on = r.get('pinned_on')
+
+    # Fetch YAML to check flags
+    page_title = 'Release:' + cid
+    try:
+        url = f'{api}?action=query&titles={page_title}&prop=revisions&rvprop=content&rvslots=main&format=json'
+        resp = urllib.request.urlopen(url, timeout=15)
+        qdata = json.loads(resp.read().decode())
+        page_content = ''
+        for p in qdata.get('query', {}).get('pages', {}).values():
+            revs = p.get('revisions', [])
+            if revs:
+                page_content = revs[0].get('slots', {}).get('main', {}).get('*', '')
+        ydata = yaml.safe_load(page_content) if page_content else {}
+        if not isinstance(ydata, dict):
+            ydata = {}
+    except:
+        ydata = {}
+
+    if ydata.get('delete'):
+        deleted.append((cid[:16], title, is_pinned))
+    elif ydata.get('unpin'):
+        retired.append((cid[:16], title, is_pinned))
+    elif not is_pinned:
+        missing_pin.append((cid[:16], title))
+
+if deleted:
+    print(f'  Deleted releases ({len(deleted)}):')
+    for cid, title, pinned in deleted:
+        status = 'STILL PINNED' if pinned else 'unpinned'
+        print(f'    {cid}... {title} [{status}]')
+
+if retired:
+    print(f'  Retired releases ({len(retired)}):')
+    for cid, title, pinned in retired:
+        status = 'STILL PINNED' if pinned else 'unpinned'
+        print(f'    {cid}... {title} [{status}]')
+
+if missing_pin:
+    print(f'  MISSING PINS ({len(missing_pin)}):')
+    for cid, title in missing_pin:
+        print(f'    {cid}... {title}')
+
+if not deleted and not retired and not missing_pin:
+    print('  All releases pinned, none deleted or retired')
+else:
+    active = len(releases.get('releases', [])) - len(deleted) - len(retired)
+    print(f'  {active} active, {len(deleted)} deleted, {len(retired)} retired, {len(missing_pin)} missing pins')
+" 2>/dev/null
 
 echo ""
 echo "--- Seeding Directories ---"
