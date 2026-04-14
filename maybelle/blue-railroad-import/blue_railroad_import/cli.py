@@ -246,6 +246,37 @@ def cmd_enrich_ipfs(args):
         sys.exit(1)
 
 
+def cmd_reconcile_pins(args):
+    """Reconcile IPFS pins with Release page state."""
+    _configure_logging(args)
+    wiki_client = create_wiki_client(args)
+
+    if not args.delivery_kid_api_key:
+        print("Error: --delivery-kid-api-key required", file=sys.stderr)
+        sys.exit(1)
+
+    from .pin_reconciliation import reconcile_pins
+
+    results = reconcile_pins(
+        wiki=wiki_client,
+        delivery_kid_url=args.delivery_kid_url.rstrip('/'),
+        delivery_kid_api_key=args.delivery_kid_api_key,
+    )
+
+    updated = [r for r in results if r.action in ('updated', 'created')]
+    errors = [r for r in results if r.action == 'error']
+
+    print(f"\nPin reconciliation complete:")
+    print(f"  Updated: {len(updated)}")
+    print(f"  Errors: {len(errors)}")
+
+    for r in errors:
+        print(f"  ERROR: {r.page_title}: {r.message}")
+
+    if errors:
+        sys.exit(1)
+
+
 def cmd_enrich_torrents(args):
     """Enrich Release pages with BitTorrent metadata via delivery-kid."""
     _configure_logging(args)
@@ -445,6 +476,23 @@ def main():
         help='API key for delivery-kid service',
     )
     torrent_parser.set_defaults(func=cmd_enrich_torrents)
+
+    # Reconcile pins command
+    pin_parser = subparsers.add_parser(
+        'reconcile-pins',
+        help='Reconcile IPFS pins with Release page state (pin missing, unpin/delete directives)'
+    )
+    add_common_args(pin_parser)
+    pin_parser.add_argument(
+        '--delivery-kid-url',
+        default='https://delivery-kid.cryptograss.live',
+        help='Delivery Kid service URL (default: https://delivery-kid.cryptograss.live)',
+    )
+    pin_parser.add_argument(
+        '--delivery-kid-api-key',
+        help='API key for delivery-kid service',
+    )
+    pin_parser.set_defaults(func=cmd_reconcile_pins)
 
     args = parser.parse_args()
 
