@@ -209,7 +209,17 @@ def generate_thumbnail(cid: str, output_dir: Optional[Path] = None) -> Optional[
         temp_thumb_path = tmpdir / thumb_filename
 
         print(f"Downloading video {cid} from IPFS...")
-        if not download_video(cid, video_path):
+        downloaded = download_video(cid, video_path)
+
+        if not downloaded:
+            # Might be an HLS directory — try downloading the first .ts segment
+            print(f"  Direct download failed, trying first HLS segment...")
+            segment_path = tmpdir / f"segment_{cid}.ts"
+            if download_video(f"{cid}/segment_000.ts", segment_path):
+                video_path = segment_path
+                downloaded = True
+
+        if not downloaded:
             return None
 
         print(f"Extracting thumbnail frame...")

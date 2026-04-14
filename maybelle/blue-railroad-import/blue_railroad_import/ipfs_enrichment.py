@@ -212,10 +212,6 @@ def enrich_thumbnails(
         file_type = r.get('file_type', '')
         release_type = r.get('release_type', '')
 
-        # Skip HLS directories — can't extract frame from a directory
-        if file_type in ('directory', 'video/hls'):
-            continue
-
         has_video = (
             (file_type and file_type.startswith('video/'))
             or release_type == 'video'
