@@ -14,18 +14,22 @@ from .torrent_enrichment import enrich_releases
 
 def get_version() -> str:
     """Get the current git commit hash, or 'unknown' if not available."""
-    # Try from package location, then from source checkout
     search_dirs = [
         Path(__file__).parent,
         Path('/opt/blue-railroad-import-src'),
     ]
     for d in search_dirs:
+        if not d.exists():
+            continue
         try:
+            # Ensure safe.directory is set (repo may be owned by different user)
+            subprocess.run(
+                ['git', 'config', '--global', '--add', 'safe.directory', str(d)],
+                capture_output=True, timeout=5,
+            )
             result = subprocess.run(
                 ['git', 'rev-parse', '--short', 'HEAD'],
-                capture_output=True,
-                text=True,
-                cwd=d,
+                capture_output=True, text=True, cwd=d, timeout=5,
             )
             if result.returncode == 0:
                 return result.stdout.strip()

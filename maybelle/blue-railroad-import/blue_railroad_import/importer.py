@@ -167,47 +167,38 @@ class BlueRailroadImporter:
         logger.info("  Loaded %s ENS -> address mappings", len(ens_mapping))
         return ens_mapping
 
-    def load_submissions(self) -> list[Submission]:
+    def load_submissions(self, quiet: bool = False) -> list[Submission]:
         """Load all submissions from the wiki."""
-        logger.info("Loading submissions from wiki...")
+        if not quiet:
+            logger.info("Loading submissions from wiki...")
         submissions = fetch_all_submissions(self.wiki)
-        logger.info("  Loaded %s submission(s)", len(submissions))
+        if not quiet:
+            logger.info("  Loaded %s submission(s)", len(submissions))
         return submissions
 
-    def ensure_thumbnail(self, token: Token) -> bool:
+    def ensure_thumbnail(self, token: Token) -> str:
         """Ensure a thumbnail exists for the token's video.
 
-        Returns True if thumbnail exists or was successfully uploaded,
-        False if thumbnail generation/upload failed or no video exists.
-
-        Thumbnails are named by IPFS CID, so multiple tokens sharing
-        the same video will share the same thumbnail file.
+        Returns 'exists', 'uploaded', 'failed', or 'no_cid'.
         """
         if not token.ipfs_cid:
-            logger.info("  No IPFS CID for token %s, skipping thumbnail", token.token_id)
-            return False
+            return 'no_cid'
 
         filename = get_thumbnail_filename(token.ipfs_cid)
 
-        # Check if thumbnail already exists (may have been uploaded for another token)
         if self.wiki.file_exists(filename):
-            logger.info("  Thumbnail already exists: %s", filename)
-            return True
+            return 'exists'
 
-        # Generate thumbnail
-        logger.info("  Generating thumbnail for video %s...", token.ipfs_cid)
+        logger.info("  Generating thumbnail for token %s...", token.token_id)
         thumb_path = generate_thumbnail(token.ipfs_cid)
         if not thumb_path:
-            logger.info("  Failed to generate thumbnail for video %s", token.ipfs_cid)
-            return False
+            logger.info("  Failed to generate thumbnail for token %s", token.token_id)
+            return 'failed'
 
-        # Upload thumbnail
         description = f"Thumbnail for Blue Railroad video (IPFS: {token.ipfs_cid})"
         comment = f"Upload thumbnail for Blue Railroad video {token.ipfs_cid}"
-
         success = self.wiki.upload_file(thumb_path, filename, description, comment)
 
-        # Clean up temp file
         try:
             thumb_path.unlink()
         except Exception:
@@ -215,10 +206,10 @@ class BlueRailroadImporter:
 
         if success:
             logger.info("  Uploaded thumbnail: %s", filename)
+            return 'uploaded'
         else:
             logger.info("  Failed to upload thumbnail: %s", filename)
-
-        return success
+            return 'failed'
 
     def import_token(
         self,
@@ -297,7 +288,7 @@ class BlueRailroadImporter:
 
         # Reload submissions if any CIDs were synced (to get updated data)
         if cid_sync_results:
-            all_submissions = self.load_submissions()
+            all_submissions = self.load_submissions(quiet=True)
 
         # Match tokens to submissions - try CID matching first, fall back to blockheight+participant
         token_to_submission = match_tokens_to_submissions(all_tokens, all_submissions)
@@ -319,13 +310,15 @@ class BlueRailroadImporter:
 
         # Import individual token pages
         logger.info("\nImporting token pages...")
-        if generate_thumbnails:
-            logger.info("  (thumbnail generation enabled)")
+        thumb_stats = {'exists': 0, 'uploaded': 0, 'failed': 0, 'no_cid': 0}
         for key, token in all_tokens.items():
+            if generate_thumbnails:
+                thumb_stats[self.ensure_thumbnail(token)] += 1
+
             submission_id = token_submission_map.get(key)
             result = self.import_token(
                 token,
-                generate_thumbnails=generate_thumbnails,
+                generate_thumbnails=False,  # already handled above
                 submission_id=submission_id,
             )
             results.token_pages.append(result)
@@ -337,6 +330,11 @@ class BlueRailroadImporter:
                 logger.info("  Updated: Blue Railroad Token %s (%s)", token.token_id, fields)
             elif result.action == 'error':
                 logger.info("  ERROR: Blue Railroad Token %s: %s", token.token_id, result.message)
+
+        if generate_thumbnails:
+            logger.info("  Thumbnails: %d exist, %d uploaded, %d failed, %d no CID",
+                        thumb_stats['exists'], thumb_stats['uploaded'],
+                        thumb_stats['failed'], thumb_stats['no_cid'])
 
         logger.info("\nToken page summary:")
         logger.info("  Created: %s", len(results.token_pages_created))

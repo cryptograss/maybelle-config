@@ -278,30 +278,28 @@ def process_release_drafts(
 
     drafts = fetch_release_drafts(wiki)
 
-    history_calls = 0
+    no_cid = 0
+    already_exist = 0
+    created = 0
+    errors = 0
     for draft in drafts:
         title = draft['title']
         data = draft['data']
 
-        # Try to find the CID from edit history
         cid = find_cid_from_history(wiki, title)
-        history_calls += 1
 
         if not cid:
-            logger.info("  %s: no CID found in history, skipping", title)
+            no_cid += 1
             continue
 
         release_title = f"Release:{cid}"
 
         if wiki.page_exists(release_title):
-            logger.info("  %s: Release page already exists (%s)", title, release_title)
+            already_exist += 1
             results.append(SaveResult(release_title, 'unchanged', 'Already exists'))
             continue
 
-        # Build Release page from draft data
         release_yaml = build_release_from_draft(data)
-
-        logger.info("  %s: creating %s", title, release_title)
 
         handler = get_draft_handler(data)
         summary = f"Release created from {handler.name} draft (via bot)"
@@ -309,13 +307,13 @@ def process_release_drafts(
         results.append(result)
 
         if result.action == 'created':
-            logger.info("    Created: %s", release_title)
+            created += 1
+            logger.info("  Created release from draft: %s", release_title)
         elif result.action == 'error':
-            logger.error("    ERROR: %s", result.message)
+            errors += 1
+            logger.error("  ERROR creating release from draft: %s", result.message)
 
-    n_drafts = len(drafts)
-    total = 1 + n_drafts + history_calls
-    logger.info("  ReleaseDraft API calls: 1 allpages + %d content + %d history = %d total",
-                n_drafts, history_calls, total)
+    logger.info("  %d drafts: %d no CID, %d already have releases, %d created, %d errors",
+                len(drafts), no_cid, already_exist, created, errors)
 
     return results

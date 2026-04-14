@@ -80,6 +80,7 @@ class TestMultiTokenTitles:
             "title: 'Blue Railroad Train (Squats) #3, #4'\n"
             "release_type: blue-railroad\n"
             "file_type: video/webm\n"
+            "ipfs_cid: QmTEST\n"
         )
 
         result = _enrich_existing(
