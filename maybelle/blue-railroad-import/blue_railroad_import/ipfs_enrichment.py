@@ -204,8 +204,18 @@ def enrich_thumbnails(
     # Find video releases missing thumbnails
     needs_thumb = []
     for r in releases:
+        # Skip deleted/unpinned releases
+        pinned_on = r.get('pinned_on')
+        if pinned_on is not None and pinned_on == []:
+            continue
+
         file_type = r.get('file_type', '')
         release_type = r.get('release_type', '')
+
+        # Skip HLS directories — can't extract frame from a directory
+        if file_type in ('directory', 'video/hls'):
+            continue
+
         has_video = (
             (file_type and file_type.startswith('video/'))
             or release_type == 'video'
