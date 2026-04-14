@@ -1,7 +1,8 @@
-"""Enrich Release pages with file size and type from IPFS.
+"""Enrich Release pages with file size, type, and thumbnails from IPFS.
 
 Queries the IPFS gateway for each release's CID to determine
 file size and content type, then updates the wiki page YAML.
+Also generates and uploads thumbnails for video releases.
 """
 
 import json
@@ -13,6 +14,7 @@ from typing import Optional
 import yaml
 
 from .wiki_client import WikiClientProtocol, SaveResult
+from .thumbnail import get_thumbnail_filename, generate_thumbnail
 
 logger = logging.getLogger(__name__)
 
@@ -177,4 +179,105 @@ def enrich_release_metadata(
         elif result.action == 'error':
             logger.error("    ERROR: %s", result.message)
 
+    return results
+
+
+def enrich_thumbnails(
+    wiki: WikiClientProtocol,
+) -> list[SaveResult]:
+    """Generate and upload thumbnails for video releases missing them.
+
+    For each release with a video file_type or release_type=video that
+    doesn't have a thumbnail, downloads the video, extracts a frame,
+    uploads to the wiki, and writes the thumbnail filename to the YAML.
+
+    Args:
+        wiki: Wiki client instance
+
+    Returns:
+        List of SaveResult for pages that were updated.
+    """
+    results = []
+
+    releases = get_all_releases(wiki.api_url)
+
+    # Find video releases missing thumbnails
+    needs_thumb = []
+    for r in releases:
+        file_type = r.get('file_type', '')
+        release_type = r.get('release_type', '')
+        has_video = (
+            (file_type and file_type.startswith('video/'))
+            or release_type == 'video'
+            or release_type == 'blue-railroad'
+        )
+        if not has_video:
+            continue
+
+        cid = r.get('ipfs_cid') or r.get('page_title', '')
+        if not cid:
+            continue
+
+        # Check if thumbnail already exists on wiki
+        thumb_filename = get_thumbnail_filename(cid)
+        if wiki.file_exists(thumb_filename):
+            continue
+
+        needs_thumb.append(r)
+
+    logger.info("  %d video releases need thumbnails", len(needs_thumb))
+
+    generated = 0
+    failed = 0
+    for r in needs_thumb:
+        cid = r.get('ipfs_cid') or r.get('page_title', '')
+        title = r.get('title', cid[:16])
+        page_title = f"Release:{cid}"
+
+        logger.info("  Generating thumbnail for %s (%s)...", cid[:16], title)
+
+        thumb_path = generate_thumbnail(cid)
+        if not thumb_path:
+            logger.info("    Failed to generate thumbnail")
+            failed += 1
+            continue
+
+        # Upload to wiki
+        thumb_filename = get_thumbnail_filename(cid)
+        description = f"Thumbnail for release video (IPFS: {cid})"
+        comment = f"Upload thumbnail for {title}"
+        success = wiki.upload_file(thumb_path, thumb_filename, description, comment)
+
+        # Clean up
+        try:
+            thumb_path.unlink()
+        except Exception:
+            pass
+
+        if not success:
+            logger.info("    Failed to upload thumbnail")
+            failed += 1
+            continue
+
+        generated += 1
+        logger.info("    Uploaded: %s", thumb_filename)
+
+        # Update Release YAML with thumbnail filename
+        content = wiki.get_page_content(page_title)
+        if content:
+            try:
+                data = yaml.safe_load(content)
+                if isinstance(data, dict) and not data.get('thumbnail'):
+                    data['thumbnail'] = thumb_filename
+                    new_content = yaml.dump(data, default_flow_style=False, allow_unicode=True)
+
+                    import blue_railroad_import
+                    v = blue_railroad_import.BOT_VERSION
+                    summary = f'Add thumbnail (bot: {v})' if v != 'unknown' else 'Add thumbnail'
+                    result = wiki.save_page(page_title, new_content, summary)
+                    results.append(result)
+            except yaml.YAMLError:
+                pass
+
+    logger.info("  Thumbnails: %d generated, %d failed", generated, failed)
     return results

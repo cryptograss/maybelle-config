@@ -25,7 +25,6 @@ def _summary(msg: str) -> str:
 
 from .wiki_client import WikiClientProtocol, SaveResult
 from .models import Token, Submission
-from .thumbnail import get_thumbnail_filename
 
 # Song ID → (song_name, exercise_name)
 SONG_EXERCISES = {
@@ -121,10 +120,14 @@ def _enrich_existing(
         existing_data['ipfs_cid'] = cid
         needs_update = True
     if not existing_data.get('thumbnail') and cid:
-        thumb = get_thumbnail_filename(cid)
-        if thumb:
-            existing_data['thumbnail'] = thumb
-            needs_update = True
+        try:
+            from .thumbnail import get_thumbnail_filename
+            thumb = get_thumbnail_filename(cid)
+            if thumb:
+                existing_data['thumbnail'] = thumb
+                needs_update = True
+        except ImportError:
+            pass
 
     if not needs_update:
         return SaveResult(page_title, 'unchanged', 'Already has metadata')

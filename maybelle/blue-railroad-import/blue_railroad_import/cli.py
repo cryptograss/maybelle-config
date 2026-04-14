@@ -246,6 +246,29 @@ def cmd_enrich_ipfs(args):
         sys.exit(1)
 
 
+def cmd_enrich_thumbnails(args):
+    """Generate thumbnails for video releases missing them."""
+    _configure_logging(args)
+    wiki_client = create_wiki_client(args)
+
+    from .ipfs_enrichment import enrich_thumbnails
+
+    results = enrich_thumbnails(wiki=wiki_client)
+
+    updated = [r for r in results if r.action in ('updated', 'created')]
+    errors = [r for r in results if r.action == 'error']
+
+    print(f"\nThumbnail enrichment complete:")
+    print(f"  Updated: {len(updated)}")
+    print(f"  Errors: {len(errors)}")
+
+    for r in errors:
+        print(f"  ERROR: {r.page_title}: {r.message}")
+
+    if errors:
+        sys.exit(1)
+
+
 def cmd_reconcile_pins(args):
     """Reconcile IPFS pins with Release page state."""
     _configure_logging(args)
@@ -459,6 +482,14 @@ def main():
         help='IPFS gateway URL (default: https://ipfs.delivery-kid.cryptograss.live)',
     )
     ipfs_parser.set_defaults(func=cmd_enrich_ipfs)
+
+    # Enrich thumbnails command
+    thumb_parser = subparsers.add_parser(
+        'enrich-thumbnails',
+        help='Generate and upload thumbnails for video releases missing them'
+    )
+    add_common_args(thumb_parser)
+    thumb_parser.set_defaults(func=cmd_enrich_thumbnails)
 
     # Enrich torrents command
     torrent_parser = subparsers.add_parser(
