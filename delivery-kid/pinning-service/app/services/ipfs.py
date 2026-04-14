@@ -146,6 +146,27 @@ async def pin_to_pinata(cid: str) -> bool:
         return False
 
 
+async def pin_cid(cid: str) -> PinResult:
+    """Pin an existing CID to the local IPFS node."""
+    settings = get_settings()
+
+    try:
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            response = await client.post(
+                f"{settings.ipfs_api_url}/api/v0/pin/add",
+                params={"arg": cid}
+            )
+            if response.status_code == 200:
+                return PinResult(success=True, cid=cid)
+            else:
+                return PinResult(
+                    success=False,
+                    error=f"IPFS pin/add failed: {response.status_code} {response.text[:100]}"
+                )
+    except Exception as e:
+        return PinResult(success=False, error=str(e))
+
+
 async def get_local_pins() -> list[str]:
     """Get list of all locally pinned CIDs."""
     settings = get_settings()

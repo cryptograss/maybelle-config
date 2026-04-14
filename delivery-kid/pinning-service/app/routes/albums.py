@@ -2,7 +2,8 @@
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from ..auth import require_wallet_auth
+from ..auth import require_auth, require_wallet_auth
+from ..config import get_settings, Settings
 from ..services import ipfs
 
 router = APIRouter()
@@ -17,15 +18,41 @@ async def list_local_pins():
     return {"pins": pins, "count": len(pins), "node": "delivery-kid"}
 
 
+@router.post("/pin/{cid}")
+async def pin_cid(
+    cid: str,
+    identity: str = Depends(require_auth),
+    settings: Settings = Depends(get_settings),
+):
+    """
+    Pin a CID to the local IPFS node.
+
+    Accepts API key, HMAC token, or wallet auth.
+    """
+    result = await ipfs.pin_cid(cid)
+
+    if not result.success:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Pin failed: {result.error}"
+        )
+
+    return {
+        "success": True,
+        "cid": cid,
+        "message": f"Pinned {cid}",
+    }
+
+
 @router.delete("/unpin/{cid}")
 async def unpin_cid(
     cid: str,
-    wallet_address: str = Depends(require_wallet_auth)
+    identity: str = Depends(require_auth),
 ):
     """
     Unpin a CID from both local IPFS and Pinata.
 
-    Requires wallet authentication.
+    Accepts API key, HMAC token, or wallet auth.
     """
     result = await ipfs.unpin(cid)
 

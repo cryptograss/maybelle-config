@@ -47,6 +47,11 @@ pipelineJob('pickipedia-import-bluerailroad') {
                                 sh 'set +x && /opt/blue-railroad-import/bin/python -m blue_railroad_import.cli enrich-ipfs --wiki-url "$WIKI_URL" --username "$BLUERAILROAD_BOT_USERNAME" --password "$BLUERAILROAD_BOT_PASSWORD" -v'
                             }
                         }
+                        stage('Reconcile pins') {
+                            steps {
+                                sh 'set +x && /opt/blue-railroad-import/bin/python -m blue_railroad_import.cli reconcile-pins --wiki-url "$WIKI_URL" --username "$BLUERAILROAD_BOT_USERNAME" --password "$BLUERAILROAD_BOT_PASSWORD" --delivery-kid-api-key "$DELIVERY_KID_API_KEY" -v'
+                            }
+                        }
                     }
 
                     post {
