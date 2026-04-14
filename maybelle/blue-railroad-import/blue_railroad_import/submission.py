@@ -234,8 +234,8 @@ def fetch_all_submissions(
         submission = fetch_submission(wiki_client, i)
         if submission:
             submissions.append(submission)
-            logger.info("  Loaded submission #%d: %s", i, submission.exercise)
 
+    logger.info("  Loaded %d submission(s)", len(submissions))
     return submissions
 
 
@@ -257,7 +257,6 @@ def update_submission_token_ids(
         SaveResult indicating what happened
     """
     page_title = get_submission_page_title(submission_id)
-    logger.info("Updating %s with token IDs: %s", page_title, token_ids)
 
     current_content = wiki_client.get_page_content(page_title)
 
@@ -419,26 +418,30 @@ def match_tokens_by_blockheight_and_participant(
     # Build lookup: (blockheight, address) -> submission
     # Resolve ENS names to addresses using the mapping
     blockheight_address_map: dict[tuple[int, str], Submission] = {}
+    resolved_ens: set[str] = set()
+    unresolved_ens: set[str] = set()
     for sub in submissions:
         if sub.block_height is None:
             continue
         for wallet in sub.participants:
             wallet_lower = wallet.lower()
 
-            # Check if this looks like an ENS name
             if wallet_lower.endswith('.eth'):
-                # Try to resolve ENS to address
                 address = ens_mapping.get(wallet_lower)
                 if address:
                     key = (sub.block_height, address.lower())
                     blockheight_address_map[key] = sub
-                    logger.info("  Resolved %s -> %s", wallet, address)
+                    resolved_ens.add(wallet_lower)
                 else:
-                    logger.info("  Could not resolve ENS: %s", wallet)
+                    unresolved_ens.add(wallet_lower)
             else:
-                # Assume it's already an address
                 key = (sub.block_height, wallet_lower)
                 blockheight_address_map[key] = sub
+
+    if resolved_ens:
+        logger.info("  Resolved %d ENS name(s): %s", len(resolved_ens), ', '.join(sorted(resolved_ens)))
+    if unresolved_ens:
+        logger.info("  Could not resolve %d ENS name(s): %s", len(unresolved_ens), ', '.join(sorted(unresolved_ens)))
 
     # Match tokens
     for token_id_str, token in tokens.items():
@@ -453,7 +456,6 @@ def match_tokens_by_blockheight_and_participant(
             if sub.id not in result:
                 result[sub.id] = []
             result[sub.id].append(int(token_id_str))
-            logger.info("  Token %s -> Submission %d (blockheight %s)", token_id_str, sub.id, token.blockheight)
 
     # Sort token IDs for each submission
     for sub_id in result:
