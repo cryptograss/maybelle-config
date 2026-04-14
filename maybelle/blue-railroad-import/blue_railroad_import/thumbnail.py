@@ -13,11 +13,10 @@ from cid import make_cid
 
 
 IPFS_GATEWAYS = [
+    "https://ipfs.delivery-kid.cryptograss.live",
     "https://ipfs.maybelle.cryptograss.live",
     "https://ipfs.io",
 ]
-
-MAYBELLE_GATEWAY = "https://ipfs.maybelle.cryptograss.live"
 
 # Hysteresis: require 3 consecutive failures before marking as unpinned
 FAILURE_THRESHOLD = 3
@@ -64,7 +63,7 @@ def check_maybelle_pinned(cid: str) -> bool:
     cache = _load_pin_cache()
     cid_status = cache.get(cid, {"pinned": True, "failures": 0})
 
-    url = f"{MAYBELLE_GATEWAY}/ipfs/{cid}"
+    url = f"{IPFS_GATEWAYS[0]}/ipfs/{cid}"
     try:
         req = urllib.request.Request(url, method='HEAD')
         with urllib.request.urlopen(req, timeout=10) as response:
