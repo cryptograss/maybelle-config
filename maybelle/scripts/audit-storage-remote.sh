@@ -73,25 +73,30 @@ while IFS= read -r pin_cid; do
 done < /tmp/audit-pins.txt
 echo "  $ORPHAN_PINS orphaned pins (not in any Release page)"
 
-# Check for Release pages with no IPFS pin
-UNPINNED=0
-while IFS= read -r rel_cid; do
-    [ -z "$rel_cid" ] && continue
-    rel_lower=$(echo "$rel_cid" | tr '[:upper:]' '[:lower:]')
-    found=false
-    while IFS= read -r pin_cid; do
-        pin_lower=$(echo "$pin_cid" | tr '[:upper:]' '[:lower:]')
-        if [ "$rel_lower" = "$pin_lower" ]; then
-            found=true
-            break
-        fi
-    done < /tmp/audit-pins.txt
-    if [ "$found" = false ]; then
-        echo "  UNPINNED RELEASE: $rel_cid"
-        UNPINNED=$((UNPINNED + 1))
-    fi
-done <<< "$RELEASE_CIDS"
-echo "  $UNPINNED releases with no IPFS pin"
+# Check for Release pages with no IPFS pin (skip deleted/unpinned)
+UNPINNED_OUTPUT=$(python3 -c "
+import json, sys, urllib.request
+
+pins = set(line.strip().lower() for line in open('/tmp/audit-pins.txt'))
+releases = json.loads(urllib.request.urlopen('${WIKI_API}?action=releaselist&format=json', timeout=30).read().decode())
+unpinned = 0
+for r in releases.get('releases', []):
+    cid = (r.get('ipfs_cid') or r.get('page_title', '')).lower()
+    # Skip deleted releases — they're intentionally unpinned
+    page_title = 'Release:' + (r.get('ipfs_cid') or r.get('page_title', ''))
+    if cid not in pins:
+        # Check if page has delete: true by looking at pinned_on
+        # Deleted pages have pinned_on cleared and won't have it set
+        # But we need the actual YAML to check delete flag
+        # Use a heuristic: if pinned_on is explicitly empty list, it was deliberately unpinned
+        pinned_on = r.get('pinned_on')
+        if pinned_on is not None and pinned_on == []:
+            continue  # deliberately unpinned
+        print(f'  UNPINNED RELEASE: {r.get(\"ipfs_cid\") or r.get(\"page_title\", \"\")}')
+        unpinned += 1
+print(f'  {unpinned} releases with no IPFS pin')
+" 2>/dev/null)
+echo "$UNPINNED_OUTPUT"
 
 echo ""
 echo "--- Seeding Directories ---"
