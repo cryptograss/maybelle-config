@@ -235,7 +235,6 @@ def fetch_all_submissions(
         if submission:
             submissions.append(submission)
 
-    logger.info("  Loaded %d submission(s)", len(submissions))
     return submissions
 
 

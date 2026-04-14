@@ -274,8 +274,6 @@ def process_release_drafts(
     """
     results = []
 
-    logger.info("Processing ReleaseDraft pages...")
-
     drafts = fetch_release_drafts(wiki)
 
     no_cid = 0
