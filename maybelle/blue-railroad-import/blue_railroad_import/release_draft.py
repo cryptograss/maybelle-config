@@ -255,6 +255,21 @@ def build_release_from_draft(draft_data: dict) -> str:
     if draft_data.get('upload_blockheight'):
         release['upload_blockheight'] = draft_data['upload_blockheight']
 
+    # Pull file_type and file_size from the files array if not already set
+    files = draft_data.get('files', [])
+    if files and not release.get('file_type'):
+        first_file = files[0]
+        media_type = first_file.get('media_type', '')
+        fmt = first_file.get('format', '')
+        if media_type and fmt:
+            release['file_type'] = f"{media_type}/{fmt.lower()}"
+        elif media_type:
+            release['file_type'] = media_type
+    if files and not release.get('file_size'):
+        size = files[0].get('size_bytes')
+        if size:
+            release['file_size'] = int(size)
+
     release['pinned_on'] = ['delivery-kid']
 
     return yaml.dump(release, default_flow_style=False, allow_unicode=True)
