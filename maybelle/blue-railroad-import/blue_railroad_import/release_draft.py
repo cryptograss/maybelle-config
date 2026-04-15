@@ -243,8 +243,29 @@ def find_cid_from_history(wiki, page_title: str) -> Optional[str]:
     return None
 
 
-def build_release_from_draft(draft_data: dict) -> str:
-    """Build Release page YAML from a ReleaseDraft's data."""
+IPFS_GATEWAY = 'https://ipfs.delivery-kid.cryptograss.live/ipfs'
+
+
+def fetch_ipfs_metadata(cid: str) -> Optional[dict]:
+    """Fetch metadata.json from an IPFS CID (directory pin).
+
+    Returns parsed dict or None if not found / not a directory pin.
+    """
+    url = f"{IPFS_GATEWAY}/{cid}/metadata.json"
+    try:
+        req = urllib.request.Request(url, headers={'User-Agent': 'BlueRailroadBot/1.0'})
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            return json.loads(resp.read().decode('utf-8'))
+    except Exception:
+        return None
+
+
+def build_release_from_draft(draft_data: dict, cid: Optional[str] = None) -> str:
+    """Build Release page YAML from a ReleaseDraft's data.
+
+    If cid is provided, also fetches metadata.json from IPFS to include
+    transcode details and other pin-time metadata.
+    """
     handler = get_draft_handler(draft_data)
     release = handler.build_release(draft_data)
 
@@ -271,6 +292,17 @@ def build_release_from_draft(draft_data: dict) -> str:
             release['file_size'] = int(size)
 
     release['pinned_on'] = ['delivery-kid']
+
+    # Fetch IPFS metadata.json for transcode details
+    if cid:
+        ipfs_meta = fetch_ipfs_metadata(cid)
+        if ipfs_meta:
+            if ipfs_meta.get('transcode'):
+                release['transcode'] = ipfs_meta['transcode']
+            if ipfs_meta.get('uploaded_by') and not release.get('uploaded_by'):
+                release['uploaded_by'] = ipfs_meta['uploaded_by']
+            if ipfs_meta.get('created_at') and not release.get('created_at'):
+                release['created_at'] = ipfs_meta['created_at']
 
     return yaml.dump(release, default_flow_style=False, allow_unicode=True)
 
@@ -312,7 +344,7 @@ def process_release_drafts(
             results.append(SaveResult(release_title, 'unchanged', 'Already exists'))
             continue
 
-        release_yaml = build_release_from_draft(data)
+        release_yaml = build_release_from_draft(data, cid=cid)
 
         handler = get_draft_handler(data)
         summary = f"Release created from {handler.name} draft (via bot)"
