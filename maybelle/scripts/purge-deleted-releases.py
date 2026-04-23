@@ -26,6 +26,7 @@ import yaml
 
 DK_HOST = "root@delivery-kid.cryptograss.live"
 WIKI_API = "https://pickipedia.xyz/api.php"
+WIKI_BASE = "https://pickipedia.xyz/wiki"
 IPFS_EMPTY_DIR = "qmunllspaccz1vlxqvkxqqlx5r1x345qqfhbsf67hva3nn"
 
 
@@ -58,6 +59,31 @@ def page_content(title: str) -> str:
         for r in p.get("revisions", []):
             return r.get("slots", {}).get("main", {}).get("*", "") or ""
     return ""
+
+
+def page_history(title: str) -> dict:
+    """Fetch first + latest revision metadata for a page.
+
+    Returns {creator, created_at, last_editor, last_edited_at, last_comment}.
+    """
+    info = {"creator": None, "created_at": None,
+            "last_editor": None, "last_edited_at": None, "last_comment": None}
+    # Latest revision
+    latest = wiki_get({"action": "query", "titles": title, "prop": "revisions",
+                       "rvlimit": "1", "rvprop": "timestamp|user|comment"})
+    for p in latest.get("query", {}).get("pages", {}).values():
+        for r in p.get("revisions", []):
+            info["last_editor"] = r.get("user")
+            info["last_edited_at"] = r.get("timestamp")
+            info["last_comment"] = (r.get("comment") or "").strip() or None
+    # First revision (page creation)
+    first = wiki_get({"action": "query", "titles": title, "prop": "revisions",
+                      "rvdir": "newer", "rvlimit": "1", "rvprop": "timestamp|user"})
+    for p in first.get("query", {}).get("pages", {}).values():
+        for r in p.get("revisions", []):
+            info["creator"] = r.get("user")
+            info["created_at"] = r.get("timestamp")
+    return info
 
 
 def fetch_pins() -> set[str]:
@@ -107,6 +133,37 @@ def confirm(prompt: str) -> bool:
     return ans in ("y", "yes")
 
 
+def _alive_flags(c: dict) -> list[str]:
+    alive = []
+    if c["pinned"]:
+        alive.append("pinned")
+    if c["seeded"]:
+        alive.append("seeded")
+    if c["pinned_on"]:
+        alive.append(f"pinned_on={','.join(c['pinned_on'])}")
+    return alive
+
+
+def _print_candidate(c: dict, terse: bool):
+    alive = _alive_flags(c)
+    if terse:
+        print(f"  {c['cid'][:16]}... [{c['reason']}] {c['title']}")
+        print(f"    alive: {', '.join(alive)}")
+        return
+    # Full detail view before the confirm prompt
+    print(f"  reason:     {c['reason']}")
+    print(f"  alive:      {', '.join(alive)}")
+    print(f"  page:       {c['url']}")
+    if c.get("creator"):
+        print(f"  created:    {c['created_at']} by {c['creator']}")
+    if c.get("last_editor"):
+        when = c.get("last_edited_at") or "?"
+        who = c.get("last_editor") or "?"
+        print(f"  last edit:  {when} by {who}")
+        if c.get("last_comment"):
+            print(f"    \"{c['last_comment']}\"")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dry-run", action="store_true",
@@ -145,9 +202,12 @@ def main():
         pinned_on = ydata.get("pinned_on") or []
 
         if pinned or seeded or pinned_on:
+            hist = page_history(f"Release:{cid}")
             candidates.append({
                 "cid": cid, "title": title, "reason": reason,
                 "pinned": pinned, "seeded": seeded, "pinned_on": pinned_on,
+                "url": f"{WIKI_BASE}/Release:{cid}",
+                **hist,
             })
 
     if not candidates:
@@ -156,15 +216,7 @@ def main():
 
     print(f"\nFound {len(candidates)} release(s) with cleanup pending:\n")
     for c in candidates:
-        alive = []
-        if c["pinned"]:
-            alive.append("pinned")
-        if c["seeded"]:
-            alive.append("seeded")
-        if c["pinned_on"]:
-            alive.append(f"pinned_on={','.join(c['pinned_on'])}")
-        print(f"  {c['cid'][:16]}... [{c['reason']}] {c['title']}")
-        print(f"    alive: {', '.join(alive)}")
+        _print_candidate(c, terse=True)
 
     if args.dry_run:
         print("\n(dry-run — nothing modified)")
@@ -174,6 +226,7 @@ def main():
     for c in candidates:
         cid = c["cid"]
         print(f"--- {cid[:16]}... {c['title']} ---")
+        _print_candidate(c, terse=False)
         if not confirm(f"  Purge infrastructure for this release?"):
             print("  skipped.\n")
             continue
