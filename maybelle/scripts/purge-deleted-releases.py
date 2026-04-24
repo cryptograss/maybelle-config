@@ -152,6 +152,8 @@ def _print_candidate(c: dict, terse: bool):
         return
     # Full detail view before the confirm prompt
     print(f"  reason:     {c['reason']}")
+    if c.get("removal_reason"):
+        print(f"  why:        {c['removal_reason']}")
     print(f"  alive:      {', '.join(alive)}")
     print(f"  page:       {c['url']}")
     if c.get("creator"):
@@ -216,8 +218,12 @@ def main():
         if pinned or seeded or pinned_on:
             print("+", end="", flush=True)
             hist = page_history(f"Release:{cid}")
+            removal_reason = ydata.get("removal_reason")
+            if not isinstance(removal_reason, str):
+                removal_reason = None
             candidates.append({
                 "cid": cid, "title": title, "reason": reason,
+                "removal_reason": removal_reason,
                 "pinned": pinned, "seeded": seeded, "pinned_on": pinned_on,
                 "url": f"{WIKI_BASE}/Release:{cid}",
                 **hist,
