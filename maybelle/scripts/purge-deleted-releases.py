@@ -170,11 +170,22 @@ def main():
                         help="List items only, do not unpin or remove anything")
     args = parser.parse_args()
 
-    print("Fetching Release pages, IPFS pins, seeding dirs...")
+    print("Fetching release list...", end=" ", flush=True)
     releases = fetch_releaselist()
-    pins = fetch_pins()
-    seeding = [s.lower() for s in fetch_seeding_dirs()]
+    print(f"{len(releases)} releases")
 
+    print("Fetching IPFS pins...", end=" ", flush=True)
+    pins = fetch_pins()
+    print(f"{len(pins)} pins")
+
+    print("Fetching seeding dirs...", end=" ", flush=True)
+    seeding = [s.lower() for s in fetch_seeding_dirs()]
+    print(f"{len(seeding)} dirs")
+
+    # Per-release YAML scan is the slow part — each page_content is an HTTP
+    # round trip. Show a dot per page fetched, `+` when we hit a candidate.
+    print(f"Scanning {len(releases)} release pages for delete/unpin flags",
+          end=" ", flush=True)
     candidates = []
     for r in releases:
         cid = r.get("ipfs_cid") or r.get("page_title") or ""
@@ -195,6 +206,7 @@ def main():
         elif ydata.get("unpin"):
             reason = "unpin"
         else:
+            print(".", end="", flush=True)
             continue
 
         pinned = cid.lower() in pins
@@ -202,6 +214,7 @@ def main():
         pinned_on = ydata.get("pinned_on") or []
 
         if pinned or seeded or pinned_on:
+            print("+", end="", flush=True)
             hist = page_history(f"Release:{cid}")
             candidates.append({
                 "cid": cid, "title": title, "reason": reason,
@@ -209,6 +222,10 @@ def main():
                 "url": f"{WIKI_BASE}/Release:{cid}",
                 **hist,
             })
+        else:
+            # delete/unpin flag but nothing alive — already cleaned.
+            print("·", end="", flush=True)
+    print()
 
     if not candidates:
         print("Nothing to clean up — no deleted/retired releases have alive infrastructure.")
