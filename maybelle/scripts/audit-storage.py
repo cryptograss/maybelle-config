@@ -201,15 +201,27 @@ def audit_pins(releases: list[dict], pins: set[str], seeding: list[str]) -> dict
         elif not pinned:
             missing_pins.append(entry)
 
+    deliberately_unpinned = {e["cid"].lower() for e in deleted + retired}
     return {"orphan_pins": orphan_pins, "missing_pins": missing_pins,
-            "deleted": deleted, "retired": retired}
+            "deleted": deleted, "retired": retired,
+            "deliberately_unpinned": deliberately_unpinned}
 
 
-def audit_seeding(releases: list[dict], seeding: list[str]) -> dict:
-    release_cids = {r.get("ipfs_cid", "").lower() for r in releases if r.get("ipfs_cid")}
+def audit_seeding(releases: list[dict], seeding: list[str],
+                  deliberately_unpinned: set[str]) -> dict:
+    """Releases flagged delete/unpin are expected NOT to be seeded.
+    Skip them in both orphan and missing checks — pin audit already
+    flags any lingering infra as CLEANUP PENDING."""
+    release_cids = {
+        r.get("ipfs_cid", "").lower() for r in releases
+        if r.get("ipfs_cid") and r.get("ipfs_cid", "").lower() not in deliberately_unpinned
+    }
     seed_cids = {s.lower() for s in seeding}
 
-    orphan_seeds = [s for s in seeding if s.lower() not in release_cids]
+    orphan_seeds = [
+        s for s in seeding
+        if s.lower() not in release_cids and s.lower() not in deliberately_unpinned
+    ]
     missing_seeds = sorted(release_cids - seed_cids - {""})
     return {"orphan_seeds": orphan_seeds, "missing_seeds": missing_seeds}
 
@@ -402,7 +414,7 @@ def main():
     print_pin_audit(pin_result, release_count)
 
     print_section("Seeding Dirs vs Release Pages")
-    seed_result = audit_seeding(releases, seeding)
+    seed_result = audit_seeding(releases, seeding, pin_result["deliberately_unpinned"])
     print_seeding_audit(seed_result, seed_count)
 
     print("Scanning wiki drafts for `abandoned: true`...")
