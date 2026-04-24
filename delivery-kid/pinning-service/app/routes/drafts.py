@@ -7,13 +7,14 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, Request, UploadFile, HTTPException
+from fastapi import APIRouter, Depends, File, Header, Request, UploadFile, HTTPException
 from sse_starlette.sse import EventSourceResponse
 
 from ..auth import require_auth, require_finalize_auth, has_finalize_token
 from ..config import get_settings, get_commit, Settings
 from ..models.draft import DraftFile, DraftState, DraftResponse, FinalizeRequest
 from ..services import analyze, ipfs, transcode
+from ..services.fsutil import safe_rmtree
 
 router = APIRouter(prefix="/draft-album", tags=["drafts"])
 
@@ -46,6 +47,7 @@ def save_draft_state(draft_dir: Path, state: DraftState) -> None:
 @router.post("", response_model=DraftResponse)
 async def create_draft(
     files: list[UploadFile] = File(...),
+    x_draft_id: str | None = Header(default=None, alias="X-Draft-Id"),
     wallet_address: str = Depends(require_auth),
     settings: Settings = Depends(get_settings)
 ):
@@ -58,6 +60,9 @@ async def create_draft(
     Required headers:
     - X-Signature: Wallet signature
     - X-Timestamp: Timestamp that was signed (milliseconds)
+    - X-Draft-Id (optional): reuse an existing draft_id (re-upload flow).
+      The existing directory is wiped first; ownership is enforced if a
+      prior draft state exists.
     """
     if not files:
         raise HTTPException(status_code=400, detail="No files provided")
@@ -81,9 +86,24 @@ async def create_draft(
             detail=f"Total upload size exceeds {settings.max_file_size_mb}MB limit"
         )
 
-    # Create draft directory
-    draft_id = str(uuid.uuid4())
     staging_dir = Path(settings.staging_dir)
+
+    # Resolve draft_id — reuse if X-Draft-Id provided, else fresh uuid.
+    if x_draft_id:
+        try:
+            uuid.UUID(x_draft_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="X-Draft-Id must be a valid UUID")
+        draft_id = x_draft_id
+        existing = get_draft_dir(staging_dir, draft_id)
+        if existing.exists():
+            prior = load_draft_state(existing)
+            if prior is not None and prior.uploaded_by.lower() != wallet_address.lower():
+                raise HTTPException(status_code=403, detail="You do not own this draft")
+            safe_rmtree(existing)
+    else:
+        draft_id = str(uuid.uuid4())
+
     draft_dir = get_draft_dir(staging_dir, draft_id)
     upload_dir = draft_dir / "upload"
     upload_dir.mkdir(parents=True, exist_ok=True)
@@ -116,7 +136,7 @@ async def create_draft(
 
         if not draft_files:
             # Cleanup if no valid audio files
-            shutil.rmtree(draft_dir)
+            safe_rmtree(draft_dir)
             raise HTTPException(
                 status_code=400,
                 detail="No valid audio files found in upload"
@@ -144,7 +164,7 @@ async def create_draft(
     except Exception as e:
         # Cleanup on error
         if draft_dir.exists():
-            shutil.rmtree(draft_dir)
+            safe_rmtree(draft_dir)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -202,7 +222,7 @@ async def delete_draft(
         raise HTTPException(status_code=403, detail="Not your draft")
 
     # Cleanup
-    shutil.rmtree(draft_dir)
+    safe_rmtree(draft_dir)
 
     return {"message": "Draft deleted", "draft_id": draft_id}
 
@@ -489,7 +509,7 @@ async def finalize_sse_generator(
         # Cleanup draft directory after finalization
         try:
             if draft_dir.exists():
-                shutil.rmtree(draft_dir)
+                safe_rmtree(draft_dir)
         except Exception:
             pass
 
