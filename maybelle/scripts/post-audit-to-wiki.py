@@ -1,20 +1,22 @@
 #!/usr/bin/env python3
-"""Run audit-storage.py and post the results to PickiPedia.
+"""Run audit-storage.py; post a wiki page only if problems are detected.
 
-Captures audit stdout, estimates the current Ethereum blockheight, and
+Captures audit stdout, looks for non-zero counts in the audit summary, and
 creates a wiki page at ``Cryptograss:delivery-kid-audits/<blockheight>``
-using the Blue Railroad Imports bot.
+via the Blue Railroad Imports bot when problems are found. When the audit
+is clean, no page is created — the wiki only accumulates real signals.
 
 Required env vars:
   BLUERAILROAD_BOT_USERNAME
   BLUERAILROAD_BOT_PASSWORD
 
 Optional env vars:
-  WIKI_URL   — defaults to https://pickipedia.xyz
+  WIKI_URL           — defaults to https://pickipedia.xyz
   AUDIT_TIMEOUT_SECS — defaults to 600
 """
 
 import os
+import re
 import subprocess
 import sys
 import time
@@ -33,6 +35,23 @@ MERGE_BLOCK = 15537394
 MERGE_TIMESTAMP = 1663224179
 SLOT_TIME = 12
 
+# Summary lines whose non-zero counts indicate something needs human attention.
+# Abandoned drafts are deliberate state and don't count. Dead wiki drafts
+# accumulate as users start-and-leave, so they aren't urgent on their own —
+# include if you decide otherwise.
+PROBLEM_LABELS = (
+    "Orphan pins",
+    "Missing pins",
+    "Orphan seeds",
+    "Missing seeds",
+    "Orphan drafts",
+    "Stalled drafts",
+    "Cleanup pending",
+)
+_SUMMARY_LINE_RE = re.compile(
+    r"^\s+(" + "|".join(re.escape(label) for label in PROBLEM_LABELS) + r"):\s+(\d+)"
+)
+
 
 def current_blockheight() -> int:
     return MERGE_BLOCK + (int(time.time()) - MERGE_TIMESTAMP) // SLOT_TIME
@@ -50,7 +69,24 @@ def run_audit() -> tuple[str, int]:
     return out, proc.returncode
 
 
-def post_to_wiki(blockheight: int, audit_text: str, returncode: int) -> str:
+def detect_problems(audit_text: str) -> dict[str, int]:
+    """Pull non-zero counts for the labels we care about out of the summary."""
+    found: dict[str, int] = {}
+    for line in audit_text.splitlines():
+        m = _SUMMARY_LINE_RE.match(line)
+        if m:
+            n = int(m.group(2))
+            if n > 0:
+                found[m.group(1)] = n
+    return found
+
+
+def post_to_wiki(
+    blockheight: int,
+    audit_text: str,
+    returncode: int,
+    problems: dict[str, int],
+) -> str:
     user = os.environ["BLUERAILROAD_BOT_USERNAME"]
     password = os.environ["BLUERAILROAD_BOT_PASSWORD"]
 
@@ -62,35 +98,46 @@ def post_to_wiki(blockheight: int, audit_text: str, returncode: int) -> str:
     status_label = "OK" if returncode == 0 else f"audit script exited {returncode}"
     timestamp = time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime())
 
+    problem_summary = "\n".join(
+        f"* '''{label}''': {count}" for label, count in problems.items()
+    )
+
     content = (
-        f"Audit captured at Ethereum block "
+        f"Audit at Ethereum block "
         f"[https://etherscan.io/block/{blockheight} {blockheight}] "
         f"({timestamp}) — {status_label}.\n\n"
+        "==Problems detected==\n"
+        f"{problem_summary}\n\n"
+        "==Full audit output==\n"
         "<pre>\n"
         f"{audit_text}"
         "\n</pre>\n\n"
         "[[Category:Delivery Kid Audits]]\n"
     )
 
+    short = ", ".join(f"{label} {count}" for label, count in problems.items())
     page = site.pages[title]
-    page.save(content, summary=f"Audit at block {blockheight} ({status_label})")
+    page.save(content, summary=f"Audit at block {blockheight}: {short}")
     return title
 
 
 def main():
     blockheight = current_blockheight()
-    target = f"Cryptograss:delivery-kid-audits/{blockheight}"
-    print(f"=== Running audit; will post to {target} ===\n")
+    print(f"=== Audit run at block {blockheight} ===\n")
 
     audit_text, rc = run_audit()
-    # Mirror audit output to Jenkins console for easy inspection.
+    # Mirror to stdout so the runner's logfile captures the full audit.
     print(audit_text)
 
-    title = post_to_wiki(blockheight, audit_text, rc)
-    print(f"\nPosted to: {WIKI_URL}/wiki/{title.replace(' ', '_')}")
+    problems = detect_problems(audit_text)
+    if not problems:
+        print(f"\nNo problems detected at block {blockheight}; nothing posted.")
+        sys.exit(0)
 
-    # Exit 0 even if audit had warnings — posting succeeded is what matters here.
-    # Non-zero from audit is surfaced in the wiki page header and the summary line.
+    summary_inline = ", ".join(f"{k}={v}" for k, v in problems.items())
+    print(f"\nProblems detected ({summary_inline}); posting...")
+    title = post_to_wiki(blockheight, audit_text, rc, problems)
+    print(f"Posted to: {WIKI_URL}/wiki/{title.replace(' ', '_')}")
     sys.exit(0)
 
 

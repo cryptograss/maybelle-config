@@ -505,12 +505,11 @@
         modification_time: preserve
         access_time: preserve
 
-    - name: Cronjob for delivery-kid audit (daily at 04:00 UTC)
+    - name: Cronjob for delivery-kid audit (every 30 minutes)
       ansible.builtin.cron:
         name: "delivery-kid audit"
         job: "/usr/local/bin/run-delivery-kid-audit.sh"
-        minute: "0"
-        hour: "4"
+        minute: "0,30"
 
     - name: Create Jenkins job definitions directory
       file:
