@@ -151,10 +151,6 @@
           - "/mnt/persist/magenta/backups:/mnt/persist/magenta/backups:ro"
           - "/mnt/persist/pickipedia/backups:/mnt/persist/pickipedia/backups:ro"
           - "/mnt/persist/blue-railroad-cache:/mnt/persist/blue-railroad-cache"
-          # Read-only access to maybelle-config so jenkins jobs can invoke
-          # scripts and python modules in maybelle/scripts/ (e.g. the
-          # delivery-kid-audit job runs post-audit-to-wiki.py from here).
-          - "/mnt/persist/maybelle-config:/mnt/persist/maybelle-config:ro"
           - "/var/log/nfs-backup.log:/var/log/nfs-backup.log:ro"
           - "/var/log/nfs-deploy.log:/var/log/nfs-deploy.log:ro"
           - "/var/log/pickipedia-backup.log:/var/log/pickipedia-backup.log:ro"
@@ -440,6 +436,81 @@
       ansible.builtin.cron:
         name: "push sites to prod"
         state: absent
+
+    # ----- Delivery-kid storage audit (host cron) -----
+    # Runs as root on maybelle so audit-storage.py can SSH to delivery-kid
+    # using root's existing keys (the same key used by deploy-delivery-kid).
+    # Posts a wiki page at Cryptograss:delivery-kid-audits/<blockheight> via
+    # the Blue Railroad Imports bot. Deliberately NOT a Jenkins job — keeps
+    # delivery-kid SSH access off the jenkins container.
+    - name: Create venv for delivery-kid audit script
+      command: python3 -m venv /opt/delivery-kid-audit
+      args:
+        creates: /opt/delivery-kid-audit
+
+    - name: Install python deps for delivery-kid audit
+      pip:
+        virtualenv: /opt/delivery-kid-audit
+        name:
+          - mwclient
+          - pyyaml
+
+    - name: Deploy delivery-kid audit env file (bot credentials)
+      copy:
+        dest: /etc/delivery-kid-audit.env
+        mode: '0600'
+        owner: root
+        group: root
+        content: |
+          BLUERAILROAD_BOT_USERNAME={{ BLUERAILROAD_BOT_USERNAME }}
+          BLUERAILROAD_BOT_PASSWORD={{ BLUERAILROAD_BOT_PASSWORD }}
+
+    - name: Create delivery-kid audit runner script
+      copy:
+        dest: /usr/local/bin/run-delivery-kid-audit.sh
+        mode: '0750'
+        owner: root
+        group: root
+        content: |
+          #!/bin/bash
+          # Run delivery-kid storage audit and post results to PickiPedia.
+          # Runs as root: audit-storage.py SSHes to delivery-kid using
+          # /root/.ssh keys (same path as deploy-delivery-kid).
+
+          set -uo pipefail
+
+          LOG="/var/log/delivery-kid-audit.log"
+          SCRIPT="/mnt/persist/maybelle-config/maybelle/scripts/post-audit-to-wiki.py"
+          VENV_PYTHON="/opt/delivery-kid-audit/bin/python"
+
+          {
+            echo ""
+            echo "=== $(date -u +%FT%TZ) audit start ==="
+            set -a
+            . /etc/delivery-kid-audit.env
+            set +a
+            "$VENV_PYTHON" "$SCRIPT"
+            rc=$?
+            echo "=== $(date -u +%FT%TZ) audit end (rc=$rc) ==="
+            exit $rc
+          } >> "$LOG" 2>&1
+
+    - name: Ensure delivery-kid audit log file exists
+      file:
+        path: /var/log/delivery-kid-audit.log
+        state: touch
+        mode: '0644'
+        owner: root
+        group: root
+        modification_time: preserve
+        access_time: preserve
+
+    - name: Cronjob for delivery-kid audit (daily at 04:00 UTC)
+      ansible.builtin.cron:
+        name: "delivery-kid audit"
+        job: "/usr/local/bin/run-delivery-kid-audit.sh"
+        minute: "0"
+        hour: "4"
 
     - name: Create Jenkins job definitions directory
       file:
