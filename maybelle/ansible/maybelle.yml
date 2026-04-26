@@ -516,14 +516,13 @@
     # Posts a wiki page at Cryptograss:delivery-kid-audits/<blockheight> via
     # the Blue Railroad Imports bot. Deliberately NOT a Jenkins job — keeps
     # delivery-kid SSH access off the jenkins container.
-    - name: Create venv for delivery-kid audit script
-      command: python3 -m venv /opt/delivery-kid-audit
-      args:
-        creates: /opt/delivery-kid-audit
-
-    - name: Install python deps for delivery-kid audit
+    - name: Create venv and install python deps for delivery-kid audit
       pip:
         virtualenv: /opt/delivery-kid-audit
+        # Use stdlib venv instead of the `virtualenv` binary (not installed
+        # on maybelle host), and ansible's pip module insists on resolving
+        # `virtualenv` on PATH even when the venv already exists.
+        virtualenv_command: /usr/bin/python3 -m venv
         name:
           - mwclient
           - pyyaml
