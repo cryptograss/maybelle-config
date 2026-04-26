@@ -318,17 +318,17 @@ def print_pin_audit(result: dict, release_count: int):
         for r in result["deleted"]:
             alive = _alive_flags(r)
             state = "CLEANUP PENDING: " + ", ".join(alive) if alive else "fully cleaned"
-            print(f"    {r['cid'][:16]}... {r['title']} [{state}]")
+            print(f"    {r['cid']} {r['title']} [{state}]")
     if result["retired"]:
         print(f"  Retired releases ({len(result['retired'])}):")
         for r in result["retired"]:
             alive = _alive_flags(r)
             state = "CLEANUP PENDING: " + ", ".join(alive) if alive else "fully cleaned"
-            print(f"    {r['cid'][:16]}... {r['title']} [{state}]")
+            print(f"    {r['cid']} {r['title']} [{state}]")
     if result["missing_pins"]:
         print(f"  MISSING PINS ({len(result['missing_pins'])}):")
         for r in result["missing_pins"]:
-            print(f"    {r['cid'][:16]}... {r['title']}")
+            print(f"    {r['cid']} {r['title']}")
     if result["orphan_pins"]:
         print(f"  ORPHAN PINS ({len(result['orphan_pins'])}) — pinned but no Release page:")
         for p in result["orphan_pins"]:
@@ -438,7 +438,13 @@ def main():
             # ever blocking on an interactive password prompt if the SSH
             # self-loopback is misconfigured.
             import socket
-            on_maybelle = socket.gethostname().startswith("maybelle")
+            on_maybelle = (
+                socket.gethostname().lower().startswith("maybelle")
+                or socket.getfqdn().lower().startswith("maybelle")
+                # /etc/delivery-kid-audit.env is created by ansible only on
+                # maybelle — its presence is a definitive marker.
+                or Path("/etc/delivery-kid-audit.env").exists()
+            )
             if on_maybelle:
                 cmd = ["docker", "exec", "-i", "jenkins", "python3", "-"]
             else:

@@ -52,6 +52,17 @@ _SUMMARY_LINE_RE = re.compile(
     r"^\s+(" + "|".join(re.escape(label) for label in PROBLEM_LABELS) + r"):\s+(\d+)"
 )
 
+# UUID4-format draft IDs in the audit output → ReleaseDraft:<uuid> wiki pages.
+_UUID_RE = re.compile(
+    r"\b([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\b"
+)
+# CIDv1 (bafy…, ~59 chars) and CIDv0 (Qm…, 46 chars). The audit lowercases
+# Qm CIDs for cross-comparison so the strict base58 alphabet doesn't match
+# anymore — use a permissive [a-zA-Z0-9] character class instead.
+_CID_RE = re.compile(
+    r"\b((?:[Bb]afy[a-zA-Z0-9]{50,60}|[Qq]m[a-zA-Z0-9]{44}))\b"
+)
+
 
 def current_blockheight() -> int:
     return MERGE_BLOCK + (int(time.time()) - MERGE_TIMESTAMP) // SLOT_TIME
@@ -79,6 +90,32 @@ def detect_problems(audit_text: str) -> dict[str, int]:
             if n > 0:
                 found[m.group(1)] = n
     return found
+
+
+def linkify_audit(text: str) -> str:
+    """Wrap recognized page references in MediaWiki link syntax.
+
+    Targets: ReleaseDraft:<uuid> and Release:<cid>. MediaWiki normalizes
+    the first letter of a page title, so passing through whatever case
+    appears in the audit output resolves to the canonical page name.
+    """
+    text = _UUID_RE.sub(r"[[ReleaseDraft:\1|\1]]", text)
+    text = _CID_RE.sub(r"[[Release:\1|\1]]", text)
+    return text
+
+
+def to_indented_pre(text: str) -> str:
+    """Convert plain text to a MediaWiki leading-space preformatted block.
+
+    HTML <pre>...</pre> renders wiki markup literally, so [[link]] inside
+    it stays as raw text. The leading-space variant of pre DOES process
+    wiki markup — convert each line to start with a space. Empty lines
+    become a single space so they don't break the pre block.
+    """
+    return "\n".join(
+        (" " + line) if line else " "
+        for line in text.split("\n")
+    )
 
 
 def post_to_wiki(
@@ -109,9 +146,7 @@ def post_to_wiki(
         "==Problems detected==\n"
         f"{problem_summary}\n\n"
         "==Full audit output==\n"
-        "<pre>\n"
-        f"{audit_text}"
-        "\n</pre>\n\n"
+        f"{to_indented_pre(linkify_audit(audit_text))}\n\n"
         "[[Category:Delivery Kid Audits]]\n"
     )
 
