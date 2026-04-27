@@ -313,18 +313,23 @@ def _alive_flags(entry: dict) -> list[str]:
 
 
 def print_pin_audit(result: dict, release_count: int):
+    # Only enumerate deleted/retired releases that have alive infra
+    # (CLEANUP PENDING) — fully-cleaned ones are history and would otherwise
+    # pile up over time. Counts of all are rolled up below.
     if result["deleted"]:
-        print(f"  Deleted releases ({len(result['deleted'])}):")
-        for r in result["deleted"]:
+        pending = [r for r in result["deleted"] if _alive_flags(r)]
+        print(f"  Deleted releases ({len(result['deleted'])} total, "
+              f"{len(pending)} cleanup pending):")
+        for r in pending:
             alive = _alive_flags(r)
-            state = "CLEANUP PENDING: " + ", ".join(alive) if alive else "fully cleaned"
-            print(f"    {r['cid']} {r['title']} [{state}]")
+            print(f"    {r['cid']} {r['title']} [CLEANUP PENDING: {', '.join(alive)}]")
     if result["retired"]:
-        print(f"  Retired releases ({len(result['retired'])}):")
-        for r in result["retired"]:
+        pending = [r for r in result["retired"] if _alive_flags(r)]
+        print(f"  Retired releases ({len(result['retired'])} total, "
+              f"{len(pending)} cleanup pending):")
+        for r in pending:
             alive = _alive_flags(r)
-            state = "CLEANUP PENDING: " + ", ".join(alive) if alive else "fully cleaned"
-            print(f"    {r['cid']} {r['title']} [{state}]")
+            print(f"    {r['cid']} {r['title']} [CLEANUP PENDING: {', '.join(alive)}]")
     if result["missing_pins"]:
         print(f"  MISSING PINS ({len(result['missing_pins'])}):")
         for r in result["missing_pins"]:
