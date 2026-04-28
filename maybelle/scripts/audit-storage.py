@@ -122,7 +122,7 @@ def fetch_seeding_dirs() -> list[str]:
 
 
 def fetch_staging_drafts() -> list[dict]:
-    """Return [{id, has_draft_json, upload_files, size_kb}, ...] for each staging draft dir."""
+    """Return [{id, has_draft_json, upload_files, size_kb, mtime}, ...]."""
     script = r"""
 cd /mnt/storage-box/staging/drafts 2>/dev/null || exit 0
 for d in */; do
@@ -132,7 +132,11 @@ for d in */; do
   upload_files=0
   [ -d "$d/upload" ] && upload_files=$(find "$d/upload" -type f 2>/dev/null | wc -l | tr -d ' ')
   size_kb=$(du -sk "$d" 2>/dev/null | cut -f1)
-  echo "$d $has_json $upload_files $size_kb"
+  # Newest file mtime in the tree — falls back to dir mtime when empty.
+  mtime=$(find "$d" -type f -printf '%T@\n' 2>/dev/null | sort -nr | head -1 | cut -d. -f1)
+  [ -z "$mtime" ] && mtime=$(stat -c %Y "$d" 2>/dev/null)
+  [ -z "$mtime" ] && mtime=0
+  echo "$d $has_json $upload_files $size_kb $mtime"
 done
 """
     out = ssh(DK_HOST, script)
@@ -145,6 +149,7 @@ done
                 "has_draft_json": parts[1] == "yes",
                 "upload_files": int(parts[2] or 0),
                 "size_kb": int(parts[3] or 0),
+                "mtime": int(parts[4]) if len(parts) >= 5 else 0,
             })
     return drafts
 
@@ -155,6 +160,21 @@ def human_size(kb: int) -> str:
     if kb < 1024 * 1024:
         return f"{kb // 1024}M"
     return f"{kb / 1024 / 1024:.1f}G"
+
+
+def human_age(epoch: int) -> str:
+    """Render a unix-epoch timestamp as 'just now' / '14m' / '3d' style age."""
+    if not epoch:
+        return ""
+    import time as _time
+    delta = max(0, int(_time.time()) - epoch)
+    if delta < 60:
+        return f"{delta}s"
+    if delta < 3600:
+        return f"{delta // 60}m"
+    if delta < 86400:
+        return f"{delta // 3600}h"
+    return f"{delta // 86400}d"
 
 
 def audit_pins(releases: list[dict], pins: set[str], seeding: list[str]) -> dict:
@@ -374,7 +394,9 @@ def print_draft_audit(result: dict, wiki_count: int, staging_count: int):
     if result["orphan_drafts"]:
         print(f"  ORPHAN DRAFTS ({len(result['orphan_drafts'])}) — staging dir, no wiki page:")
         for d in result["orphan_drafts"]:
-            print(f"    {d['id']} ({human_size(d['size_kb'])})")
+            age = human_age(d.get("mtime", 0))
+            age_part = f", {age} old" if age else ""
+            print(f"    {d['id']} ({human_size(d['size_kb'])}{age_part})")
     if result["stalled_drafts"]:
         print(f"  STALLED DRAFTS ({len(result['stalled_drafts'])}) — wiki page + empty staging:")
         for d in result["stalled_drafts"]:

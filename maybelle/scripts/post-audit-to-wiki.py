@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
-"""Run audit-storage.py; post results to PickiPedia.
+"""Run audit-storage.py; publish results.
 
 Two output channels:
 
-1. ``Cryptograss:delivery-kid-audits/Latest`` — overwritten every run as a
-   bot edit (filtered out of recent changes by default), so anyone curious
-   about the most recent audit has a stable URL to check.
+1. ``$STATE_DIR/audit-latest.json`` — written every run. A separate scp
+   step in the runner ships it to delivery-kid, where Caddy serves it
+   publicly so MediaWiki's Special:DeliveryKidAudit can render the live
+   state without ever touching the wiki.
 
 2. ``Cryptograss:delivery-kid-audits/<blockheight>`` — created only when
-   problems are detected. These accumulate over time and DO show in
-   recent changes, so they act as the "something needs attention" signal.
+   problems are detected AND the problem set has changed since the most
+   recent posting. These DO show in recent changes; they're the
+   "something needs attention" signal.
 
 Required env vars:
   BLUERAILROAD_BOT_USERNAME
@@ -18,8 +20,10 @@ Required env vars:
 Optional env vars:
   WIKI_URL           — defaults to https://pickipedia.xyz
   AUDIT_TIMEOUT_SECS — defaults to 600
+  AUDIT_STATE_DIR    — defaults to /var/lib/delivery-kid-audit
 """
 
+import json
 import os
 import re
 import subprocess
@@ -34,8 +38,9 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 AUDIT_SCRIPT = SCRIPT_DIR / "audit-storage.py"
 WIKI_URL = os.environ.get("WIKI_URL", "https://pickipedia.xyz")
 AUDIT_TIMEOUT = int(os.environ.get("AUDIT_TIMEOUT_SECS", "600"))
-
-LATEST_PAGE_TITLE = "Cryptograss:Delivery-kid-audits/Latest"
+STATE_DIR = Path(os.environ.get("AUDIT_STATE_DIR", "/var/lib/delivery-kid-audit"))
+JSON_OUTPUT_PATH = STATE_DIR / "audit-latest.json"
+FINGERPRINT_PATH = STATE_DIR / "last-fingerprint"
 
 # Ethereum merge constants — matches the formula used by the Special:Deliver* pages.
 MERGE_BLOCK = 15537394
@@ -125,6 +130,49 @@ def to_indented_pre(text: str) -> str:
     )
 
 
+def fingerprint(problems: dict[str, int]) -> str:
+    """Stable string repr of the current problem counts."""
+    if not problems:
+        return "clean"
+    return ",".join(f"{k.replace(' ', '_')}={v}" for k, v in sorted(problems.items()))
+
+
+def previous_fingerprint() -> str | None:
+    """Read the most recently-posted fingerprint from local state."""
+    try:
+        return FINGERPRINT_PATH.read_text().strip() or None
+    except FileNotFoundError:
+        return None
+
+
+def save_fingerprint(fp: str) -> None:
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    FINGERPRINT_PATH.write_text(fp + "\n")
+
+
+def write_audit_json(
+    blockheight: int, returncode: int, problems: dict[str, int], audit_text: str,
+) -> None:
+    """Write the blob that Special:DeliveryKidAudit renders.
+
+    Always written, regardless of whether problems were detected — the
+    Special page needs a JSON to read every run.
+    """
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "blockheight": blockheight,
+        "timestamp_epoch": int(time.time()),
+        "timestamp_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "returncode": returncode,
+        "problems": problems,
+        "fingerprint": fingerprint(problems),
+        "audit_text": audit_text,
+    }
+    tmp = JSON_OUTPUT_PATH.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(payload, indent=2))
+    tmp.replace(JSON_OUTPUT_PATH)
+
+
 def _status_banner(problems: dict[str, int]) -> str:
     """Build a colored callout summarizing whether action is required.
 
@@ -196,26 +244,6 @@ def post_problem_page(
     return title
 
 
-def post_latest_page(
-    site: mwclient.Site,
-    blockheight: int,
-    audit_text: str,
-    returncode: int,
-    problems: dict[str, int],
-) -> str:
-    """Update the always-fresh Latest page (bot edit, hidden from RC by default)."""
-    short = (
-        ", ".join(f"{label} {count}" for label, count in problems.items())
-        if problems else "clean"
-    )
-    site.pages[LATEST_PAGE_TITLE].save(
-        _build_page_content(blockheight, audit_text, returncode, problems),
-        summary=f"Audit at block {blockheight}: {short}",
-        bot=True,
-    )
-    return LATEST_PAGE_TITLE
-
-
 def main():
     blockheight = current_blockheight()
     print(f"=== Audit run at block {blockheight} ===\n")
@@ -225,21 +253,30 @@ def main():
     print(audit_text)
 
     problems = detect_problems(audit_text)
-    site = _login()
+    curr_fp = fingerprint(problems)
 
-    # Always update Latest so there's a stable place to see the most recent
-    # run. Marked as bot edit → filtered from recent changes by default.
-    post_latest_page(site, blockheight, audit_text, rc, problems)
-    print(f"Latest updated: {WIKI_URL}/wiki/{LATEST_PAGE_TITLE.replace(' ', '_')}")
+    # Always write the JSON blob — the Special page reads it on every view,
+    # whether or not anything is wrong.
+    write_audit_json(blockheight, rc, problems, audit_text)
+    print(f"Wrote {JSON_OUTPUT_PATH} (fingerprint={curr_fp})")
 
     if not problems:
         print(f"\nNo problems detected at block {blockheight}; "
-              "no per-block page posted.")
+              "no wiki edits.")
         sys.exit(0)
 
+    prev_fp = previous_fingerprint()
+    if curr_fp == prev_fp:
+        print(f"\nProblem set unchanged since previous post "
+              f"({curr_fp}); skipping per-block page.")
+        sys.exit(0)
+
+    site = _login()
     summary_inline = ", ".join(f"{k}={v}" for k, v in problems.items())
-    print(f"\nProblems detected ({summary_inline}); posting per-block page...")
+    print(f"\nProblem set changed ({prev_fp or 'none'} → {curr_fp}); "
+          "posting per-block page...")
     title = post_problem_page(site, blockheight, audit_text, rc, problems)
+    save_fingerprint(curr_fp)
     print(f"Posted to: {WIKI_URL}/wiki/{title.replace(' ', '_')}")
     sys.exit(0)
 

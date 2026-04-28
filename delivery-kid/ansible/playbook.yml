@@ -305,6 +305,17 @@
           delay: 2
       when: "ipfs_admin_domain not in (ipfs_cors_check.stdout | default(''))"
 
+    # Receiving directory for the audit JSON shipped from maybelle by
+    # /usr/local/bin/run-delivery-kid-audit.sh. World-readable so caddy
+    # (running as the `caddy` user) can serve it.
+    - name: Create audit blob directory
+      file:
+        path: /var/lib/delivery-kid-audit
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+
     # Caddy reverse proxy - install from official repo (not Ubuntu's)
     - name: Add Caddy GPG key
       apt_key:
@@ -339,6 +350,12 @@
         dest: /etc/caddy/Caddyfile
         content: |
           {{ domain_name }} {
+              # Static audit blob written by maybelle's host cron via scp.
+              # Read by pickipedia's Special:DeliveryKidAudit on view.
+              handle /audit-latest.json {
+                  root * /var/lib/delivery-kid-audit
+                  file_server
+              }
               route /webseed/* {
                   # BEP 19 webseed rewrite: BT clients request
                   # /webseed/{cid}/{torrent_name}/{file_path}

@@ -558,6 +558,17 @@
           - mwclient
           - pyyaml
 
+    # Holds audit-latest.json (shipped to delivery-kid for the Special
+    # page) and last-fingerprint (used to skip per-block wiki page when
+    # the problem set hasn't changed).
+    - name: Create delivery-kid audit state directory
+      file:
+        path: /var/lib/delivery-kid-audit
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+
     - name: Deploy delivery-kid audit env file (bot credentials)
       copy:
         dest: /etc/delivery-kid-audit.env
@@ -579,7 +590,9 @@
         group: root
         content: |
           #!/bin/bash
-          # Run delivery-kid storage audit and post results to PickiPedia.
+          # Run delivery-kid storage audit, ship the JSON to delivery-kid
+          # so the wiki Special:DeliveryKidAudit can render it, and post
+          # to PickiPedia if a new problem set was detected.
           # Runs as root: audit-storage.py SSHes to delivery-kid using
           # /root/.ssh keys (same path as deploy-delivery-kid).
 
@@ -588,6 +601,9 @@
           LOG="/var/log/delivery-kid-audit.log"
           SCRIPT="/mnt/persist/maybelle-config/maybelle/scripts/post-audit-to-wiki.py"
           VENV_PYTHON="/opt/delivery-kid-audit/bin/python"
+          STATE_DIR="/var/lib/delivery-kid-audit"
+          REMOTE_HOST="delivery-kid.cryptograss.live"
+          REMOTE_PATH="/var/lib/delivery-kid-audit/audit-latest.json"
 
           {
             echo ""
@@ -597,6 +613,18 @@
             set +a
             "$VENV_PYTHON" "$SCRIPT"
             rc=$?
+            # Ship the JSON regardless of audit rc — the Special page wants
+            # the latest run's output even if it errored.
+            if [ -f "$STATE_DIR/audit-latest.json" ]; then
+              if scp -B -o BatchMode=yes "$STATE_DIR/audit-latest.json" \
+                   "root@$REMOTE_HOST:$REMOTE_PATH"; then
+                echo "shipped audit-latest.json to $REMOTE_HOST"
+              else
+                echo "WARNING: scp to $REMOTE_HOST failed"
+              fi
+            else
+              echo "WARNING: $STATE_DIR/audit-latest.json missing — nothing to ship"
+            fi
             echo "=== $(date -u +%FT%TZ) audit end (rc=$rc) ==="
             exit $rc
           } >> "$LOG" 2>&1
