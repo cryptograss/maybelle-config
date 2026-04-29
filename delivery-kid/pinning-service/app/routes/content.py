@@ -94,6 +94,60 @@ def _append_finalize_log(state: ContentDraftState, stage: str, message: str,
         state.finalize_log = state.finalize_log[-FINALIZE_LOG_MAX:]
 
 
+def log_pre_handler_failure(draft_id: str, status_code: int,
+                            request_headers: dict, settings: Settings) -> None:
+    """
+    Persist a failed-before-handler upload into the draft's upload_log.
+
+    Body-parse failures, request-too-large, and other framework-level errors
+    raise HTTPException before the /draft-content handler runs, so the
+    handler's own fail() helper never gets a chance to log them. The
+    middleware in main.py observes those response codes and calls this so
+    we still leave a trail visible on the ReleaseDraft page.
+
+    No-op when the draft doesn't exist or when the most recent log entry is
+    a fresh 'error' phase — that means our own fail() already covered it.
+    """
+    try:
+        uuid.UUID(draft_id)
+    except ValueError:
+        return
+    staging_dir = Path(settings.staging_dir)
+    draft_dir = get_draft_dir(staging_dir, draft_id)
+    state = load_draft_state(draft_dir)
+    if state is None:
+        return
+
+    # Dedup: if our handler's fail() just wrote an 'error' entry within the
+    # last 2 seconds, the middleware is observing the same exception and
+    # we don't need a duplicate row.
+    if state.upload_log:
+        last = state.upload_log[-1]
+        if last.get("phase") == "error":
+            try:
+                last_dt = datetime.fromisoformat(
+                    last.get("ts", "").replace("Z", "+00:00")
+                )
+                if (datetime.now(timezone.utc) - last_dt).total_seconds() < 2:
+                    return
+            except (ValueError, TypeError):
+                pass
+
+    content_length = request_headers.get("content-length", "?")
+    content_type = (request_headers.get("content-type") or "?").split(";")[0]
+    msg = (
+        f"HTTP {status_code} before handler ran "
+        f"(content-length={content_length}, content-type={content_type})"
+    )
+    state.status = "upload_failed"
+    _append_upload_log(state, "request-error", msg, error=f"HTTP {status_code}")
+    try:
+        save_draft_state(draft_dir, state)
+    except Exception:
+        logger.exception("[content:%s] Failed to persist pre-handler failure",
+                         draft_id[:8])
+
+
 @router.post("/init", response_model=ContentDraftResponse)
 async def init_content_draft(
     wallet_address: str = Depends(require_auth),
