@@ -526,9 +526,11 @@ def materialize_record_tracks(
             continue
         if data.get('release_type') != 'record':
             continue
-        if data.get('tracks'):
-            logger.debug("  Skip %s: already has tracks: array", title)
-            continue
+
+        # Don't early-return if tracks: is already present — we still
+        # want to backfill any missing /Metadata subpages and any new
+        # encodings that delivery-kid surfaces. Each subsequent step
+        # is idempotent (page_exists checks before each create).
 
         logger.info("Materializing tracks for %s", title)
         album = _fetch_album_tracks(delivery_kid_url, cid)
@@ -566,6 +568,33 @@ def materialize_record_tracks(
                 except Exception as e:
                     results.append(SaveResult(track_page, 'error', str(e)))
                     continue
+
+            # Pre-create the editable /Metadata subpage so visitors land
+            # straight on the timeline editor instead of a "no text yet"
+            # page. Stub matches PickiPediaRecordingMetadata's
+            # makeEmptyContent so the editor mounts with empty timeline
+            # + ensemble.
+            metadata_page = f"{track_page}/Metadata"
+            if not wiki.page_exists(metadata_page):
+                track_title = track.get('title') or 'this track'
+                metadata_yaml = (
+                    f"# Recording metadata for {track_title}.\n"
+                    "# Edited via the timeline editor on this page.\n"
+                    "\n"
+                    "timeline: {}\n"
+                    "ensemble: {}\n"
+                )
+                try:
+                    page = wiki.site.pages[metadata_page]
+                    page.save(metadata_yaml,
+                              summary=_summary(
+                                  f"Stub metadata for track #{track.get('track_number')}"
+                              ),
+                              contentmodel='recording-metadata-yaml')
+                    results.append(SaveResult(metadata_page, 'created'))
+                    logger.info("  Created: %s", metadata_page)
+                except Exception as e:
+                    results.append(SaveResult(metadata_page, 'error', str(e)))
 
             track_summaries.append({
                 'cid': track_cid,
