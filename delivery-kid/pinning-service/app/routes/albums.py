@@ -46,11 +46,20 @@ def _leading_track_number(basename: str) -> int | None:
 
 
 def _title_from_basename(basename: str) -> str:
-    # Strip leading "{N} - " if present, else use the basename as-is.
-    sep = basename.find(" - ")
-    if sep > 0 and basename[:sep].strip().isdigit():
-        return basename[sep + 3:].strip()
-    return basename.strip()
+    # Strip a leading "{N}" prefix and the separator that follows, if any.
+    # Handles common conventions: "1 - Title", "01-Title", "1. Title".
+    # If no leading number, return basename as-is.
+    i = 0
+    while i < len(basename) and basename[i].isdigit():
+        i += 1
+    if i == 0:
+        return basename.strip()
+    rest = basename[i:].lstrip()
+    # Common separators after the number: " - ", "-", ". ", "."
+    for sep in (" - ", "- ", "-", ". ", "."):
+        if rest.startswith(sep):
+            return rest[len(sep):].strip()
+    return rest.strip()
 
 
 @router.get("/album-tracks/{album_cid}")
