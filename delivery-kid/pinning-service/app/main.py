@@ -5,11 +5,12 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from .config import get_settings
 from .routes import health, albums, drafts, content, enrich, torrent, coconut, staging
+from .routes.content import log_pre_handler_failure
 from .services.seeder import init_seeder, stop_seeder
 
 # Configure logging
@@ -68,6 +69,39 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["*"]
 )
+
+# Persist pre-handler upload failures into draft.upload_log.
+#
+# Body-parse errors, request-too-large, and any HTTPException raised before
+# the /draft-content POST handler runs are otherwise invisible: the handler
+# never gets the chance to call its own fail() helper. This middleware
+# observes the response status, and when an /init-created draft exists it
+# leaves an entry on the draft's upload_log so the ReleaseDraft page can
+# show what blew up. Dedup against the handler's own fail() is handled by
+# log_pre_handler_failure itself.
+@app.middleware("http")
+async def log_draft_request_failures(request: Request, call_next):
+    response = await call_next(request)
+    if (
+        request.url.path == "/draft-content"
+        and request.method == "POST"
+        and response.status_code >= 400
+    ):
+        draft_id = request.headers.get("x-draft-id") or request.headers.get("X-Draft-Id")
+        if draft_id:
+            try:
+                log_pre_handler_failure(
+                    draft_id,
+                    response.status_code,
+                    dict(request.headers),
+                    get_settings(),
+                )
+            except Exception:
+                logger.exception(
+                    "[middleware] Failed to log pre-handler upload failure"
+                )
+    return response
+
 
 # Include routers
 app.include_router(health.router)
