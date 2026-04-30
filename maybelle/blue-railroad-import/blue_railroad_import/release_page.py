@@ -414,6 +414,185 @@ def clear_torrent_fields(
     return results
 
 
+def _fetch_album_tracks(delivery_kid_url: str, album_cid: str) -> Optional[dict]:
+    """Fetch a record-type album's per-track structure from delivery-kid.
+
+    Returns the parsed JSON ({album_cid, tracks, extras}), or None on failure.
+    """
+    url = f"{delivery_kid_url.rstrip('/')}/album-tracks/{album_cid}"
+    try:
+        with urllib.request.urlopen(url, timeout=60) as response:
+            return json.loads(response.read().decode('utf-8'))
+    except Exception as e:
+        logger.warning("Failed to fetch %s: %s", url, e)
+        return None
+
+
+def _canonical_track_cid(track: dict) -> tuple[Optional[str], Optional[str]]:
+    """Pick the canonical (cid, format) for a track.
+
+    FLAC is preferred (lossless, archival source). Falls back to OGG, then
+    the first encoding alphabetically. Returns (None, None) if no encoding
+    has a CID.
+    """
+    encodings = track.get('encodings') or {}
+    for fmt in ('flac', 'ogg', 'wav', 'm4a', 'mp3'):
+        cid = (encodings.get(fmt) or {}).get('cid')
+        if cid:
+            return cid, fmt
+    for fmt, enc in sorted(encodings.items()):
+        if enc.get('cid'):
+            return enc['cid'], fmt
+    return None, None
+
+
+def _build_track_release_yaml(
+    track: dict, canonical_cid: str, canonical_fmt: str, album_cid: str
+) -> str:
+    """YAML body for a per-track Release page (named by canonical CID)."""
+    encodings = {fmt: enc['cid']
+                 for fmt, enc in (track.get('encodings') or {}).items()
+                 if enc.get('cid')}
+    body: dict = {
+        'title': track.get('title') or '',
+        'release_type': 'track',
+        'parent_release': album_cid,
+        'track_number': track.get('track_number'),
+        'canonical_format': canonical_fmt,
+        'ipfs_cid': canonical_cid,
+        'encodings': encodings,
+    }
+    sizes = {fmt: enc['size']
+             for fmt, enc in (track.get('encodings') or {}).items()
+             if enc.get('size')}
+    if sizes:
+        body['encoding_sizes'] = sizes
+    return yaml.dump(body, default_flow_style=False, allow_unicode=True, sort_keys=False)
+
+
+def materialize_record_tracks(
+    wiki: WikiClientProtocol,
+    delivery_kid_url: str,
+    album_cid: Optional[str] = None,
+) -> list[SaveResult]:
+    """Materialize per-track Release pages for record-type albums.
+
+    For each record-type Release page (release_type: record) lacking a
+    tracks: array, fetch the per-track structure from delivery-kid's
+    /album-tracks endpoint, create one Release:Qm<flac_cid> page per
+    track, and patch the album page to include a tracks: array linking
+    each track's canonical CID.
+
+    Idempotent — albums that already have a tracks: array are skipped,
+    and per-track pages that already exist are not re-created.
+
+    Args:
+        wiki: WikiClientProtocol instance.
+        delivery_kid_url: e.g. "https://delivery-kid.cryptograss.live"
+        album_cid: if given, process only this album (Release:<cid>).
+            Else, walk all pages in the Release namespace.
+
+    Returns:
+        List of SaveResult for each page created or updated.
+    """
+    results: list[SaveResult] = []
+
+    if album_cid:
+        candidates = [f"Release:{album_cid}"]
+    else:
+        url = (
+            f"{wiki.api_url}?action=query&list=allpages&apnamespace=3004"
+            f"&aplimit=500&format=json"
+        )
+        with urllib.request.urlopen(url, timeout=30) as response:
+            data = json.loads(response.read().decode('utf-8'))
+        candidates = [p['title']
+                      for p in data.get('query', {}).get('allpages', [])]
+        logger.info("Walking %d Release pages for record-type albums", len(candidates))
+
+    for title in candidates:
+        cid = title.split(':', 1)[1] if ':' in title else title
+        existing = wiki.get_page_content(title)
+        if not existing:
+            continue
+
+        try:
+            data = yaml.safe_load(existing) or {}
+        except yaml.YAMLError as e:
+            logger.warning("  Skip %s: YAML parse error: %s", title, e)
+            continue
+
+        if not isinstance(data, dict):
+            continue
+        if data.get('release_type') != 'record':
+            continue
+        if data.get('tracks'):
+            logger.debug("  Skip %s: already has tracks: array", title)
+            continue
+
+        logger.info("Materializing tracks for %s", title)
+        album = _fetch_album_tracks(delivery_kid_url, cid)
+        if not album or not album.get('tracks'):
+            results.append(SaveResult(title, 'error',
+                                      'No tracks returned from delivery-kid'))
+            continue
+
+        track_summaries = []
+        for track in album['tracks']:
+            track_cid, fmt = _canonical_track_cid(track)
+            if not track_cid:
+                logger.warning("  Skip track %s: no encoding CIDs",
+                               track.get('title'))
+                continue
+            track_page = f"Release:{track_cid}"
+
+            if wiki.page_exists(track_page):
+                logger.info("  Track exists: %s", track_page)
+            else:
+                track_yaml = _build_track_release_yaml(track, track_cid, fmt, cid)
+                summary = _summary(
+                    f"Track #{track.get('track_number')} ({track.get('title')}) "
+                    f"of {cid}"
+                )
+                # mwclient page.save sets contentmodel via NS default
+                # (release-yaml on NS_RELEASE 3004); explicit kwarg keeps
+                # it durable against namespace config drift.
+                try:
+                    page = wiki.site.pages[track_page]
+                    page.save(track_yaml, summary=summary,
+                              contentmodel='release-yaml')
+                    results.append(SaveResult(track_page, 'created'))
+                    logger.info("  Created: %s", track_page)
+                except Exception as e:
+                    results.append(SaveResult(track_page, 'error', str(e)))
+                    continue
+
+            track_summaries.append({
+                'cid': track_cid,
+                'title': track.get('title') or '',
+                'track_number': track.get('track_number'),
+            })
+
+        # Patch album YAML with tracks: array. yaml.dump re-emits the whole
+        # structure (semantically equivalent, may reflow whitespace).
+        data['tracks'] = track_summaries
+        new_yaml = yaml.dump(data, default_flow_style=False,
+                             allow_unicode=True, sort_keys=False)
+        if new_yaml.strip() == existing.strip():
+            results.append(SaveResult(title, 'unchanged',
+                                      'Tracks already present'))
+            continue
+
+        result = wiki.save_page(
+            title, new_yaml,
+            _summary(f"Add tracks: array ({len(track_summaries)} tracks)"),
+        )
+        results.append(result)
+        logger.info("  Updated %s with tracks: array", title)
+
+    return results
+
+
 def ensure_release_for_submission(
     wiki: WikiClientProtocol,
     submission: Submission,

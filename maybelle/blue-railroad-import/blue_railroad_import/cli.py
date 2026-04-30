@@ -176,6 +176,36 @@ def cmd_convert_releases(args):
         sys.exit(1)
 
 
+def cmd_materialize_tracks(args):
+    """Materialize per-track Release pages for record-type albums."""
+    _configure_logging(args)
+    wiki_client = create_wiki_client(args)
+
+    from .release_page import materialize_record_tracks
+    results = materialize_record_tracks(
+        wiki_client,
+        delivery_kid_url=args.delivery_kid_url,
+        album_cid=args.album_cid,
+    )
+
+    created = [r for r in results if r.action == 'created']
+    updated = [r for r in results if r.action == 'updated']
+    unchanged = [r for r in results if r.action == 'unchanged']
+    errors = [r for r in results if r.action == 'error']
+
+    print(f"\nMaterialize tracks complete:")
+    print(f"  Created: {len(created)}")
+    print(f"  Updated: {len(updated)}")
+    print(f"  Unchanged: {len(unchanged)}")
+    print(f"  Errors: {len(errors)}")
+
+    for r in errors:
+        print(f"  ERROR: {r.page_title}: {r.message}")
+
+    if errors:
+        sys.exit(1)
+
+
 def cmd_fix_bot_proposes(args):
     """Fix Release pages that still have Bot_proposes wikitext content."""
     _configure_logging(args)
@@ -453,6 +483,27 @@ def main():
     )
     add_common_args(convert_parser)
     convert_parser.set_defaults(func=cmd_convert_releases)
+
+    # Materialize tracks for record-type albums
+    tracks_parser = subparsers.add_parser(
+        'materialize-tracks',
+        help=(
+            'Materialize per-track Release pages for record-type albums '
+            'lacking a tracks: array'
+        ),
+    )
+    add_common_args(tracks_parser)
+    tracks_parser.add_argument(
+        '--delivery-kid-url',
+        default='https://delivery-kid.cryptograss.live',
+        help='Base URL of the delivery-kid pinning service',
+    )
+    tracks_parser.add_argument(
+        '--album-cid',
+        default=None,
+        help='Process only this album CID (else walk all Release pages)',
+    )
+    tracks_parser.set_defaults(func=cmd_materialize_tracks)
 
     # Fix Bot_proposes pages
     fix_parser = subparsers.add_parser(
