@@ -42,6 +42,16 @@ pipelineJob('pickipedia-import-bluerailroad') {
                                 sh 'set +x && /opt/blue-railroad-import/bin/python -m blue_railroad_import.cli enrich-torrents --wiki-url "$WIKI_URL" --username "$BLUERAILROAD_BOT_USERNAME" --password "$BLUERAILROAD_BOT_PASSWORD" --delivery-kid-api-key "$DELIVERY_KID_API_KEY" -v'
                             }
                         }
+                        stage('Materialize tracks') {
+                            // Runs before Enrich thumbnails so a stale ffmpeg
+                            // failure on some video doesn't cascade-skip
+                            // track materialization. Idempotent — once a
+                            // record is materialized, subsequent cycles are
+                            // a fast no-op.
+                            steps {
+                                sh 'set +x && /opt/blue-railroad-import/bin/python -m blue_railroad_import.cli materialize-tracks --wiki-url "$WIKI_URL" --username "$BLUERAILROAD_BOT_USERNAME" --password "$BLUERAILROAD_BOT_PASSWORD" -v'
+                            }
+                        }
                         stage('Enrich IPFS metadata') {
                             steps {
                                 sh 'set +x && /opt/blue-railroad-import/bin/python -m blue_railroad_import.cli enrich-ipfs --wiki-url "$WIKI_URL" --username "$BLUERAILROAD_BOT_USERNAME" --password "$BLUERAILROAD_BOT_PASSWORD" -v'
@@ -55,15 +65,6 @@ pipelineJob('pickipedia-import-bluerailroad') {
                         stage('Reconcile pins') {
                             steps {
                                 sh 'set +x && /opt/blue-railroad-import/bin/python -m blue_railroad_import.cli reconcile-pins --wiki-url "$WIKI_URL" --username "$BLUERAILROAD_BOT_USERNAME" --password "$BLUERAILROAD_BOT_PASSWORD" --delivery-kid-api-key "$DELIVERY_KID_API_KEY" -v'
-                            }
-                        }
-                        stage('Materialize tracks') {
-                            // For each record-type Release page lacking a tracks: array,
-                            // calls delivery-kid /album-tracks/{cid} and creates per-track
-                            // Release:Qm<flac_cid> pages. Idempotent — once a record is
-                            // materialized, subsequent cycles are a fast no-op.
-                            steps {
-                                sh 'set +x && /opt/blue-railroad-import/bin/python -m blue_railroad_import.cli materialize-tracks --wiki-url "$WIKI_URL" --username "$BLUERAILROAD_BOT_USERNAME" --password "$BLUERAILROAD_BOT_PASSWORD" -v'
                             }
                         }
                     }
