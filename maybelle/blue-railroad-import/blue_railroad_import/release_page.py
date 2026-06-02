@@ -534,9 +534,32 @@ def materialize_record_tracks(
 
         logger.info("Materializing tracks for %s", title)
         album = _fetch_album_tracks(delivery_kid_url, cid)
-        if not album or not album.get('tracks'):
+        if not album:
             results.append(SaveResult(title, 'error',
-                                      'No tracks returned from delivery-kid'))
+                                      'No response from delivery-kid /album-tracks'))
+            continue
+        if not album.get('tracks'):
+            # Empty tracks isn't necessarily a failure — encrypted album
+            # releases (e.g. Vowel Sounds (encrypted)) legitimately have
+            # no plaintext tracks; their contents land in ``extras`` as
+            # ``*.flac.encrypted at <timestamp>`` files which we can't
+            # materialize as per-track Release pages. Log it and move on
+            # so one encrypted album doesn't fail the whole pipeline.
+            extras = album.get('extras') or []
+            if extras:
+                logger.info(
+                    "  Skip %s: no plaintext tracks (%d encrypted/extras file(s))",
+                    title, len(extras),
+                )
+                results.append(SaveResult(
+                    title, 'unchanged',
+                    f'No plaintext tracks ({len(extras)} encrypted/extras)',
+                ))
+            else:
+                logger.warning("  Skip %s: empty album (no tracks and no extras)", title)
+                results.append(SaveResult(
+                    title, 'unchanged', 'Empty album (no tracks, no extras)',
+                ))
             continue
 
         track_summaries = []
