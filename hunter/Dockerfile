@@ -134,12 +134,15 @@ RUN /root/.local/bin/uv pip install --python /usr/bin/python3 --break-system-pac
 # Ubuntu 26.04 ships Python 3.14, but the godogen ML pipeline pulls
 # pymatting → numba → llvmlite which caps at Python 3.9. Isolating in a
 # 3.12 venv keeps godogen's stack working without downgrading the base OS.
+# Pin pymatting>=1.1.15: 1.1.14 declares `numba!=0.49.0` (no lower bound),
+# which lets the resolver pick numba==0.53.1 (only builds on Python <3.10);
+# 1.1.15 requires numba>=0.60 which supports 3.12 cleanly.
 # Skip GPU-specific packages (onnxruntime-gpu, nvidia-cudnn) — hunter has no
 # NVIDIA GPU; install CPU onnxruntime instead.
 RUN /root/.local/bin/uv python install 3.12 \
     && /root/.local/bin/uv venv /opt/godogen-venv --python 3.12 \
     && /root/.local/bin/uv pip install --python /opt/godogen-venv/bin/python \
-        google-genai xai-sdk requests numpy pillow rembg pymatting onnxruntime
+        google-genai xai-sdk requests numpy pillow rembg 'pymatting>=1.1.15' onnxruntime
 
 # Put the godogen venv first in PATH so `python`/`python3` invocations from
 # godogen's tools (documented as `python rembg_matting.py`) resolve to the
