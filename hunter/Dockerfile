@@ -130,11 +130,22 @@ ENV PATH="/root/.local/bin:$PATH"
 # Install Python dependencies for memory-lane using uv
 RUN /root/.local/bin/uv pip install --python /usr/bin/python3 --break-system-packages -r /home/magent/workspace/memory-lane/requirements.txt
 
-# Install godogen Python dependencies (rembg, etc. for Godot asset pipeline)
-# Skip GPU-specific packages (onnxruntime-gpu, nvidia-cudnn) since hunter has no NVIDIA GPU
-# Install CPU onnxruntime instead
-RUN /root/.local/bin/uv pip install --python /usr/bin/python3 --break-system-packages \
-    google-genai xai-sdk requests numpy pillow rembg pymatting onnxruntime
+# Install godogen Python dependencies into a dedicated Python 3.12 venv.
+# Ubuntu 26.04 ships Python 3.14, but the godogen ML pipeline pulls
+# pymatting → numba → llvmlite which caps at Python 3.9. Isolating in a
+# 3.12 venv keeps godogen's stack working without downgrading the base OS.
+# Skip GPU-specific packages (onnxruntime-gpu, nvidia-cudnn) — hunter has no
+# NVIDIA GPU; install CPU onnxruntime instead.
+RUN /root/.local/bin/uv python install 3.12 \
+    && /root/.local/bin/uv venv /opt/godogen-venv --python 3.12 \
+    && /root/.local/bin/uv pip install --python /opt/godogen-venv/bin/python \
+        google-genai xai-sdk requests numpy pillow rembg pymatting onnxruntime
+
+# Put the godogen venv first in PATH so `python`/`python3` invocations from
+# godogen's tools (documented as `python rembg_matting.py`) resolve to the
+# ML stack. Nothing else in this image needs system Python at runtime —
+# memory-lane runs from its own image.
+ENV PATH="/opt/godogen-venv/bin:$PATH"
 
 # Copy startup script
 COPY container_startup.py /usr/local/bin/
