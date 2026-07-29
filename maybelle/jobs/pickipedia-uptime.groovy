@@ -1,5 +1,12 @@
 pipelineJob('pickipedia-uptime') {
     description('HTTP health check for PickiPedia production (pickipedia.xyz) - runs every minute. Alerts after 2 consecutive failures.')
+    logRotator {
+        // Every-minute cron with no rotator accumulated 22GB of build records
+        // over months. 100 keeps ~1.7hr of context for post-incident debugging;
+        // daysToKeep(3) is the hard ceiling.
+        numToKeep(100)
+        daysToKeep(3)
+    }
     definition {
         cps {
             script('''

@@ -1,5 +1,9 @@
 pipelineJob('delivery-kid-uptime') {
     description('Health check for delivery-kid pinning service and IPFS gateway - runs every 5 minutes. Alerts after 2 consecutive failures.')
+    logRotator {
+        numToKeep(100)
+        daysToKeep(7)
+    }
     definition {
         cps {
             script('''
