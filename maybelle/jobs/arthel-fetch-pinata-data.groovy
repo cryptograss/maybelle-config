@@ -4,6 +4,10 @@ pipelineJob('arthel-fetch-pinata-data') {
     properties {
         disableConcurrentBuilds()
     }
+    logRotator {
+        numToKeep(30)
+        daysToKeep(7)
+    }
     definition {
         cpsScm {
             scm {

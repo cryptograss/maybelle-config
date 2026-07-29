@@ -2,6 +2,10 @@ pipelineJob('arthel-production-build') {
     properties {
         disableConcurrentBuilds()
     }
+    logRotator {
+        numToKeep(30)
+        daysToKeep(30)
+    }
     definition {
         cpsScm {
             scm {

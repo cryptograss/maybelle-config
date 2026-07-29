@@ -2,6 +2,10 @@ pipelineJob('arthel-fetch-chain-data') {
     properties {
         disableConcurrentBuilds()
     }
+    logRotator {
+        numToKeep(50)
+        daysToKeep(7)
+    }
     definition {
         cpsScm {
             scm {

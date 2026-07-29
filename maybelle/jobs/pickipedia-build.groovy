@@ -2,6 +2,10 @@ pipelineJob('pickipedia-build') {
     properties {
         disableConcurrentBuilds()
     }
+    logRotator {
+        numToKeep(30)
+        daysToKeep(14)
+    }
     definition {
         cpsScm {
             scm {
