@@ -1,6 +1,12 @@
 pipelineJob('deploy-hunter') {
     description('Hunter deployment log - triggered externally via deploy-hunter-remote.py')
 
+    logRotator {
+        // Deploys are worth keeping longer for post-incident debugging.
+        numToKeep(50)
+        daysToKeep(180)
+    }
+
     parameters {
         stringParam('DEPLOY_USER', '', 'User who initiated the deploy')
         stringParam('DEPLOY_STATUS', '', 'success or failure')
