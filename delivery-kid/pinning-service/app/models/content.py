@@ -40,8 +40,9 @@ class ContentDraftState(BaseModel):
     # happened even after a refresh or a process crash.
     #   awaiting_upload — /init called, no bytes yet
     #   uploading       — file POST in flight
+    #   fetching        — /from-url accepted; yt-dlp is pulling bytes server-side
     #   uploaded        — files saved + analyzed; preview may be running
-    #   upload_failed   — file POST raised; see upload_log
+    #   upload_failed   — file POST or URL fetch raised; see upload_log
     #   finalizing      — finalize SSE in progress
     #   finalized       — pin successful
     #   finalize_failed — finalize SSE errored; draft dir kept for forensics
@@ -84,6 +85,11 @@ class ContentDraftResponse(BaseModel):
     preview_mp4_cid: Optional[str] = Field(default=None, description="IPFS CID of 480p preview MP4")
     preview_token: Optional[str] = Field(default=None, description="One-time token (returned only on init)")
     preview_log: list[dict] = Field(default_factory=list, description="Recent progress entries from Coconut webhook")
+
+
+class ContentFromUrlRequest(BaseModel):
+    """Request body for fetching draft content from a yt-dlp-compatible URL."""
+    url: str = Field(description="Page or media URL for yt-dlp to fetch (http/https only)")
 
 
 class ContentFinalizeRequest(BaseModel):
