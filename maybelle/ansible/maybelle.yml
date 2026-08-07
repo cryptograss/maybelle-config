@@ -150,6 +150,7 @@
         - pickipedia-rsync-status.groovy
         - backup-pickipedia.groovy
         - backup-memory-lane.groovy
+        - pickipedia-enrich-torrents.groovy
       notify: Restart Jenkins container
 
     # Jenkins persists job runtime state (config.xml, builds/) in
@@ -167,6 +168,7 @@
         - pickipedia-rsync-status
         - backup-pickipedia
         - backup-memory-lane
+        - pickipedia-enrich-torrents
       notify: Restart Jenkins container
 
     - name: Check if log paths are directories (Docker creates dirs for missing mount sources)
