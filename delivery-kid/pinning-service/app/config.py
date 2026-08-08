@@ -37,6 +37,11 @@ class Settings(BaseSettings):
     max_file_size_mb: int = 50000  # 50GB - effectively no limit for albums
     max_files_per_upload: int = 50
 
+    # Wall-clock ceiling for a /draft-content/from-url yt-dlp fetch. Generous
+    # because a long set filmed at 4K over a slow origin is a legitimate case;
+    # it exists to stop a wedged fetch holding staging space forever.
+    url_fetch_timeout_seconds: int = 3600
+
     # Draft settings
     # draft_ttl_hours removed — drafts persist until explicitly finalized or deleted
     max_staging_size_gb: int = 10  # Maximum total size of staging directory

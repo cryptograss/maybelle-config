@@ -16,9 +16,10 @@ from sse_starlette.sse import EventSourceResponse
 from ..auth import require_auth, require_finalize_auth, has_finalize_token
 from ..config import get_settings, get_commit, Settings
 from ..models.content import (
-    ContentFile, ContentDraftState, ContentDraftResponse, ContentFinalizeRequest
+    ContentFile, ContentDraftState, ContentDraftResponse, ContentFinalizeRequest,
+    ContentFromUrlRequest
 )
-from ..services import analyze, ipfs, transcode
+from ..services import analyze, ipfs, transcode, url_fetch
 from ..services.coconut import submit_to_coconut, save_job, load_job
 from ..services.fsutil import safe_rmtree
 from ..services.pickipedia_client import snapshot_diagnostics_for_state_async
@@ -162,6 +163,79 @@ def _fire_diagnostics_snapshot(state: ContentDraftState) -> None:
     except RuntimeError:
         logger.debug("[content:%s] No running loop; skipping diagnostics snapshot",
                      state.draft_id[:8])
+
+
+class NoUsableMediaError(Exception):
+    """Nothing in the upload directory survived analysis."""
+
+
+async def _analyze_and_mark_uploaded(
+    draft_id: str,
+    draft_dir: Path,
+    upload_dir: Path,
+    state: ContentDraftState,
+    settings: Settings,
+) -> list[ContentFile]:
+    """Analyse everything in upload_dir, record it on state, start any preview.
+
+    Shared by the multipart upload handler and the URL-fetch worker — bytes
+    arrive by two routes but everything after they land is identical, and
+    keeping one copy of it is the only way the two stay in step.
+
+    Persists state before returning. Caller owns the HTTP (or background)
+    error surface.
+
+    Raises:
+        NoUsableMediaError: nothing analysed successfully.
+    """
+    analyses = await analyze.analyze_media_directory(upload_dir)
+
+    draft_files = []
+    for a in analyses:
+        if a.success:
+            draft_files.append(ContentFile(
+                original_filename=a.original_filename,
+                detected_title=a.detected_title,
+                media_type=a.media_type,
+                format=a.format,
+                duration_seconds=a.duration_seconds,
+                sample_rate=a.sample_rate,
+                bit_depth=a.bit_depth,
+                channels=a.channels,
+                width=a.width,
+                height=a.height,
+                video_codec=a.video_codec,
+                audio_codec=a.audio_codec,
+                size_bytes=a.size_bytes,
+                creation_time=a.creation_time,
+            ))
+        else:
+            _append_upload_log(state, "analyze-error",
+                               f"ffprobe failed on {a.original_filename}",
+                               error=a.error or "unknown")
+
+    if not draft_files:
+        raise NoUsableMediaError("No valid media files found in upload")
+
+    # Determine if this is a single-video upload that should get a preview
+    video_files = [f for f in draft_files if f.media_type == "video"]
+    should_preview = len(draft_files) == 1 and len(video_files) == 1 and settings.coconut_api_key
+
+    state.files = draft_files
+    state.status = "uploaded"
+    state.preview_status = "pending" if should_preview else "none"
+    _append_upload_log(state, "analyzed",
+                       f"Analyzed {len(draft_files)} file(s); "
+                       + ("preview pending." if should_preview else "no preview."))
+    save_draft_state(draft_dir, state)
+
+    # Kick off background preview transcoding for video uploads
+    if should_preview:
+        asyncio.create_task(
+            _submit_preview_transcode(draft_id, state, settings)
+        )
+
+    return draft_files
 
 
 @router.post("/init", response_model=ContentDraftResponse)
@@ -324,54 +398,9 @@ async def create_content_draft(
                                f"Saved {file.filename} ({file_path.stat().st_size} bytes)")
         save_draft_state(draft_dir, state)
 
-        # Analyze all media files
-        analyses = await analyze.analyze_media_directory(upload_dir)
-
-        # Convert to ContentFile models
-        draft_files = []
-        for a in analyses:
-            if a.success:
-                draft_files.append(ContentFile(
-                    original_filename=a.original_filename,
-                    detected_title=a.detected_title,
-                    media_type=a.media_type,
-                    format=a.format,
-                    duration_seconds=a.duration_seconds,
-                    sample_rate=a.sample_rate,
-                    bit_depth=a.bit_depth,
-                    channels=a.channels,
-                    width=a.width,
-                    height=a.height,
-                    video_codec=a.video_codec,
-                    audio_codec=a.audio_codec,
-                    size_bytes=a.size_bytes,
-                    creation_time=a.creation_time,
-                ))
-            else:
-                _append_upload_log(state, "analyze-error",
-                                   f"ffprobe failed on {a.original_filename}",
-                                   error=a.error or "unknown")
-
-        if not draft_files:
-            raise fail(400, "No valid media files found in upload")
-
-        # Determine if this is a single-video upload that should get a preview
-        video_files = [f for f in draft_files if f.media_type == "video"]
-        should_preview = len(draft_files) == 1 and len(video_files) == 1 and settings.coconut_api_key
-
-        state.files = draft_files
-        state.status = "uploaded"
-        state.preview_status = "pending" if should_preview else "none"
-        _append_upload_log(state, "analyzed",
-                           f"Analyzed {len(draft_files)} file(s); "
-                           + ("preview pending." if should_preview else "no preview."))
-        save_draft_state(draft_dir, state)
-
-        # Kick off background preview transcoding for video uploads
-        if should_preview:
-            asyncio.create_task(
-                _submit_preview_transcode(draft_id, state, settings)
-            )
+        draft_files = await _analyze_and_mark_uploaded(
+            draft_id, draft_dir, upload_dir, state, settings
+        )
 
         return ContentDraftResponse(
             draft_id=draft_id,
@@ -384,10 +413,171 @@ async def create_content_draft(
 
     except HTTPException:
         raise
+    except NoUsableMediaError as e:
+        raise fail(400, str(e))
     except Exception as e:
         # Persistent record: keep draft_dir, log the failure, and surface it.
         logger.exception("[content:%s] Upload failed", draft_id[:8])
         raise fail(500, f"Upload error: {e}")
+
+
+async def _fetch_url_into_draft(
+    draft_id: str,
+    url: str,
+    settings: Settings,
+) -> None:
+    """Background worker: pull ``url`` into the draft, then analyse it.
+
+    Runs detached from the request that started it, so every outcome has to
+    land in draft.json — that file (mirrored to the ReleaseDraft page) is the
+    only thing the client can see once the 202 has gone out.
+    """
+    staging_dir = Path(settings.staging_dir)
+    draft_dir = get_draft_dir(staging_dir, draft_id)
+    upload_dir = draft_dir / "upload"
+    fetch_dir = draft_dir / "fetch"
+
+    state = load_draft_state(draft_dir)
+    if state is None:
+        logger.error("[content:%s] Draft vanished before fetch started", draft_id[:8])
+        return
+
+    def persist_failure(message: str) -> None:
+        state.status = "upload_failed"
+        _append_upload_log(state, "error", message, error=message)
+        try:
+            save_draft_state(draft_dir, state)
+        except Exception:
+            logger.exception("[content:%s] Could not persist fetch failure", draft_id[:8])
+        _fire_diagnostics_snapshot(state)
+
+    try:
+        # Both dirs start empty: a retry into an existing draft shouldn't
+        # leave last attempt's partial file to be picked up as the media.
+        for d in (upload_dir, fetch_dir):
+            if d.exists():
+                safe_rmtree(d)
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        fetch_dir.mkdir(parents=True, exist_ok=True)
+
+        last_logged_decile = -1
+
+        async def on_progress(line: str, pct: float | None) -> None:
+            nonlocal last_logged_decile
+            if pct is None:
+                return
+            decile = int(pct) // 10
+            if decile == last_logged_decile:
+                return
+            last_logged_decile = decile
+            _append_upload_log(state, "fetching", line)
+            try:
+                save_draft_state(draft_dir, state)
+            except Exception:
+                logger.warning("[content:%s] Could not persist fetch progress",
+                               draft_id[:8])
+
+        result = await url_fetch.fetch_url_to_dir(
+            url,
+            fetch_dir,
+            max_filesize_mb=settings.max_file_size_mb,
+            timeout_seconds=settings.url_fetch_timeout_seconds,
+            progress_callback=on_progress,
+        )
+
+        if not result.success or result.file_path is None:
+            persist_failure(result.error or "Fetch failed for an unknown reason")
+            return
+
+        # Only the media file moves into upload/ — that directory is what gets
+        # pinned, and the .info.json sidecar stays behind in fetch/ where it
+        # remains available for forensics without ending up on IPFS.
+        destination = upload_dir / result.file_path.name
+        shutil.move(str(result.file_path), str(destination))
+        _append_upload_log(
+            state, "received",
+            f"Fetched {destination.name} ({destination.stat().st_size} bytes) from {url}"
+        )
+
+        if result.info:
+            extracted = url_fetch.source_metadata(result.info)
+            # User-entered metadata always wins; these only fill gaps.
+            for key, value in extracted.items():
+                state.metadata.setdefault(key, value)
+        state.metadata.setdefault("source_url", url)
+
+        save_draft_state(draft_dir, state)
+
+        await _analyze_and_mark_uploaded(
+            draft_id, draft_dir, upload_dir, state, settings
+        )
+
+    except NoUsableMediaError as e:
+        persist_failure(str(e))
+    except Exception as e:
+        logger.exception("[content:%s] URL fetch failed", draft_id[:8])
+        persist_failure(f"Fetch error: {e}")
+
+
+@router.post("/from-url", response_model=ContentDraftResponse, status_code=202)
+async def create_content_draft_from_url(
+    body: ContentFromUrlRequest,
+    x_draft_id: str = Header(alias="X-Draft-Id"),
+    wallet_address: str = Depends(require_auth),
+    settings: Settings = Depends(get_settings)
+):
+    """
+    Fetch draft content from a yt-dlp-compatible URL instead of uploading it.
+
+    Server-side mirror of ``POST /draft-content``: delivery-kid pulls the bytes
+    rather than the browser pushing them. Returns 202 as soon as the fetch is
+    accepted — a long download would otherwise sit past the reverse proxy's
+    timeout — and the client watches ``GET /draft-content/{draft_id}`` for
+    ``status`` and ``upload_log`` until it reads ``uploaded`` or
+    ``upload_failed``.
+
+    ``X-Draft-Id`` is required (unlike the multipart endpoint, which tolerates
+    its absence): the draft and its ReleaseDraft page must already exist, or a
+    fetch that fails has nowhere to report itself.
+    """
+    staging_dir = Path(settings.staging_dir)
+
+    try:
+        uuid.UUID(x_draft_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="X-Draft-Id must be a valid UUID")
+
+    draft_dir = get_draft_dir(staging_dir, x_draft_id)
+    state = load_draft_state(draft_dir)
+    if state is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Content draft not found — call /draft-content/init first"
+        )
+    if state.uploaded_by.lower() != wallet_address.lower():
+        raise HTTPException(status_code=403, detail="You do not own this draft")
+
+    try:
+        url = url_fetch.validate_fetchable_url(body.url)
+    except url_fetch.UrlNotAllowed as e:
+        # Rejected before any state change — the draft stays as it was, so the
+        # user can correct the URL and post again.
+        raise HTTPException(status_code=400, detail=str(e))
+
+    state.status = "fetching"
+    _append_upload_log(state, "fetch-start", f"Fetching {url} with yt-dlp...")
+    save_draft_state(draft_dir, state)
+
+    asyncio.create_task(_fetch_url_into_draft(x_draft_id, url, settings))
+
+    return ContentDraftResponse(
+        draft_id=x_draft_id,
+        files=[],
+        commit=get_commit(),
+        status=state.status,
+        upload_log=state.upload_log,
+        preview_status=state.preview_status,
+    )
 
 
 @router.get("/{draft_id}", response_model=ContentDraftResponse)
