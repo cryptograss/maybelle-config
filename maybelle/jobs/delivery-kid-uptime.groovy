@@ -26,7 +26,7 @@ pipelineJob('delivery-kid-uptime') {
                                 script {
                                     // Use the Python test script for comprehensive checks
                                     def result = sh(
-                                        script: '/mnt/persist/maybelle-config/delivery-kid/scripts/test-delivery-kid.py --json',
+                                        script: '/var/jenkins_home/scripts/test-delivery-kid.py --json',
                                         returnStdout: true
                                     ).trim()
 

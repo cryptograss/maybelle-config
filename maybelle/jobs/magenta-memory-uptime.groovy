@@ -32,9 +32,18 @@ Exists because the MCP server went down and stayed down through four consecutive
                                     // JSON. Letting the non-zero exit throw here would
                                     // lose the per-check detail exactly when it matters.
                                     def result = sh(
-                                        script: '/mnt/persist/maybelle-config/maybelle/scripts/test-magenta-memory.py --json || true',
+                                        script: '/var/jenkins_home/scripts/test-magenta-memory.py --json || true',
                                         returnStdout: true
                                     ).trim()
+
+                                    // ...but `|| true` also swallows the script failing to
+                                    // run at all, and readJSON's complaint about empty text
+                                    // says nothing about why. Name that case before parsing.
+                                    if (!result) {
+                                        error("FAIL: health check produced no output — the script did not run. " +
+                                              "Expected it at /var/jenkins_home/scripts/test-magenta-memory.py; " +
+                                              "ansible copies it there from maybelle/scripts/.")
+                                    }
 
                                     def json = readJSON text: result
                                     echo "Checks passed: ${json.passed}/${json.total}"
