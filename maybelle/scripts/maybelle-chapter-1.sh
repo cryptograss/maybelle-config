@@ -102,8 +102,18 @@ echo ""
 
 # Commands to run on maybelle
 REMOTE_SCRIPT=$(cat <<'OUTER_EOF'
+#!/usr/bin/env bash
 set -e
-trap 'echo ""; echo "ERROR: Script failed at line $LINENO. Press enter to exit."; read' ERR
+# Pauses read from /dev/tty rather than inherited stdin. A bare `read` depends
+# on whatever stdin tmux hands the script; when that isn't a terminal it returns
+# non-zero at once, and with `set -e` the ERR trap below fires and announces a
+# failed deploy after a run that succeeded completely. `|| true` stops a pause
+# from ever being an error.
+#
+# `2>/dev/null` goes BEFORE `</dev/tty` on purpose. Redirections apply left to
+# right, so with the usual ordering bash reports a failed /dev/tty open using
+# the stderr it still has, and the message escapes anyway.
+trap 'echo ""; echo "ERROR: Script failed at line $LINENO. Press enter to exit."; read -r _ 2>/dev/null </dev/tty || true' ERR
 
 HETZNER_VOLUME_PATH="__HETZNER_VOLUME_PATH__"
 MOUNT_POINT="__MOUNT_POINT__"
@@ -175,7 +185,7 @@ echo ""
 echo "=== Chapter 1 complete ==="
 echo "Log saved to: $LOG_FILE"
 echo "Press enter to exit"
-read
+read -r _ 2>/dev/null </dev/tty || true
 OUTER_EOF
 )
 
