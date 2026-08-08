@@ -138,6 +138,32 @@
         group: 1000
       notify: Restart Jenkins container
 
+    # Health-check scripts have to live inside the container. Only
+    # jenkins_home and a few log files are mounted — the maybelle-config
+    # checkout on the host is not — so a job pointing at
+    # /mnt/persist/maybelle-config/... resolves to nothing and the step dies
+    # with "not found". Copying them here mirrors how job .groovy files are
+    # already handled, and avoids mounting the whole config repo (vault
+    # included) into Jenkins just to reach two files.
+    - name: Create Jenkins scripts directory
+      file:
+        path: "{{ jenkins_home }}/scripts"
+        state: directory
+        mode: '0755'
+        owner: 1000
+        group: 1000
+
+    - name: Copy health-check scripts into Jenkins
+      copy:
+        src: "{{ item }}"
+        dest: "{{ jenkins_home }}/scripts/"
+        mode: '0755'
+        owner: 1000
+        group: 1000
+      loop:
+        - "{{ playbook_dir }}/../scripts/test-magenta-memory.py"
+        - "{{ playbook_dir }}/../../delivery-kid/scripts/test-delivery-kid.py"
+
     # `copy` doesn't delete files at dest that aren't in src, so removing a
     # .groovy from jobs/ leaves the old definition lingering. This task
     # ensures retired .groovy files don't get re-loaded on restart.
