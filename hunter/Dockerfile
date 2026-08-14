@@ -44,6 +44,11 @@ RUN echo "# Enable mouse support" > /etc/tmux.conf && \
 # Install Claude tools and Playwright globally (as root)
 RUN npm install -g @anthropic-ai/sdk @anthropic-ai/claude-code playwright
 
+# Install Paseo CLI (agent orchestration daemon + web UI).
+# Paseo drives whichever agent CLIs are present in the image; today that is
+# Claude Code, but the point of running it is that it is harness-agnostic.
+RUN npm install -g @getpaseo/cli
+
 # Install system dependencies for Playwright first (as root)
 RUN npx playwright install-deps
 RUN npx @modelcontextprotocol/server-puppeteer

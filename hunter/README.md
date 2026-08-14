@@ -26,6 +26,33 @@ Each team member gets isolated container with:
 - Own `.claude` directory mounted from `/opt/magenta/{username}/`
 - Shared access to PostgreSQL database
 - SSH access via key-based routing
+- A Paseo agent daemon (see below)
+
+### Paseo Agent Daemon
+
+[Paseo](https://github.com/getpaseo/paseo) is a self-hosted orchestrator that
+gives the agents a web and mobile interface instead of a terminal. It runs
+*inside* each user container, so agents get the real environment — workspace,
+MCP servers, `gh` credentials, `~/.claude` — exactly as a terminal session
+would. It is harness-agnostic (Claude Code, Codex, Copilot, OpenCode, Pi),
+which is the main reason we picked it over a first-party client.
+
+| | |
+|---|---|
+| Container port | 6767 |
+| Host port | `19090 + (ssh_port - 2222)` — justin 19090, rj 19091, skyler 19092, fibonacci 19093 |
+| Public URL | `https://paseo.{username}.hunter.cryptograss.live` |
+| Auth | `PASEO_PASSWORD`, per user, from the vault |
+| State | `/home/magent/.paseo` (on the mounted home volume, survives rebuilds) |
+| Logs | `/tmp/paseo.log` inside the container |
+
+**The daemon does not start unless `PASEO_PASSWORD` is set.** It can run
+arbitrary code on the container by design, so an unset password means no
+daemon rather than a daemon behind a default one. To enable it, add
+`paseo_password` to the vault and re-run the playbook.
+
+The host port binds to `127.0.0.1` only. Caddy is the sole public entrance,
+which is also what terminates TLS — the mobile clients require it.
 
 ## Files
 

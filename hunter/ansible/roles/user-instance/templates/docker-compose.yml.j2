@@ -12,6 +12,10 @@ services:
       # Port range: {{ user.port_range_start }}-{{ user.port_range_start + 9 }}
       # Maps to container ports 4000-4009
       - "{{ user.port_range_start }}-{{ user.port_range_start + 9 }}:4000-4009"
+      # Paseo agent daemon (19090 for justin, 19091 for rj, etc.)
+      # Bound to 127.0.0.1 deliberately: Caddy is the only public entrance,
+      # so the daemon is never directly reachable from the internet.
+      - "127.0.0.1:{{ 19090 + (user.ssh_port - 2222) }}:6767"
       # Mosh UDP port range (60000-61000 in container, mapped to unique range per user)
       - "{{ user.mosh_port_start | default(60000 + (user.ssh_port - 2222) * 100) }}-{{ user.mosh_port_start | default(60000 + (user.ssh_port - 2222) * 100) + 99 }}:60000-60099/udp"
       # NOTE: PickiPedia runs as sibling container (not inside arthel), so no port mapping here.
@@ -36,6 +40,9 @@ services:
       - POSTGRES_USER=magent
       - POSTGRES_PASSWORD={{ postgres_password }}
       - CODE_SERVER_PASSWORD={{ user.code_server_password }}
+      # Paseo web UI auth. Empty means the daemon does not start at all —
+      # see start_paseo() in container_startup.py.
+      - PASEO_PASSWORD={{ user.paseo_password | default('') }}
       - GH_TOKEN={{ user.github_token | default('') }}
       - DJANGO_SECRET_KEY={{ user.django_secret_key | default('') }}
       - SSH_PORT={{ user.ssh_port }}
