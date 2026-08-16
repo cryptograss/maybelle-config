@@ -10,4 +10,8 @@ services:
       # MariaDB socket directory — mount the directory, not the socket file,
       # so the container survives MariaDB restarts (which recreate the socket)
       - /var/run/mysqld:/var/run/mysqld
+      # Sitemap output. Lives outside the MediaWiki tree because Jenkins rsyncs
+      # deploys over {{ mediawiki_root }}; generateSitemap.php writes here and
+      # Caddy serves it at /sitemap/.
+      - {{ sitemap_dir }}:/var/www/sitemap
     restart: unless-stopped

@@ -40,7 +40,11 @@
     dest: /etc/caddy/Caddyfile
     content: |
       # PickiPedia - SSL termination and reverse proxy
-      {{ domain_name }}, {{ www_domain }} {
+      #
+      # alias_domains are served, not redirected. Bouncing them to
+      # {{ domain_name }} would defeat their entire purpose: they exist for
+      # readers on networks that block the canonical name outright.
+      {{ domain_name }}, {{ www_domain }}{% for alias in alias_domains | default([]) %}, {{ alias }}{% endfor %} {
           # Static files for the Rabbithole shell. Served same-origin
           # with the wiki so the iframe right pane (loading
           # /wiki/Release:.../Metadata) shares cookies and can call
@@ -48,6 +52,15 @@
           handle_path /rabbithole/* {
               root * /var/www/rabbithole
               try_files {path} {path}/ /shell.html
+              file_server
+          }
+
+          # XML sitemap, regenerated on a cron by the mediawiki role. Served
+          # straight off disk from outside the MediaWiki tree — Jenkins rsyncs
+          # deploys over {{ mediawiki_root }}, so anything generated in there
+          # gets swept away on the next build.
+          handle_path /sitemap/* {
+              root * {{ sitemap_dir }}
               file_server
           }
 

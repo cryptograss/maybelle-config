@@ -16,6 +16,25 @@ all:
     www_domain: www.pickipedia.xyz
     admin_email: justin@cryptograss.live
 
+    # Additional hostnames this wiki answers to, served directly rather than
+    # redirected. Some networks run content filters that read the hostname out
+    # of the TLS ClientHello and reset the connection on sight of
+    # pickipedia.xyz, while leaving other names pointing at the very same
+    # server alone; an alias is a door for readers stuck behind one of those.
+    #
+    # Each name here needs its own DNS A record pointing at this host before
+    # Caddy can get a certificate for it — ACME will fail on any that don't
+    # resolve here. The matching whitelist lives in the wiki's LocalSettings.php
+    # ($pickipediaAltHosts), which is what makes MediaWiki emit links on the
+    # alias instead of bouncing readers back to the canonical name.
+    alias_domains:
+      - pickipedia.cryptograss.live
+
+    # XML sitemap output. Deliberately outside {{ mediawiki_root }}: Jenkins
+    # rsyncs deploys over that tree and would sweep away anything generated
+    # inside it.
+    sitemap_dir: /var/www/pickipedia-sitemap
+
     # MediaWiki version
     mediawiki_version: "1.43.6"
 
