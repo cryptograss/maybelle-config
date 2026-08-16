@@ -27,6 +27,16 @@
     group: www-data
     mode: '0755'
 
+# Outside {{ mediawiki_root }} on purpose. Jenkins rsyncs each deploy over that
+# tree, so a sitemap generated inside it survives only until the next build.
+- name: Create sitemap directory
+  file:
+    path: "{{ sitemap_dir }}"
+    state: directory
+    owner: www-data
+    group: www-data
+    mode: '0755'
+
 # NOTE: LocalSettings.php is deployed by Jenkins from the pickipedia repo.
 # This ansible role handles secrets in LocalSettings.local.php.
 
@@ -80,6 +90,39 @@
     name: "mediawiki job queue"
     minute: "*/5"
     job: "/usr/local/bin/mediawiki-jobs.sh"
+
+- name: Create sitemap generator script (runs inside Docker container)
+  copy:
+    dest: /usr/local/bin/mediawiki-sitemap.sh
+    mode: '0755'
+    content: |
+      #!/bin/bash
+      # Regenerate the XML sitemap so search engines can find all articles
+      # without having to crawl their way to them link by link.
+      #
+      # --compress no: the corpus is small enough that gzip buys nothing, and
+      # plain .xml avoids Caddy having to get Content-Encoding right on a
+      # static file.
+      # --skip-redirects: a redirect is not a page anyone should land on from
+      # search results.
+      # --identifier: fixes the index filename as sitemap-index-{{ db_name }}.xml,
+      # which is what robots.txt in the pickipedia repo points at. Change one,
+      # change the other.
+      set -euo pipefail
+      docker exec pickipedia-wiki php /var/www/html/maintenance/generateSitemap.php \
+          --fspath /var/www/sitemap \
+          --urlpath /sitemap/ \
+          --server "https://{{ domain_name }}" \
+          --identifier "{{ db_name }}" \
+          --compress no \
+          --skip-redirects 2>&1 | logger -t mediawiki-sitemap
+
+- name: Schedule sitemap regeneration
+  ansible.builtin.cron:
+    name: "mediawiki sitemap"
+    minute: "17"
+    hour: "4"
+    job: "/usr/local/bin/mediawiki-sitemap.sh"
 
 - name: Set permissions on MediaWiki directories
   file:
