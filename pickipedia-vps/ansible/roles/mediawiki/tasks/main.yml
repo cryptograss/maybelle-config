@@ -138,7 +138,8 @@
     mode: '0755'
     content: |
       #!/bin/bash
-      # Rebuild the combined bluegrass podcast feed served at /firehose.xml.
+      # Rebuild the combined bluegrass podcast feed served at
+      # /{{ firehose_file }}.
       #
       # Runs on the host rather than in the wiki container: this is a plain
       # HTTP fetch of thirteen RSS feeds and needs nothing MediaWiki has.
@@ -149,7 +150,7 @@
       set -euo pipefail
 
       SCRIPT="{{ mediawiki_root }}/tools/podcast-firehose.py"
-      OUT="{{ firehose_dir }}/firehose.xml"
+      OUT="{{ firehose_dir }}/{{ firehose_file }}"
 
       if [ ! -f "$SCRIPT" ]; then
           echo "firehose: $SCRIPT not found; has the wiki been deployed?" >&2

@@ -35,9 +35,16 @@ all:
     # inside it.
     sitemap_dir: /var/www/pickipedia-sitemap
 
-    # Combined podcast feed, served at https://{{ domain_name }}/firehose.xml.
+    # Combined podcast feed, served at https://{{ domain_name }}/{{ firehose_file }}.
     # Outside the MediaWiki tree for the same reason as the sitemap.
+    #
+    # The filename is a variable because two things have to agree on it — the
+    # Caddy route and the script that writes the file — and a subscriber URL
+    # that silently stops resolving is a bad way to find out they drifted.
+    # Named for what it is: this wiki may well publish other feeds, and
+    # "firehose.xml" at the site root would not say which one.
     firehose_dir: /var/www/pickipedia-firehose
+    firehose_file: bluegrass-podcast-firehose.xml
 
     # How often to re-fetch the thirteen upstream podcast feeds. Every six
     # hours is well inside how often any of them publish, and keeps us to
