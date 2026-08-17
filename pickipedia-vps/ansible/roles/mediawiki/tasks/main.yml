@@ -37,6 +37,14 @@
     group: www-data
     mode: '0755'
 
+- name: Create podcast firehose directory
+  file:
+    path: "{{ firehose_dir }}"
+    state: directory
+    owner: www-data
+    group: www-data
+    mode: '0755'
+
 # NOTE: LocalSettings.php is deployed by Jenkins from the pickipedia repo.
 # This ansible role handles secrets in LocalSettings.local.php.
 
@@ -123,6 +131,56 @@
     minute: "17"
     hour: "4"
     job: "/usr/local/bin/mediawiki-sitemap.sh"
+
+- name: Create podcast firehose script
+  copy:
+    dest: /usr/local/bin/pickipedia-firehose.sh
+    mode: '0755'
+    content: |
+      #!/bin/bash
+      # Rebuild the combined bluegrass podcast feed served at
+      # /{{ firehose_file }}.
+      #
+      # Runs on the host rather than in the wiki container: this is a plain
+      # HTTP fetch of thirteen RSS feeds and needs nothing MediaWiki has.
+      #
+      # The script is deployed with the wiki tree by Jenkins — see the Copy
+      # Tools stage in cryptograss/pickipedia's Jenkinsfile. If it is missing,
+      # the wiki has not been deployed since that stage was added.
+      set -euo pipefail
+
+      SCRIPT="{{ mediawiki_root }}/tools/podcast-firehose.py"
+      OUT="{{ firehose_dir }}/{{ firehose_file }}"
+
+      if [ ! -f "$SCRIPT" ]; then
+          echo "firehose: $SCRIPT not found; has the wiki been deployed?" >&2
+          exit 1
+      fi
+
+      # Build to a temporary file and move it into place. An upstream feed that
+      # hangs or dies partway would otherwise leave a truncated XML file being
+      # served to every subscriber until the next run; this way the last good
+      # feed keeps serving and only the log records the failure.
+      TMP="$(mktemp)"
+      trap 'rm -f "$TMP"' EXIT
+
+      if python3 "$SCRIPT" "$TMP"; then
+          mv "$TMP" "$OUT"
+          trap - EXIT
+          chown www-data:www-data "$OUT"
+          chmod 0644 "$OUT"
+          echo "firehose: rebuilt $OUT"
+      else
+          echo "firehose: generation failed, keeping the previous feed" >&2
+          exit 1
+      fi
+
+- name: Schedule podcast firehose regeneration
+  ansible.builtin.cron:
+    name: "pickipedia podcast firehose"
+    minute: "9"
+    hour: "{{ firehose_cron_hour }}"
+    job: "/usr/local/bin/pickipedia-firehose.sh 2>&1 | logger -t pickipedia-firehose"
 
 - name: Set permissions on MediaWiki directories
   file:
