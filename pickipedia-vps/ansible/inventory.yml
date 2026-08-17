@@ -35,6 +35,15 @@ all:
     # inside it.
     sitemap_dir: /var/www/pickipedia-sitemap
 
+    # Combined podcast feed, served at https://{{ domain_name }}/firehose.xml.
+    # Outside the MediaWiki tree for the same reason as the sitemap.
+    firehose_dir: /var/www/pickipedia-firehose
+
+    # How often to re-fetch the thirteen upstream podcast feeds. Every six
+    # hours is well inside how often any of them publish, and keeps us to
+    # ~50 requests a day per feed's host rather than being a nuisance.
+    firehose_cron_hour: "*/6"
+
     # MediaWiki version
     mediawiki_version: "1.43.6"
 
