@@ -64,6 +64,15 @@
               file_server
           }
 
+          # Combined podcast feed. A single file rather than a directory, so
+          # `handle` and not `handle_path` — the request path is the filename
+          # and stripping it would leave nothing to serve.
+          handle /firehose.xml {
+              root * {{ firehose_dir }}
+              header Content-Type "application/rss+xml; charset=utf-8"
+              file_server
+          }
+
           handle {
               reverse_proxy 127.0.0.1:8080
           }
