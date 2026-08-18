@@ -51,6 +51,20 @@ all:
     # ~50 requests a day per feed's host rather than being a nuisance.
     firehose_cron_hour: "*/6"
 
+    # Hard ceiling on one firehose run, enforced by cron rather than by the
+    # script, so it holds even when the script is the thing that is stuck.
+    #
+    # The tools have their own guards — a per-podcast budget for runaway
+    # patterns, a size cap on responses, a socket timeout per fetch — and this
+    # sits underneath all of them. Its job is not to catch the failure we
+    # thought of; it is to make sure that whatever we did not think of costs one
+    # run rather than a process that never exits and a second one every six
+    # hours after that.
+    #
+    # Thirteen feeds at a 30s socket timeout is 390s worst case if every host
+    # hangs, which has never happened; a real run takes about twenty seconds.
+    firehose_timeout_seconds: 600
+
     # MediaWiki version
     mediawiki_version: "1.43.6"
 
