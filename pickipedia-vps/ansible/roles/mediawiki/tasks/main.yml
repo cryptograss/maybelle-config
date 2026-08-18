@@ -180,7 +180,9 @@
     name: "pickipedia podcast firehose"
     minute: "9"
     hour: "{{ firehose_cron_hour }}"
-    job: "/usr/local/bin/pickipedia-firehose.sh 2>&1 | logger -t pickipedia-firehose"
+    job: >-
+      timeout {{ firehose_timeout_seconds }} /usr/local/bin/pickipedia-firehose.sh
+      2>&1 | logger -t pickipedia-firehose
 
 - name: Set permissions on MediaWiki directories
   file:
