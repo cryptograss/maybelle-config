@@ -16,6 +16,10 @@ from ..models.draft import DraftFile, DraftState, DraftResponse, FinalizeRequest
 from ..services import analyze, ipfs, transcode
 from ..services.fsutil import safe_rmtree
 
+# Read uploads off the wire in 8MB slices so peak memory stays flat
+# regardless of file size.
+UPLOAD_CHUNK_BYTES = 8 * 1024 * 1024
+
 router = APIRouter(prefix="/draft-album", tags=["drafts"])
 
 
@@ -113,8 +117,16 @@ async def create_draft(
         for file in files:
             file_path = upload_dir / file.filename
             with open(file_path, "wb") as f:
-                content = await file.read()
-                f.write(content)
+                # Stream in fixed-size chunks. A bare await file.read() pulls
+                # the whole upload into RAM at once, which OOM-kills the
+                # worker on long videos (the box has 4GB and shares it with
+                # kubo). Starlette has already spooled the body to a temp
+                # file by this point, so chunking here costs nothing.
+                while True:
+                    chunk = await file.read(UPLOAD_CHUNK_BYTES)
+                    if not chunk:
+                        break
+                    f.write(chunk)
 
         # Analyze audio files
         analyses = await analyze.analyze_directory(upload_dir)

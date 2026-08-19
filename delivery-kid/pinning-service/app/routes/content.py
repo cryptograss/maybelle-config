@@ -23,6 +23,10 @@ from ..services.coconut import submit_to_coconut, save_job, load_job
 from ..services.fsutil import safe_rmtree
 from ..services.pickipedia_client import snapshot_diagnostics_for_state_async
 
+# Read uploads off the wire in 8MB slices so peak memory stays flat
+# regardless of file size.
+UPLOAD_CHUNK_BYTES = 8 * 1024 * 1024
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/draft-content", tags=["content"])
@@ -318,8 +322,16 @@ async def create_content_draft(
         for file in files:
             file_path = upload_dir / file.filename
             with open(file_path, "wb") as f:
-                content = await file.read()
-                f.write(content)
+                # Stream in fixed-size chunks. A bare await file.read() pulls
+                # the whole upload into RAM at once, which OOM-kills the
+                # worker on long videos (the box has 4GB and shares it with
+                # kubo). Starlette has already spooled the body to a temp
+                # file by this point, so chunking here costs nothing.
+                while True:
+                    chunk = await file.read(UPLOAD_CHUNK_BYTES)
+                    if not chunk:
+                        break
+                    f.write(chunk)
             _append_upload_log(state, "received",
                                f"Saved {file.filename} ({file_path.stat().st_size} bytes)")
         save_draft_state(draft_dir, state)
@@ -386,8 +398,12 @@ async def create_content_draft(
         raise
     except Exception as e:
         # Persistent record: keep draft_dir, log the failure, and surface it.
+        # Include the exception class: several exceptions that show up here
+        # (MemoryError chief among them) stringify to the empty string, which
+        # produced a useless bare "Upload error:" in the diagnostics panel.
         logger.exception("[content:%s] Upload failed", draft_id[:8])
-        raise fail(500, f"Upload error: {e}")
+        detail = str(e) or "(no message)"
+        raise fail(500, f"Upload error: {type(e).__name__}: {detail}")
 
 
 @router.get("/{draft_id}", response_model=ContentDraftResponse)
