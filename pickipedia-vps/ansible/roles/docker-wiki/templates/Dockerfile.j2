@@ -35,6 +35,25 @@ RUN apt-get update && apt-get install -y \
 RUN a2enmod rewrite headers
 RUN sed -i '/<Directory \/var\/www\/>/,/<\/Directory>/ s/AllowOverride None/AllowOverride All/' /etc/apache2/apache2.conf
 
+# Let encoded slashes through to MediaWiki.
+#
+# Wiki subpage titles contain "/" — "Grass Talk Radio/GTR-190" and so on — and
+# the REST API percent-encodes that as %2F in the path. Apache's default is to
+# reject any request whose path contains an encoded slash, returning its own
+# 404 before PHP is ever reached. The effect is that every subpage on the wiki
+# can be created through the API but never read or edited again, which makes
+# bot-maintained subpages a one-way trip.
+#
+# NoDecode passes the sequence through still encoded, leaving MediaWiki to
+# decode it — which is what it expects. Plain "On" would decode it in Apache
+# and reintroduce the path ambiguity the default is there to prevent.
+#
+# Set in the vhost as well as the server config on purpose: virtual hosts do
+# not inherit this directive, so the server-level setting alone has no effect
+# on requests that a vhost handles, which here is all of them.
+RUN printf '\n# See Dockerfile: subpage titles need encoded slashes preserved.\nAllowEncodedSlashes NoDecode\n' >> /etc/apache2/apache2.conf \
+    && sed -i 's|<VirtualHost \*:80>|<VirtualHost *:80>\n\tAllowEncodedSlashes NoDecode|' /etc/apache2/sites-available/000-default.conf
+
 # PHP configuration matching current production settings
 RUN { \
     echo 'memory_limit = 256M'; \
