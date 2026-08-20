@@ -376,9 +376,25 @@ async def webhook_coconut(request: Request, settings: Settings = Depends(get_set
                 job["error"] = "Failed to pin HLS output to IPFS"
 
         elif event_type == "job.failed":
-            logger.error("[%s] Coconut job failed: %s", job_id, event.get("error"))
+            # Coconut's job.failed webhook has been arriving with no "error"
+            # field, which rendered as a bare "Unknown error" on the draft page
+            # and told us nothing. Log the entire event body so the next
+            # failure is diagnosable, and try the other plausible carriers
+            # before falling back to a placeholder that at least says why it
+            # is a placeholder.
+            logger.error(
+                "[%s] Coconut job failed. Full event body: %s",
+                job_id, json.dumps(event, default=str),
+            )
+            err = (
+                event.get("error")
+                or event.get("message")
+                or event.get("error_message")
+                or (event.get("data") or {}).get("error")
+                or "Coconut reported job.failed with no error field"
+            )
             job["status"] = "failed"
-            job["error"] = event.get("error", "Unknown error")
+            job["error"] = err
             job["failedAt"] = datetime.now(timezone.utc).isoformat()
 
         save_job(staging_dir, job_id, job)

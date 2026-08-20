@@ -76,7 +76,11 @@ def _get_site():
             return _site
         try:
             import mwclient
-            site = mwclient.Site(host, scheme=scheme)
+            # PickiPedia runs with $wgScriptPath empty, so its API lives at
+            # /api.php. mwclient defaults to path='/w/', which makes every
+            # request hit /w/api.php and 404 at login — silently disabling
+            # every wiki snapshot this module exists to write.
+            site = mwclient.Site(host, scheme=scheme, path="/")
             site.login(user, password)
             _site = site
             logger.info("pickipedia_client: authenticated to %s as %s", host, user)
