@@ -54,6 +54,41 @@ daemon rather than a daemon behind a default one. To enable it, add
 The host port binds to `127.0.0.1` only. Caddy is the sole public entrance,
 which is also what terminates TLS — the mobile clients require it.
 
+#### Seeing each other's sessions
+
+`paseo_password` is one shared secret across all users, the same way
+`code_server_password` already is. Each of us runs our own daemon, but anyone
+can open anyone else's URL and watch those sessions live — no separate shared
+instance needed.
+
+Per-user daemons rather than one shared one, because a single daemon would run
+every agent as the same `magent` in one container: one home directory, one
+`~/.claude` auth, one git identity, one workspace. It would also break
+memory-lane's attribution, since the watcher maps
+`/opt/magenta/<user>/home/.claude/projects` per user — every conversation would
+land under whoever's container hosted the daemon.
+
+If we later want a genuine org-level view — all daemons in one dashboard, plus
+GitHub/Slack/Discord triggers — that's [Paseo Hub](https://paseo.sh/docs/hub),
+self-hostable with `npx @getpaseo/hub` against our existing PostgreSQL. Note
+that Hub's shared view is trigger runs and daemon status; live session viewing
+is still per-daemon.
+
+#### Two non-obvious daemon settings
+
+Both are set in the compose template and both are required here:
+
+- `PASEO_LISTEN=0.0.0.0:6767` — the daemon defaults to `127.0.0.1`, which
+  Docker port mapping cannot reach, since mapping forwards to the container's
+  interface rather than its loopback.
+- `PASEO_HOSTNAMES` — the daemon validates the `Host` header against an
+  allowlist defaulting to `localhost`, so Caddy's domain must be named or every
+  proxied request is rejected.
+
+The daemon is started with `paseo daemon start --web-ui`. Bare `paseo` runs the
+interactive flow that prompts about the relay; relay consent only happens under
+`paseo daemon pair --relay`, which we never call — Caddy is our transport.
+
 ## Files
 
 - `Dockerfile` - Main user container image

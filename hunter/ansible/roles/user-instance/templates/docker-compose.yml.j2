@@ -40,9 +40,18 @@ services:
       - POSTGRES_USER=magent
       - POSTGRES_PASSWORD={{ postgres_password }}
       - CODE_SERVER_PASSWORD={{ user.code_server_password }}
-      # Paseo web UI auth. Empty means the daemon does not start at all —
+      # Paseo web UI auth. Deliberately the SAME secret for every user (like
+      # code_server_password above) so any of us can open anyone's daemon and
+      # watch their sessions. Empty means the daemon does not start at all —
       # see start_paseo() in container_startup.py.
       - PASEO_PASSWORD={{ user.paseo_password | default('') }}
+      # Bind all interfaces inside the container: Docker port mapping forwards
+      # to the container interface, not its loopback, and Paseo defaults to
+      # 127.0.0.1.
+      - PASEO_LISTEN=0.0.0.0:6767
+      # The daemon rejects requests whose Host header isn't allowlisted, so
+      # Caddy's domain has to be named explicitly.
+      - PASEO_HOSTNAMES=paseo.{{ user.name }}.{{ base_domain }},localhost
       - GH_TOKEN={{ user.github_token | default('') }}
       - DJANGO_SECRET_KEY={{ user.django_secret_key | default('') }}
       - SSH_PORT={{ user.ssh_port }}

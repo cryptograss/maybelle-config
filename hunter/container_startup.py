@@ -580,13 +580,28 @@ def start_paseo():
     Path(paseo_home).mkdir(parents=True, exist_ok=True)
     run_command(f"chown -R magent:magent {paseo_home}", check=False)
 
+    # Two daemon defaults have to be overridden to work behind Docker + Caddy:
+    #   listen: defaults to 127.0.0.1:6767. Docker port mapping forwards to
+    #     the container's interface, not its loopback, so a loopback-bound
+    #     daemon is unreachable from the host no matter how it's mapped.
+    #   hostnames: the daemon validates the Host header against an allowlist
+    #     that defaults to localhost, so proxied requests arriving with
+    #     Caddy's domain are rejected unless that domain is allowed.
+    listen = os.environ.get('PASEO_LISTEN', '0.0.0.0:6767')
+    hostnames = os.environ.get('PASEO_HOSTNAMES', 'localhost')
+
+    # `paseo daemon start` is the headless entrypoint. Bare `paseo` runs the
+    # interactive flow that prompts about enabling the relay; relay consent
+    # only happens under `paseo daemon pair --relay`, which we never call --
+    # Caddy is our transport, so the relay stays off.
     logger.info("Starting Paseo daemon...")
     run_command(
         f"PASEO_PASSWORD='{password}' PASEO_HOME='{paseo_home}' "
-        f"nohup paseo > /tmp/paseo.log 2>&1 &",
+        f"PASEO_LISTEN='{listen}' PASEO_HOSTNAMES='{hostnames}' "
+        f"nohup paseo daemon start --web-ui > /tmp/paseo.log 2>&1 &",
         user='magent'
     )
-    logger.info("✓ Paseo daemon started on port 6767 (logs: /tmp/paseo.log)")
+    logger.info(f"✓ Paseo daemon started on {listen} (logs: /tmp/paseo.log)")
 
 
 def start_services():
