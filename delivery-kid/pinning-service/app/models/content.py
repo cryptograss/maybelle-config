@@ -101,7 +101,8 @@ class ContentFinalizeRequest(BaseModel):
     transcode_hls: bool = Field(default=False, description="Transcode video to HLS before pinning (legacy, use transcoding_strategy)")
     transcoding_strategy: str = Field(
         default="auto",
-        description="Transcoding strategy for video: 'auto' (Coconut first, local fallback), 'coconut', 'local', 'none'"
+        description="Transcoding strategy for video: 'auto' (local AV1/Opus), "
+                    "'local' (same), 'coconut' (opt-in cloud), 'none' (pin as-is)"
     )
     subsequent_to: Optional[str] = Field(default=None, description="CID this content supersedes")
     transcoding_qualities: Optional[list[int]] = Field(

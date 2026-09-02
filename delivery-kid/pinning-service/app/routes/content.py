@@ -735,16 +735,25 @@ async def _submit_preview_transcode(
 
 
 def _should_use_coconut(request: ContentFinalizeRequest, settings: Settings) -> bool:
-    """Determine if we should try Coconut cloud transcoding."""
-    strategy = request.transcoding_strategy
-    if strategy == "none":
-        return False
-    if strategy == "local":
-        return False
-    if strategy == "coconut":
+    """Determine if we should try Coconut cloud transcoding.
+
+    Coconut is now opt-in only. It used to be what "auto" reached for first,
+    on the assumption that AV1 was too expensive to encode here — that is no
+    longer true (SVT-AV1 at preset 10 encodes 1080p faster than realtime on
+    this box, and faster than the libx264 profile it replaced).
+
+    Leaving Coconut as the default was also actively harmful: once it accepts
+    a job, finalize_sse_generator returns, the job's later failure arrives by
+    webhook, and nothing re-dispatches to local. So an "auto" finalize that
+    Coconut accepted and then failed had no fallback at all — twelve minutes
+    of waiting and an unreadable error, which is exactly what happened to
+    drafts 3fc94d4e and 28b76266. Making local the default removes that
+    trapdoor rather than patching it.
+    """
+    if request.transcoding_strategy == "coconut":
         return bool(settings.coconut_api_key)
-    # "auto" — use Coconut if available, otherwise local
-    return bool(settings.coconut_api_key)
+    # "auto", "local" and anything else transcode locally.
+    return False
 
 
 def _should_transcode_video(request: ContentFinalizeRequest) -> bool:
