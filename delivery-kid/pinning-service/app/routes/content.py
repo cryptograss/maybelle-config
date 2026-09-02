@@ -956,11 +956,59 @@ async def finalize_sse_generator(
             })
 
             hls_dir = output_dir / "hls"
-            result = await transcode.transcode_video_to_hls(
-                src_path, hls_dir,
-                trim_start=request.trim_start_seconds,
-                trim_end=request.trim_end_seconds,
+
+            # Stream the encoder's progress to the page instead of going quiet
+            # for the length of the encode. transcode_video_to_hls reports via
+            # callback, but a callback cannot yield from this generator, so it
+            # hands updates to a queue that we drain while the encode runs.
+            progress_q: asyncio.Queue = asyncio.Queue()
+
+            async def _on_transcode_progress(message: str, pct):
+                await progress_q.put((message, pct))
+
+            transcode_task = asyncio.create_task(
+                transcode.transcode_video_to_hls(
+                    src_path, hls_dir,
+                    progress_callback=_on_transcode_progress,
+                    trim_start=request.trim_start_seconds,
+                    trim_end=request.trim_end_seconds,
+                )
             )
+
+            while True:
+                getter = asyncio.create_task(progress_q.get())
+                done, _pending = await asyncio.wait(
+                    {getter, transcode_task},
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                if getter in done:
+                    message, pct = getter.result()
+                    yield await send_event("progress", {
+                        "stage": "transcode",
+                        "message": message,
+                        # The encode occupies the 10-60 band of the overall
+                        # finalize bar; pinning takes it the rest of the way.
+                        "progress": 10 + int((pct or 0) * 0.5),
+                        # Tells the client this supersedes the previous line
+                        # rather than adding to it — otherwise an hour-long
+                        # encode leaves hundreds of near-identical log rows.
+                        "live": True,
+                    })
+                    continue
+                getter.cancel()
+                break
+
+            # Anything queued between the last drain and the task finishing.
+            while not progress_q.empty():
+                message, pct = progress_q.get_nowait()
+                yield await send_event("progress", {
+                    "stage": "transcode",
+                    "message": message,
+                    "progress": 10 + int((pct or 0) * 0.5),
+                    "live": True,
+                })
+
+            result = await transcode_task
 
             if not result.success:
                 state.status = "finalize_failed"

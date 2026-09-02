@@ -3,6 +3,7 @@
 import asyncio
 import json
 import shutil
+import time
 from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Optional, Callable, Awaitable
@@ -31,6 +32,80 @@ HLS_SEGMENT_SECONDS = 6
 AV1_PRESET = 10          # 0 = slowest/best .. 13 = fastest
 AV1_CRF = 35             # SVT-AV1's CRF scale is not x264's; 35 is a sane streaming default
 OPUS_BITRATE = "128k"
+
+# Progress reporting. ffmpeg emits a block every ~0.5s at 1080p; forwarding all
+# of them would flood the SSE stream and the on-page log, so updates are
+# throttled to one update every this many seconds. The consumer is expected
+# to treat these as replacing the previous line, not accumulating.
+PROGRESS_MIN_INTERVAL_SECONDS = 2.0
+FFMPEG_STDERR_TAIL_LINES = 40
+
+
+def _out_time_seconds(fields: dict) -> Optional[float]:
+    """Seconds of output written so far, from an ffmpeg -progress block.
+
+    ffmpeg reports `out_time_us` and, for historical reasons, an `out_time_ms`
+    that is also microseconds. Prefer the honestly-named one and fall back to
+    the formatted timestamp.
+    """
+    for key in ("out_time_us", "out_time_ms"):
+        raw = fields.get(key)
+        if raw and raw not in ("N/A", "-"):
+            try:
+                return int(raw) / 1_000_000
+            except ValueError:
+                pass
+    stamp = fields.get("out_time")
+    if stamp and stamp not in ("N/A", "-"):
+        try:
+            hours, minutes, seconds = stamp.split(":")
+            return int(hours) * 3600 + int(minutes) * 60 + float(seconds)
+        except ValueError:
+            pass
+    return None
+
+
+def _clock(seconds: float) -> str:
+    """Compact human duration: 45s, 6m12s, 1h04m."""
+    seconds = max(0, int(seconds))
+    if seconds < 60:
+        return f"{seconds}s"
+    if seconds < 3600:
+        return f"{seconds // 60}m{seconds % 60:02d}s"
+    return f"{seconds // 3600}h{(seconds % 3600) // 60:02d}m"
+
+
+def _format_progress(done: Optional[float], total: float,
+                     fields: dict, elapsed: float) -> str:
+    """One readable line describing where the encode has got to.
+
+    Deliberately front-loads the percentage: it is the thing someone staring
+    at a stalled-looking page actually wants to know.
+    """
+    if done is None or total <= 0:
+        return f"Encoding — {_clock(elapsed)} elapsed"
+
+    pct = max(0.0, min(100.0, done / total * 100.0))
+    parts = [f"Encoding {pct:.0f}%", f"{_clock(done)} of {_clock(total)}"]
+
+    speed_raw = (fields.get("speed") or "").rstrip("x")
+    speed = None
+    try:
+        speed = float(speed_raw)
+    except ValueError:
+        pass
+
+    if speed and speed > 0:
+        parts.append(f"{speed:.2f}x")
+        remaining = (total - done) / speed
+        if remaining > 1:
+            parts.append(f"~{_clock(remaining)} left")
+    elif elapsed > 5 and done > 0:
+        # No speed field yet — extrapolate from wall clock instead of going quiet.
+        remaining = elapsed * (total - done) / done
+        parts.append(f"~{_clock(remaining)} left")
+
+    return " · ".join(parts)
 
 
 def _frame_rate(probe: Optional[dict]) -> float:
@@ -211,7 +286,7 @@ async def transcode_album_directory(
 async def transcode_video_to_hls(
     input_path: Path,
     output_dir: Path,
-    progress_callback: Optional[Callable[[str], Awaitable[None]]] = None,
+    progress_callback: Optional[Callable[[str, Optional[float]], Awaitable[None]]] = None,
     trim_start: Optional[float] = None,
     trim_end: Optional[float] = None,
 ) -> TranscodeResult:
@@ -248,7 +323,7 @@ async def transcode_video_to_hls(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     if progress_callback:
-        await progress_callback(f"Transcoding {input_path.name} to AV1/Opus HLS")
+        await progress_callback(f"Transcoding {input_path.name} to AV1/Opus HLS", 0.0)
 
     try:
         # Build ffmpeg HLS command
@@ -266,6 +341,12 @@ async def transcode_video_to_hls(
 
         cmd = [
             "ffmpeg", "-y",
+            # Machine-readable progress on stdout. Without this the encode is
+            # a black box: for an hour-long source the caller sees "started"
+            # and then nothing until it finishes, which is indistinguishable
+            # from a hang.
+            "-nostats",
+            "-progress", "pipe:1",
         ]
         # Trim: -ss before -i for fast seek, -to after -i for end time
         if trim_start is not None:
@@ -302,17 +383,91 @@ async def transcode_video_to_hls(
             str(master_playlist),
         ])
 
+        # How much media we expect to encode, so percentages mean something.
+        total_seconds = float((source_probe or {}).get("format", {}).get("duration", 0) or 0)
+        if trim_start is not None or trim_end is not None:
+            start = trim_start or 0.0
+            end = trim_end if trim_end is not None else (total_seconds or 0.0)
+            total_seconds = max(0.0, end - start)
+
         process = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
+            stderr=asyncio.subprocess.PIPE,
         )
 
-        _, stderr = await process.communicate()
+        # stderr must be drained concurrently: if its pipe buffer fills while
+        # we are busy reading stdout, ffmpeg blocks on write and the whole
+        # encode deadlocks. Keep only the tail — ffmpeg is chatty and we only
+        # ever want the last lines for an error message.
+        stderr_tail: list[str] = []
+
+        async def _drain_stderr() -> None:
+            assert process.stderr is not None
+            while True:
+                line = await process.stderr.readline()
+                if not line:
+                    break
+                stderr_tail.append(line.decode(errors="replace").rstrip())
+                if len(stderr_tail) > FFMPEG_STDERR_TAIL_LINES:
+                    del stderr_tail[0]
+
+        drainer = asyncio.create_task(_drain_stderr())
+
+        fields: dict[str, str] = {}
+        last_emit = 0.0
+        last_pct = -1.0
+        started = time.monotonic()
+
+        assert process.stdout is not None
+        while True:
+            raw = await process.stdout.readline()
+            if not raw:
+                break
+            line = raw.decode(errors="replace").strip()
+            key, sep, value = line.partition("=")
+            if not sep:
+                continue
+            fields[key.strip()] = value.strip()
+
+            # ffmpeg terminates each progress block with progress=continue|end
+            if key.strip() != "progress":
+                continue
+
+            done_seconds = _out_time_seconds(fields)
+            pct = None
+            if total_seconds > 0 and done_seconds is not None:
+                pct = max(0.0, min(100.0, done_seconds / total_seconds * 100.0))
+
+            # Purely time-throttled. An earlier version also emitted on every
+            # whole percent of movement, which fires once a second on short
+            # clips and would put ~1500 lines on the page for an hour-long one.
+            # Always emit ffmpeg's final block, throttle or not. Otherwise the
+            # last thing the page shows is whatever percentage happened to fall
+            # on a tick — "96% · ~2s left" — and it never visibly finishes.
+            final = fields.get("progress") == "end"
+
+            now = time.monotonic()
+            if progress_callback and (final or (now - last_emit) >= PROGRESS_MIN_INTERVAL_SECONDS):
+                last_emit = now
+                if pct is not None:
+                    last_pct = pct
+                await progress_callback(
+                    _format_progress(done_seconds, total_seconds, fields, now - started),
+                    pct,
+                )
+
+            fields.clear()
+
+        await process.wait()
+        await drainer
 
         if process.returncode != 0:
-            error_msg = stderr.decode() if stderr else "Unknown ffmpeg error"
-            return TranscodeResult(success=False, error=error_msg)
+            error_msg = "\n".join(stderr_tail) if stderr_tail else "ffmpeg failed with no stderr output"
+            return TranscodeResult(
+                success=False,
+                error=f"ffmpeg exited {process.returncode}: {error_msg}",
+            )
 
         if not master_playlist.exists():
             return TranscodeResult(success=False, error="master.m3u8 not created")
