@@ -73,6 +73,16 @@
               file_server
           }
 
+          # How the nightly podcast import went. Served so that the cron-health
+          # job on maybelle can see it: cron output on this box goes to syslog,
+          # and syslog on a VPS nobody logs into is where the firehose sat
+          # broken for days with an error nobody read.
+          handle_path /status/* {
+              root * {{ status_dir }}
+              header Content-Type "text/plain; charset=utf-8"
+              file_server
+          }
+
           handle {
               reverse_proxy 127.0.0.1:8080
           }

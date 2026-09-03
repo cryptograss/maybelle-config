@@ -235,6 +235,59 @@ pipelineJob('cron-health') {
                                 }
                             }
                         }
+
+                        // Runs on the pickipedia VPS rather than here, so the
+                        // signal comes over HTTP instead of off a local log.
+                        // A held run — the change budget refusing an unusually
+                        // large edit — is deliberately not a failure here; it
+                        // wants a person to look, and it will keep saying so
+                        // until one does.
+                        stage('pickipedia podcast import') {
+                            steps {
+                                catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
+                                    sh """
+                                        STATUS_URL="https://pickipedia.xyz/status/podcast-import.txt"
+                                        STALE_HOURS=30
+
+                                        echo "=== pickipedia podcast import ==="
+                                        BODY=\$(curl -fsS --max-time 30 "\$STATUS_URL" 2>&1) || {
+                                            echo "WARN: no status yet at \$STATUS_URL"
+                                            echo "      (expected until the import has run once)"
+                                            exit 0
+                                        }
+                                        echo "\$BODY"
+
+                                        LAST_TIME=\$(echo "\$BODY" | sed -n 's/^run: //p' | tail -1)
+                                        if [ -z "\$LAST_TIME" ]; then
+                                            echo "FAIL: status file has no run timestamp"
+                                            exit 1
+                                        fi
+                                        LAST_EPOCH=\$(date -d "\$LAST_TIME" +%s 2>/dev/null || echo 0)
+                                        AGE_H=\$(( (\$(date +%s) - LAST_EPOCH) / 3600 ))
+                                        echo "Last run: \$LAST_TIME (\$AGE_H h ago)"
+
+                                        if [ "\$AGE_H" -gt "\$STALE_HOURS" ]; then
+                                            echo "FAIL: stale (>\$STALE_HOURS h) — the daily import has not run"
+                                            exit 1
+                                        fi
+
+                                        case "\$BODY" in
+                                            *"result: OK"*)
+                                                echo "OK" ;;
+                                            *"result: HELD"*)
+                                                echo "FAIL: held for review — more pages would change than the"
+                                                echo "      budget allows. This is the guard working. Look at the"
+                                                echo "      breakdown above, and if it is intended, run the import"
+                                                echo "      by hand with a raised --max-changes."
+                                                exit 1 ;;
+                                            *)
+                                                echo "FAIL: import did not report success"
+                                                exit 1 ;;
+                                        esac
+                                    """
+                                }
+                            }
+                        }
                     }
 
                     post {

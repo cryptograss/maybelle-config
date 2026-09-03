@@ -65,6 +65,37 @@ all:
     # hangs, which has never happened; a real run takes about twenty seconds.
     firehose_timeout_seconds: 600
 
+    # Podcast episode import. Reads the same thirteen feeds, parses the guest
+    # names out of episode titles, and writes one wiki page per episode.
+    #
+    # Runs here rather than on Jenkins deliberately. The bot's credentials
+    # belong somewhere Magent cannot reach — the whole point of
+    # HearThatWhistleBlow being a separate identity is that it is operated by
+    # people, and that stops being true the moment its password sits on a box
+    # an agent has a shell on. See User:HearThatWhistleBlow.
+    #
+    # Once a day is plenty. Podcasts publish weekly at best, and unlike the
+    # firehose — which subscribers pull from — nothing downstream is waiting on
+    # this within the hour.
+    import_cron_hour: "4"
+    import_cron_minute: "17"
+    import_timeout_seconds: 3600
+
+    # How many pages one unattended run may change before it stops and asks.
+    #
+    # A normal night changes nothing, or the handful of episodes published
+    # since yesterday. A pattern edited too broadly on the wiki would change
+    # every episode of that show. The importer never deletes, so those pages
+    # would outlive the pattern that made them — which is why this is a
+    # ceiling rather than something to clean up afterwards.
+    import_max_changes: 50
+
+    # Where the import leaves a note saying how it went, served over HTTP so
+    # that the cron-health job on maybelle can see it. Cron output goes to
+    # syslog on this box, and syslog on a VPS nobody logs into is where the
+    # firehose sat broken for days with a ModuleNotFoundError nobody read.
+    status_dir: /var/www/pickipedia-status
+
     # MediaWiki version
     mediawiki_version: "1.43.6"
 

@@ -45,6 +45,14 @@
     group: www-data
     mode: '0755'
 
+- name: Create podcast import status directory
+  file:
+    path: "{{ status_dir }}"
+    state: directory
+    owner: www-data
+    group: www-data
+    mode: '0755'
+
 # NOTE: LocalSettings.php is deployed by Jenkins from the pickipedia repo.
 # This ansible role handles secrets in LocalSettings.local.php.
 
@@ -183,6 +191,98 @@
     job: >-
       timeout {{ firehose_timeout_seconds }} /usr/local/bin/pickipedia-firehose.sh
       2>&1 | logger -t pickipedia-firehose
+
+# The import bot's credentials. Root-only and in a file rather than on the
+# cron line, because a command line is readable from ps by every other process
+# on the box. Use a MediaWiki BotPassword rather than the account's own login,
+# so the grant can be narrowed to editing and revoked on its own.
+- name: Install podcast import credentials
+  copy:
+    dest: /etc/pickipedia-podcast-import.env
+    owner: root
+    group: root
+    mode: '0600'
+    content: |
+      PICKIPEDIA_BOT_USER={{ podcast_import_bot_user }}
+      PICKIPEDIA_BOT_PASSWORD={{ podcast_import_bot_password }}
+  no_log: true
+
+- name: Create podcast import script
+  copy:
+    dest: /usr/local/bin/pickipedia-podcast-import.sh
+    mode: '0755'
+    content: |
+      #!/bin/bash
+      # Parse guest names out of podcast episode titles and write one wiki page
+      # per episode, as HearThatWhistleBlow.
+      #
+      # Deployed with the wiki tree by Jenkins — see the Copy Tools stage in
+      # cryptograss/pickipedia's Jenkinsfile.
+      set -euo pipefail
+
+      TOOLS="{{ mediawiki_root }}/tools"
+      STATUS="{{ status_dir }}/podcast-import.txt"
+
+      # shellcheck disable=SC1091
+      . /etc/pickipedia-podcast-import.env
+      export PICKIPEDIA_BOT_USER PICKIPEDIA_BOT_PASSWORD
+
+      note() {
+          printf '%s\n' "$*" | tee -a "$STATUS.new" >&2
+      }
+
+      : > "$STATUS.new"
+      note "run: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+      if [ ! -f "$TOOLS/podcast-episodes.py" ]; then
+          note "result: FAILED - tools missing; has the wiki been deployed?"
+          mv "$STATUS.new" "$STATUS"
+          exit 1
+      fi
+
+      EPISODES="$(mktemp)"
+      trap 'rm -f "$EPISODES" "$STATUS.new"' EXIT
+
+      # Extraction reads the feed list and the guest patterns from the wiki. If
+      # it cannot reach the wiki it falls back to the checked-in copy, and the
+      # importer refuses to write from that — a stale pattern would not fail,
+      # it would quietly write the wrong thing to every page it touched.
+      if ! python3 "$TOOLS/podcast-episodes.py" --json --with-wikitext > "$EPISODES" 2>>"$STATUS.new"; then
+          note "result: FAILED - extraction"
+          mv "$STATUS.new" "$STATUS"
+          exit 1
+      fi
+
+      if python3 "$TOOLS/podcast-episodes-to-wiki.py" --write \
+              --max-changes {{ import_max_changes }} \
+              < "$EPISODES" >>"$STATUS.new" 2>&1; then
+          note "result: OK"
+      else
+          # Over the change budget is not a fault. It is the guard doing its
+          # job, and it wants a person to look rather than a retry.
+          if grep -q 'refusing to write' "$STATUS.new"; then
+              note "result: HELD - change budget exceeded, see above"
+          else
+              note "result: FAILED - import"
+          fi
+          mv "$STATUS.new" "$STATUS"
+          chmod 0644 "$STATUS"
+          exit 1
+      fi
+
+      mv "$STATUS.new" "$STATUS"
+      chmod 0644 "$STATUS"
+      trap - EXIT
+      rm -f "$EPISODES"
+
+- name: Schedule podcast episode import
+  ansible.builtin.cron:
+    name: "pickipedia podcast import"
+    minute: "{{ import_cron_minute }}"
+    hour: "{{ import_cron_hour }}"
+    job: >-
+      timeout {{ import_timeout_seconds }} /usr/local/bin/pickipedia-podcast-import.sh
+      2>&1 | logger -t pickipedia-podcast-import
 
 - name: Set permissions on MediaWiki directories
   file:
