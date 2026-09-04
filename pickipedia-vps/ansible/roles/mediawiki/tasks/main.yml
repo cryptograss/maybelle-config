@@ -192,6 +192,27 @@
       timeout {{ firehose_timeout_seconds }} /usr/local/bin/pickipedia-firehose.sh
       2>&1 | logger -t pickipedia-firehose
 
+# Checked separately from the task that uses them, because that task is no_log
+# and a no_log task cannot tell you what went wrong. Without this, a missing
+# vault key fails as an opaque "output has been hidden", which is a poor way to
+# learn that you forgot to add something.
+- name: Check that the import bot's credentials are in the vault
+  ansible.builtin.assert:
+    that:
+      - podcast_import_bot_user is defined
+      - podcast_import_bot_user | length > 0
+      - podcast_import_bot_password is defined
+      - podcast_import_bot_password | length > 0
+    quiet: true
+    fail_msg: >-
+      The podcast import bot's credentials are missing from the vault. Add
+      these two keys to secrets/vault.yml
+      (ansible-vault edit secrets/vault.yml):
+      podcast_import_bot_user, podcast_import_bot_password.
+      The user is of the form "HearThatWhistleBlow@episodes" — the account
+      name, then the BotPassword label. See User:HearThatWhistleBlow on the
+      wiki.
+
 # The import bot's credentials. Root-only and in a file rather than on the
 # cron line, because a command line is readable from ps by every other process
 # on the box. Use a MediaWiki BotPassword rather than the account's own login,
