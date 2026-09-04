@@ -108,7 +108,28 @@
           respond /health "OK" 200
       }
     mode: '0644'
-  notify: Restart Caddy
+
+# Validated and reloaded here rather than through a handler.
+#
+# A handler fires only when the config task reports a change, and ansible
+# flushes handlers at the *end* of a play. So a run that writes a new Caddyfile
+# and then fails later leaves the file correct and the running server stale —
+# and the next run sees no change, notifies nothing, and never reloads. The
+# config and the process disagree, and no amount of re-running fixes it.
+#
+# That happened, and it cost an afternoon of wondering why a route that was
+# plainly in the file was not being served. A graceful reload costs nothing and
+# has no downtime, so doing it every time is simpler than reasoning about when
+# it is needed.
+- name: Check the Caddy configuration is valid
+  ansible.builtin.command:
+    cmd: caddy validate --config /etc/caddy/Caddyfile
+  changed_when: false
+
+- name: Reload Caddy
+  ansible.builtin.systemd:
+    name: caddy
+    state: reloaded
 
 - name: Start and enable Caddy
   systemd:
