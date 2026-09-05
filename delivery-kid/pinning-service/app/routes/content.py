@@ -159,14 +159,41 @@ def _fire_diagnostics_snapshot(state: ContentDraftState) -> None:
 
     Called at every terminal-state transition so the upload/finalize/preview
     log trail survives a delivery-kid rebuild. Swallows scheduling errors
-    (e.g. no running loop) so a wiki blip never masks the underlying
-    upload outcome the caller is about to surface.
+    (e.g. no running loop) so a wiki blip never masks the underlying upload
+    outcome the caller is about to surface.
+
+    "Fire and forget" previously meant the task's result was discarded, so a
+    snapshot that returned False — missing credentials, a failing wiki call —
+    was indistinguishable from one that worked. It was months before anyone
+    noticed there were no diagnostics sub-pages on the wiki at all. The
+    outcome is still not awaited, but it is no longer thrown away.
     """
+    draft_id = state.draft_id
+
+    def _report(task: "asyncio.Task") -> None:
+        try:
+            if task.cancelled():
+                return
+            exc = task.exception()
+            if exc is not None:
+                logger.error("[content:%s] Diagnostics snapshot raised: %r",
+                             draft_id[:8], exc)
+            elif task.result() is False:
+                logger.error(
+                    "[content:%s] Diagnostics snapshot did not write. The wiki "
+                    "copy of this draft's logs is the only one that survives a "
+                    "delivery-kid rebuild; check PICKIPEDIA_BOT_PASSWORD and the "
+                    "bot's edit rights.", draft_id[:8])
+        except Exception:
+            logger.exception("[content:%s] Failed to report snapshot outcome",
+                             draft_id[:8])
+
     try:
-        asyncio.create_task(snapshot_diagnostics_for_state_async(state))
+        task = asyncio.create_task(snapshot_diagnostics_for_state_async(state))
+        task.add_done_callback(_report)
     except RuntimeError:
         logger.debug("[content:%s] No running loop; skipping diagnostics snapshot",
-                     state.draft_id[:8])
+                     draft_id[:8])
 
 
 class NoUsableMediaError(Exception):

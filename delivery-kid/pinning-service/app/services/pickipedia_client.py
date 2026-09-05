@@ -19,6 +19,7 @@ import asyncio
 import json
 import logging
 import os
+import time
 from datetime import datetime, timezone
 from threading import Lock
 from typing import Optional
@@ -32,9 +33,18 @@ logger = logging.getLogger(__name__)
 _site = None
 _site_lock = Lock()
 
-# Tracks whether we've already complained about missing creds, so the log
-# warns exactly once per process rather than on every snapshot attempt.
-_warned_missing_creds = False
+# When credentials are missing we complain, but not on every snapshot — that
+# would drown the log. Warning exactly once per process was the previous
+# behaviour and it was too quiet: this container runs for weeks, so a single
+# line at startup scrolls away and the module then fails in silence forever.
+# Re-warn periodically instead, so "this has never worked" stays visible.
+_last_missing_creds_warning = 0.0
+MISSING_CREDS_WARN_INTERVAL = 3600
+
+# Consecutive failures, so a persistent outage reads differently from a blip.
+# Every snapshot failing since startup is a configuration problem, not a
+# network one, and should say so.
+_consecutive_failures = 0
 
 
 def _parse_host(url: str) -> tuple[str, str]:
@@ -48,24 +58,23 @@ def _parse_host(url: str) -> tuple[str, str]:
 
 def _get_site():
     """Return a logged-in mwclient.Site, or None if creds aren't configured."""
-    global _site, _warned_missing_creds
+    global _site, _last_missing_creds_warning
     if _site is not None:
         return _site
 
     user = os.environ.get("PICKIPEDIA_BOT_USER", "Magent@magent")
     password = os.environ.get("PICKIPEDIA_BOT_PASSWORD")
     if not password:
-        # Warn once per process. Previously this branch was silent and the
-        # snapshot path would no-op without explanation — we found it the
-        # hard way after a deploy left PICKIPEDIA_BOT_PASSWORD empty in the
-        # container env. One log line makes the silent failure visible.
-        if not _warned_missing_creds:
-            logger.warning(
-                "pickipedia_client: PICKIPEDIA_BOT_PASSWORD is empty — wiki "
-                "snapshots will silently no-op. Set the env var (sourced "
-                "from vault) to enable diagnostics-page snapshots."
+        now = time.monotonic()
+        if now - _last_missing_creds_warning > MISSING_CREDS_WARN_INTERVAL:
+            _last_missing_creds_warning = now
+            logger.error(
+                "pickipedia_client: PICKIPEDIA_BOT_PASSWORD is empty, so no "
+                "diagnostics snapshot has been written. The wiki copy is the "
+                "only record of a draft's logs that survives a delivery-kid "
+                "rebuild — without it, a draft whose staging is cleaned up "
+                "leaves nothing behind. Set the env var from vault."
             )
-            _warned_missing_creds = True
         return None
 
     url = os.environ.get("PICKIPEDIA_URL", "https://pickipedia.xyz")
@@ -123,16 +132,31 @@ def snapshot_diagnostics(draft_id: str, payload: dict) -> bool:
     content = json.dumps(payload, indent=2, default=str)
     summary = f"diagnostics snapshot — status={payload.get('status', 'unknown')}"
 
+    global _consecutive_failures
     try:
         page = site.pages[title]
         existing = page.text() if page.exists else None
         if existing == content:
+            _consecutive_failures = 0
             return True
         page.save(content, summary=summary)
+        _consecutive_failures = 0
         logger.info("pickipedia_client: snapshotted %s (%d bytes)", title, len(content))
         return True
     except Exception as e:
+        _consecutive_failures += 1
         logger.error("pickipedia_client: snapshot failed for %s: %s", title, e)
+        # A run of failures is a configuration problem wearing the costume of
+        # a transient one. Say which it looks like, because the difference
+        # decides whether anyone goes and looks.
+        if _consecutive_failures in (3, 10) or _consecutive_failures % 50 == 0:
+            logger.error(
+                "pickipedia_client: %d consecutive snapshot failures — this is "
+                "not a blip. Diagnostics sub-pages are not being written at "
+                "all, so any draft whose staging is cleaned up will leave no "
+                "log trail behind. Check the bot's credentials and edit rights.",
+                _consecutive_failures,
+            )
         return False
 
 
