@@ -64,6 +64,51 @@ def save_draft_state(draft_dir: Path, state: ContentDraftState) -> None:
 
 
 # Caps on per-draft log lengths (keep draft.json small).
+# A draft directory is removed once its contents are safely pinned, which
+# means the directory cannot answer "was this ever published?" afterwards.
+# Without an answer, a retry of an already-successful finalize reports
+# "Content draft not found" — which reads as data loss and invites the user
+# to re-upload something that is already on IPFS. This ledger is the smallest
+# thing that survives the cleanup and can say otherwise.
+FINALIZED_LEDGER_DIRNAME = "finalized"
+
+
+def _finalized_ledger_path(staging_dir: Path, draft_id: str) -> Path:
+    directory = staging_dir / FINALIZED_LEDGER_DIRNAME
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory / f"{draft_id}.json"
+
+
+def record_finalized(staging_dir: Path, draft_id: str, cid: str,
+                     title: str | None = None) -> None:
+    """Note that this draft was published, and to which CID.
+
+    Deliberately best-effort and never raising: this is called on the success
+    path and must not be able to turn a completed publish into a failure.
+    """
+    try:
+        _finalized_ledger_path(staging_dir, draft_id).write_text(json.dumps({
+            "draft_id": draft_id,
+            "cid": cid,
+            "title": title,
+            "finalized_at": datetime.now(timezone.utc).isoformat(),
+        }, indent=2))
+    except Exception:
+        logger.exception("[content:%s] Failed to write finalized ledger entry",
+                         draft_id[:8])
+
+
+def load_finalized(staging_dir: Path, draft_id: str) -> dict | None:
+    """Return the ledger entry for a published draft, or None."""
+    path = staging_dir / FINALIZED_LEDGER_DIRNAME / f"{draft_id}.json"
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text())
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
 UPLOAD_LOG_MAX = 100
 FINALIZE_LOG_MAX = 200
 
@@ -1084,7 +1129,38 @@ async def finalize_sse_generator(
 
         gateway_url = f"{settings.ipfs_gateway_url}/ipfs/{result.cid}"
 
+        # Record the publish durably BEFORE telling anyone about it.
+        #
+        # Everything after this line can fail: the SSE event may not reach a
+        # client that has navigated away, the browser may never get to write
+        # final_cid onto the ReleaseDraft page, the bot may not run. Until now
+        # the CID lived only in that event and in whatever the browser did
+        # next — so any of those failures left a successfully pinned release
+        # with no record anywhere, while the source bytes had already been
+        # deleted as "safely published". The user was then told "Content draft
+        # not found" and reasonably concluded the upload was gone.
+        #
+        # Three records, cheapest first, none of which depend on the client:
+        #   draft.json      — survives until the directory is cleaned up
+        #   finalized/      — survives the directory being cleaned up
+        #   wiki snapshot   — survives delivery-kid's storage entirely
         state.status = "finalized"
+        state.final_cid = result.cid
+        state.finalized_at = datetime.now(timezone.utc)
+        _append_finalize_log(state, "pinned", f"Pinned to IPFS as {result.cid}",
+                             progress=95)
+        try:
+            save_draft_state(draft_dir, state)
+        except Exception:
+            logger.exception("[content:%s] Pin succeeded but draft.json write failed",
+                             draft_id[:8])
+        record_finalized(Path(settings.staging_dir), draft_id, result.cid, request.title)
+        _fire_diagnostics_snapshot(state)
+
+        # Set before the yield, not after: if the client has gone away the
+        # send below raises, and the pin is no less successful for that.
+        pin_success = True
+
         yield await send_event("complete", {
             "cid": result.cid,
             "gateway_url": gateway_url,
@@ -1093,7 +1169,6 @@ async def finalize_sse_generator(
             "file_type": request.file_type,
             "subsequent_to": request.subsequent_to,
         })
-        pin_success = True
 
     except Exception as e:
         logger.exception("[content:%s] Finalize failed", draft_id[:8])
@@ -1146,6 +1221,20 @@ async def finalize_content_draft(
 
     state = load_draft_state(draft_dir)
     if state is None:
+        # A missing draft directory has two very different meanings, and
+        # conflating them is how a successful publish came to look like data
+        # loss. Check the ledger before claiming anything is absent.
+        prior = load_finalized(staging_dir, draft_id)
+        if prior:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"This draft was already finalized as {prior['cid']}"
+                    + (f" on {prior['finalized_at']}" if prior.get("finalized_at") else "")
+                    + ". Its source was removed once the pin succeeded, so there is"
+                      " nothing to re-upload — the release is published."
+                ),
+            )
         raise HTTPException(status_code=404, detail="Content draft not found")
 
     # No ownership check — require_finalize_auth already ensures
@@ -1155,3 +1244,4 @@ async def finalize_content_draft(
         finalize_sse_generator(draft_id, request, draft_dir, state, settings),
         media_type="text/event-stream"
     )
+
