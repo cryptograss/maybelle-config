@@ -56,11 +56,39 @@ def _parse_host(url: str) -> tuple[str, str]:
     return url.rstrip("/"), "https"
 
 
-def _get_site():
+def _site_is_usable(site) -> bool:
+    """Whether a cached Site still has a live login.
+
+    mwclient keeps a `logged_in` flag and refuses to edit without it. The
+    session behind it expires, and this module cached the Site in a module
+    global forever — so after a few hours every save failed with
+
+        By default, mwclient protects you from accidentally editing
+        without being logged in.
+
+    and kept failing until the container was restarted. Observed on
+    delivery-kid: authenticated 01:18, saving fine; by 21:14 every snapshot
+    rejected, for the rest of the day.
+    """
+    if site is None:
+        return False
+    try:
+        return bool(getattr(site, "logged_in", False))
+    except Exception:
+        return False
+
+
+def _get_site(force_relogin: bool = False):
     """Return a logged-in mwclient.Site, or None if creds aren't configured."""
     global _site, _last_missing_creds_warning
-    if _site is not None:
-        return _site
+    if force_relogin:
+        _site = None
+    elif _site is not None:
+        if _site_is_usable(_site):
+            return _site
+        logger.warning("pickipedia_client: cached session is no longer logged "
+                       "in; re-authenticating")
+        _site = None
 
     user = os.environ.get("PICKIPEDIA_BOT_USER", "Magent@magent")
     password = os.environ.get("PICKIPEDIA_BOT_PASSWORD")
@@ -81,7 +109,7 @@ def _get_site():
     host, scheme = _parse_host(url)
 
     with _site_lock:
-        if _site is not None:
+        if _site is not None and _site_is_usable(_site):
             return _site
         try:
             import mwclient
@@ -133,16 +161,34 @@ def snapshot_diagnostics(draft_id: str, payload: dict) -> bool:
     summary = f"diagnostics snapshot — status={payload.get('status', 'unknown')}"
 
     global _consecutive_failures
-    try:
+
+    def _attempt(site) -> bool:
         page = site.pages[title]
         existing = page.text() if page.exists else None
         if existing == content:
-            _consecutive_failures = 0
             return True
         page.save(content, summary=summary)
-        _consecutive_failures = 0
         logger.info("pickipedia_client: snapshotted %s (%d bytes)", title, len(content))
         return True
+
+    try:
+        try:
+            ok = _attempt(site)
+        except Exception as first:
+            # mwclient's logged_in flag can still read true after the server
+            # has dropped the session, in which case the flag check upstream
+            # passes and the save fails anyway. One forced re-login and retry
+            # covers that; anything failing twice is a real problem.
+            if "logged in" not in str(first).lower():
+                raise
+            logger.warning("pickipedia_client: save refused as logged-out; "
+                           "re-authenticating and retrying once")
+            site = _get_site(force_relogin=True)
+            if site is None:
+                raise
+            ok = _attempt(site)
+        _consecutive_failures = 0
+        return ok
     except Exception as e:
         _consecutive_failures += 1
         logger.error("pickipedia_client: snapshot failed for %s: %s", title, e)
