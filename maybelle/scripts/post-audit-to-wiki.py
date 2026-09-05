@@ -29,6 +29,7 @@ import re
 import subprocess
 import sys
 import time
+import urllib.request
 from pathlib import Path
 
 import mwclient
@@ -42,16 +43,36 @@ STATE_DIR = Path(os.environ.get("AUDIT_STATE_DIR", "/var/lib/delivery-kid-audit"
 JSON_OUTPUT_PATH = STATE_DIR / "audit-latest.json"
 FINGERPRINT_PATH = STATE_DIR / "last-fingerprint"
 
-# Ethereum merge constants — matches the formula used by the Special:Deliver* pages.
-MERGE_BLOCK = 15537394
-MERGE_TIMESTAMP = 1663224179
-SLOT_TIME = 12
+# Block heights name the audit pages this script creates, so getting them
+# wrong produces page titles that point at blocks which do not exist — which
+# is exactly what was happening. Twelve seconds is the *slot* time, not the
+# block time: slots get missed, so the realised average is 12.044s, and
+# extrapolating from the Merge at exactly 12s had drifted about 75,000 blocks
+# — some ten days — into the future. See pickipedia#112.
+#
+# Ask the chain when it will answer; otherwise extrapolate from a recent
+# verified block rather than from 2022, which keeps the error in minutes.
+ETH_RPC_URL = "https://ethereum-rpc.publicnode.com"
+RPC_TIMEOUT = 5
+# publicnode returns 403 to Python's default urllib user agent. Without this
+# header the call fails every time and silently degrades to the estimate —
+# which is exactly the sort of quiet fallback that let the old drift go
+# unnoticed for months.
+RPC_USER_AGENT = "pickipedia-audit/1.0 (+https://pickipedia.xyz)"
+ANCHOR_BLOCK = 25000000
+ANCHOR_TIMESTAMP = 1777637363  # block 25,000,000 — 2026-05-01T12:09:23Z
+SECONDS_PER_BLOCK = 12.044
 
 # Summary lines whose non-zero counts indicate something needs human attention.
 # Abandoned drafts are deliberate state and don't count. Dead wiki drafts
 # accumulate as users start-and-leave, so they aren't urgent on their own —
 # include if you decide otherwise.
 PROBLEM_LABELS = (
+    # Content that appears to be pinned but was never written down. This is
+    # the most urgent thing the audit can find: the previous behaviour was to
+    # report the two halves separately and recommend deleting the wiki page,
+    # which was the only surviving pointer to a published release.
+    "Unrecorded publishes",
     "Orphan pins",
     "Missing pins",
     "Orphan seeds",
@@ -77,7 +98,40 @@ _CID_RE = re.compile(
 
 
 def current_blockheight() -> int:
-    return MERGE_BLOCK + (int(time.time()) - MERGE_TIMESTAMP) // SLOT_TIME
+    """The current block, from the chain if possible, else estimated.
+
+    Never raises: a cron job that posts an audit must not fail because a
+    public RPC endpoint was slow. A stale-by-minutes estimate is a far better
+    outcome than no audit page at all.
+    """
+    try:
+        request = urllib.request.Request(
+            ETH_RPC_URL,
+            data=json.dumps({
+                "jsonrpc": "2.0", "method": "eth_blockNumber", "params": [], "id": 1,
+            }).encode(),
+            headers={
+                "Content-Type": "application/json",
+                "User-Agent": RPC_USER_AGENT,
+            },
+        )
+        with urllib.request.urlopen(request, timeout=RPC_TIMEOUT) as resp:
+            result = json.loads(resp.read().decode()).get("result")
+        block = int(str(result), 16)
+        # A node answering with something behind our last known-good anchor is
+        # not to be trusted with naming a permanent page.
+        if block > ANCHOR_BLOCK:
+            return block
+        print(f"  [eth rpc returned an implausible block {block}; estimating]",
+              file=sys.stderr)
+    except Exception as e:
+        # Say so. A permanently failing RPC should not look identical to a
+        # working one, or the estimate quietly becomes the only code path.
+        print(f"  [eth rpc unavailable ({type(e).__name__}); estimating]",
+              file=sys.stderr)
+    return ANCHOR_BLOCK + round(
+        (int(time.time()) - ANCHOR_TIMESTAMP) / SECONDS_PER_BLOCK
+    )
 
 
 def run_audit() -> tuple[str, int]:

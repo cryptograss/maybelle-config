@@ -110,10 +110,21 @@ def fetch_releaselist() -> list[dict]:
         return json.loads(resp.read().decode()).get("releases", [])
 
 
-def fetch_pins() -> set[str]:
-    """Return set of lowercase recursive pin CIDs on the delivery-kid IPFS node."""
+def fetch_pins() -> dict[str, str]:
+    """Recursive pins on the delivery-kid IPFS node, as {lowercase: as-published}.
+
+    Comparisons here are case-insensitive because Release page titles are not
+    reliably cased, but CIDs *are* case-sensitive — a lowercased CID is not a
+    valid address and any wiki link built from one is a redlink. Keeping both
+    forms lets us compare loosely and print correctly.
+    """
     out = ssh(DK_HOST, "docker exec ipfs ipfs pin ls --type=recursive -q 2>/dev/null")
-    return {line.strip().lower() for line in out.splitlines() if line.strip()}
+    pins = {}
+    for line in out.splitlines():
+        cid = line.strip()
+        if cid:
+            pins[cid.lower()] = cid
+    return pins
 
 
 def fetch_seeding_dirs() -> list[str]:
@@ -177,7 +188,7 @@ def human_age(epoch: int) -> str:
     return f"{delta // 86400}d"
 
 
-def audit_pins(releases: list[dict], pins: set[str], seeding: list[str]) -> dict:
+def audit_pins(releases: list[dict], pins: dict[str, str], seeding: list[str]) -> dict:
     """Cross-reference Release pages against IPFS pins + seeding dirs.
 
     Captures per-release state (pinned, seeded, pinned_on) so the summary can
@@ -192,7 +203,8 @@ def audit_pins(releases: list[dict], pins: set[str], seeding: list[str]) -> dict
         if pin == IPFS_EMPTY_DIR:
             continue
         if pin not in release_cids:
-            orphan_pins.append(pin)
+            # Print the CID as published, not as compared — see fetch_pins.
+            orphan_pins.append(pins[pin] if isinstance(pins, dict) else pin)
 
     missing_pins, deleted, retired = [], [], []
     for r in releases:
@@ -325,6 +337,118 @@ def audit_drafts(
     return {"orphan_drafts": orphan_drafts, "stalled_drafts": stalled_drafts,
             "dead_wiki_drafts": dead_wiki_drafts, "finalized_gone": finalized_gone,
             "abandoned_drafts": abandoned_drafts}
+
+
+def fetch_pin_metadata(cid: str) -> Optional[dict]:
+    """Read metadata.json out of a pinned directory, if it has one.
+
+    Finalization writes this file alongside the media, so it is the only thing
+    tying a pin back to what it was meant to be.
+    """
+    out = ssh(DK_HOST, f"docker exec ipfs ipfs cat /ipfs/{cid}/metadata.json 2>/dev/null")
+    if not out.strip():
+        return None
+    try:
+        parsed = json.loads(out)
+        return parsed if isinstance(parsed, dict) else None
+    except json.JSONDecodeError:
+        return None
+
+
+def _normalise_title(title: str) -> str:
+    return " ".join(str(title or "").lower().split())
+
+
+def correlate_unrecorded_publishes(orphan_pins: list[str],
+                                   dead_wiki_drafts: list[str]) -> list[dict]:
+    """Pair orphan pins with drafts that published without recording it.
+
+    The reasoning that makes this worth doing:
+
+    Staging for a draft is only ever removed after a *successful* pin. So a
+    wiki draft with no staging and no "pinned to IPFS" record did not fail —
+    it succeeded, and then lost its paperwork before anything wrote the CID
+    down. Its content is almost certainly sitting in the orphan pin list.
+
+    Until now the audit reported both halves of that and drew no line between
+    them: an orphan pin appeared, a draft went dead, and the recommendation
+    was "safe to delete from wiki" — pointing at the only surviving reference
+    to a published, seeding, sixty-six-minute video. Reconstructing the link
+    by hand is what recovered it; doing it here costs one `ipfs cat` per
+    orphan pin.
+
+    Returns [{cid, draft, title, confidence}, ...], strongest first.
+    """
+    if not orphan_pins or not dead_wiki_drafts:
+        return []
+
+    draft_titles = {}
+    for draft in dead_wiki_drafts:
+        try:
+            parsed = yaml.safe_load(page_content(f"ReleaseDraft:{draft}")) or {}
+            content = parsed.get("content") or {}
+            title = content.get("title") if isinstance(content, dict) else None
+            if title:
+                draft_titles.setdefault(_normalise_title(title), []).append(draft)
+        except Exception:
+            continue
+
+    matches = []
+    unmatched_pins = []
+    for cid in orphan_pins:
+        meta = fetch_pin_metadata(cid)
+        if not meta:
+            unmatched_pins.append(cid)
+            continue
+        key = _normalise_title(meta.get("title", ""))
+        if key and key in draft_titles:
+            for draft in draft_titles[key]:
+                matches.append({
+                    "cid": cid,
+                    "draft": draft,
+                    "title": meta.get("title"),
+                    "uploaded_by": meta.get("uploaded_by"),
+                    "confidence": "title match",
+                })
+        else:
+            unmatched_pins.append(cid)
+
+    # Even without a title match the coincidence is worth stating: a dead
+    # draft means a pin happened, so an orphan pin alongside one is a
+    # candidate rather than a curiosity.
+    matched_drafts = {m["draft"] for m in matches}
+    for draft in dead_wiki_drafts:
+        if draft not in matched_drafts and unmatched_pins:
+            matches.append({
+                "cid": None,
+                "draft": draft,
+                "title": None,
+                "uploaded_by": None,
+                "confidence": "unmatched — staging was cleaned, so this draft "
+                              "probably published; check the orphan pins",
+            })
+
+    matches.sort(key=lambda m: 0 if m["confidence"] == "title match" else 1)
+    return matches
+
+
+def print_unrecorded_publishes(matches: list[dict]):
+    if not matches:
+        return
+    print(f"  UNRECORDED PUBLISHES ({len(matches)}) — content that appears to be "
+          f"pinned but was never written down:")
+    for m in matches:
+        if m["cid"]:
+            print(f"    [[Release:{m['cid']}|{m['cid']}]]")
+            print(f"      looks like [[ReleaseDraft:{m['draft']}]] — "
+                  f"\"{m['title']}\" ({m['confidence']})")
+            if m.get("uploaded_by"):
+                print(f"      uploaded by {m['uploaded_by']}")
+        else:
+            print(f"    [[ReleaseDraft:{m['draft']}]] — {m['confidence']}")
+    print("    Staging is only removed after a successful pin, so these drafts")
+    print("    did not fail — they published and lost the record. Do NOT delete")
+    print("    these pages; write the CID back onto the draft instead.")
 
 
 def print_section(title: str):
@@ -468,6 +592,17 @@ def main():
     draft_result = audit_drafts(wiki_draft_ids, staging_drafts, abandoned)
     print_draft_audit(draft_result, draft_count, staging_count)
 
+    # Both halves of the "published but unrecorded" story are now known: an
+    # orphan pin exists, and a draft went dead. Neither alone means much;
+    # together they are the signature of a finalize that succeeded and lost
+    # its record. Correlate them rather than leaving a reader to notice.
+    unrecorded = correlate_unrecorded_publishes(
+        pin_result["orphan_pins"], draft_result["dead_wiki_drafts"]
+    )
+    if unrecorded:
+        print_section("Possibly Published But Unrecorded")
+        print_unrecorded_publishes(unrecorded)
+
     print_section("Blue Railroad Chain Data vs Releases")
     # Flush our own stdout buffer before launching a subprocess that writes
     # to the same pipe — otherwise, when stdout is captured (not a TTY),
@@ -522,6 +657,7 @@ def main():
     print(f"  Stalled drafts:      {len(draft_result['stalled_drafts'])}")
     print(f"  Dead wiki drafts:    {len(draft_result['dead_wiki_drafts'])}")
     print(f"  Abandoned drafts:    {len(draft_result['abandoned_drafts'])}")
+    print(f"  Unrecorded publishes: {len(unrecorded)}")
 
     cleanup_pending = sum(
         1 for r in pin_result["deleted"] + pin_result["retired"]
