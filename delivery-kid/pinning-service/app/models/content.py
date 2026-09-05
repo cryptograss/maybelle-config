@@ -47,6 +47,14 @@ class ContentDraftState(BaseModel):
     #   finalized       — pin successful
     #   finalize_failed — finalize SSE errored; draft dir kept for forensics
     status: str = Field(default="uploaded", description="Draft lifecycle status")
+    # Set the moment the pin succeeds, before anything downstream can fail.
+    # Previously the CID existed only inside the "complete" SSE event and
+    # whatever the browser subsequently wrote to the wiki, so a dropped
+    # connection or a closed tab between pinning and that write lost the
+    # only record of a successful publish — while the source bytes had
+    # already been deleted.
+    final_cid: Optional[str] = Field(default=None, description="IPFS CID of the finalized release")
+    finalized_at: Optional[datetime] = Field(default=None, description="When the pin succeeded")
     # Upload-stage progress trail (init, file received, analyzed, errored).
     upload_log: list[dict] = Field(default_factory=list,
                                    description="Upload-stage progress entries: [{ts, phase, message, error?}]")
