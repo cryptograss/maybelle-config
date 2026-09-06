@@ -249,8 +249,12 @@ class _FakeWiki:
         return _Pages()
 
 
-class TestDiagnosticsActuallyReachTheWiki:
-    """Assert the outcome, not the call.
+class TestOnThePipe:
+    """Does it come out the far end?
+
+    Named for the same reason as delivery-kid and Blue Railroad: it says
+    what the thing is for. Every other test here asks whether something was
+    put *into* the pipe. These ask whether anything came out.
 
     Every other test in this file mocks mwclient and checks that
     snapshot_diagnostics invoked save() with the right title. All of them
