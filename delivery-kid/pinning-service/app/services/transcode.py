@@ -2,11 +2,14 @@
 
 import asyncio
 import json
+import logging
 import shutil
 import time
 from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Optional, Callable, Awaitable
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -32,6 +35,12 @@ HLS_SEGMENT_SECONDS = 6
 AV1_PRESET = 10          # 0 = slowest/best .. 13 = fastest
 AV1_CRF = 35             # SVT-AV1's CRF scale is not x264's; 35 is a sane streaming default
 OPUS_BITRATE = "128k"
+
+# A still shown before playback starts. Lives inside the pinned directory so
+# it shares the release's CID, and being a JPEG it renders on browsers that
+# cannot decode the video itself.
+POSTER_FILENAME = "poster.jpg"
+POSTER_MAX_OFFSET_SECONDS = 60.0
 
 # Progress reporting. ffmpeg emits a block every ~0.5s at 1080p; forwarding all
 # of them would flood the SSE stream and the on-page log, so updates are
@@ -131,6 +140,58 @@ def _frame_rate(probe: Optional[dict]) -> float:
             except (ValueError, ZeroDivisionError):
                 continue
     return 30.0
+
+
+async def _write_poster(input_path: Path, output_dir: Path,
+                        total_seconds: float,
+                        trim_start: Optional[float] = None) -> Optional[str]:
+    """Pull a representative still out of the video, next to the HLS output.
+
+    Without one, a player shows an empty black rectangle until someone presses
+    play — and on a browser that cannot decode AV1 it shows an empty black
+    rectangle forever. A JPEG decodes everywhere, so even a viewer who cannot
+    play the video sees what it is.
+
+    Because the poster lands inside the directory that gets pinned, it travels
+    with the release under the same CID. Costs perhaps 150KB against a video
+    of several hundred megabytes.
+
+    Failure is non-fatal and deliberately so: a missing thumbnail is a
+    cosmetic loss, and must never fail an encode that otherwise worked.
+    """
+    poster = output_dir / POSTER_FILENAME
+
+    # Ten percent in, capped — the opening seconds of a recording are usually
+    # a lens cap, a black frame, or somebody still walking to their seat.
+    offset = (trim_start or 0.0) + min(max(total_seconds * 0.1, 1.0),
+                                       POSTER_MAX_OFFSET_SECONDS)
+
+    cmd = [
+        "ffmpeg", "-y", "-loglevel", "error",
+        "-ss", f"{offset:.3f}",
+        "-i", str(input_path),
+        # The thumbnail filter scores a window of frames and emits the most
+        # representative, which avoids landing on a black or blurred one.
+        "-vf", "thumbnail",
+        "-frames:v", "1",
+        "-q:v", "3",
+        str(poster),
+    ]
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await proc.communicate()
+        if proc.returncode != 0 or not poster.exists():
+            logger.warning("poster frame not written: %s",
+                           (stderr or b"").decode(errors="replace")[:200])
+            return None
+        return POSTER_FILENAME
+    except Exception:
+        logger.exception("poster frame failed")
+        return None
 
 
 async def _has_encoder(name: str) -> bool:
@@ -472,6 +533,14 @@ async def transcode_video_to_hls(
         if not master_playlist.exists():
             return TranscodeResult(success=False, error="master.m3u8 not created")
 
+        # A still for the player to show before playback starts. Written after
+        # the encode so a failure here cannot cost us a successful transcode.
+        poster_name = await _write_poster(
+            input_path, output_dir, total_seconds, trim_start
+        )
+        if progress_callback and poster_name:
+            await progress_callback("Poster frame written", None)
+
         # Gather transcode metadata
         segments = sorted(output_dir.glob("segment_*.m4s"))
         segment_sizes = {s.name: s.stat().st_size for s in segments}
@@ -526,6 +595,9 @@ async def transcode_video_to_hls(
             "total_output_size_bytes": total_output_size,
             "source": source_info,
             "royalty_free": True,
+            # Relative to the pinned directory, so a player can build the URL
+            # from the release CID alone. None when extraction failed.
+            "poster": poster_name,
             "ffmpeg_settings": {
                 "video_codec": "libsvtav1",
                 "preset": AV1_PRESET,
