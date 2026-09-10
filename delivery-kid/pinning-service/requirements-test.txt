@@ -1,0 +1,5 @@
+# Test-only dependencies. Kept separate from requirements.txt so the runtime
+# image does not carry a test framework, and declared in a file rather than
+# inline in CI so the versions are reviewable in a diff.
+pytest>=8.0.0
+pytest-asyncio>=0.23.0
