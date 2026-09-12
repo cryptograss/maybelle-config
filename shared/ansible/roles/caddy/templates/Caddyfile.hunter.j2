@@ -23,4 +23,12 @@ arthel.{{ user.name }}.{{ base_domain }} {
     reverse_proxy localhost:{{ user.port_range_start }}
 }
 
+# {{ user.full_name }} - Paseo agent daemon (container port 6767, bound to 127.0.0.1 on the host)
+# Caddy is the only public entrance to the daemon; it terminates TLS, which the
+# mobile clients require. reverse_proxy upgrades WebSockets natively, which
+# Paseo's client transport depends on.
+paseo.{{ user.name }}.{{ base_domain }} {
+    reverse_proxy localhost:{{ 19090 + (user.ssh_port - 2222) }}
+}
+
 {% endfor %}

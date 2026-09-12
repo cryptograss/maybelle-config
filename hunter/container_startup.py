@@ -554,6 +554,56 @@ def setup_godot():
         logger.warning("⚠ Godot binary not responding (may need display for full init)")
 
 
+def start_paseo():
+    """Start the Paseo agent daemon.
+
+    Paseo serves a web/mobile UI over its own HTTP server and orchestrates
+    whichever agent CLIs are installed in this container. It runs *inside*
+    the user container on purpose: agents get the real dev environment —
+    workspace, MCP servers, gh credentials, ~/.claude — exactly as a
+    terminal session would.
+
+    Fail-safe: the daemon is an arbitrary-code-execution surface by design,
+    so it does not start at all unless PASEO_PASSWORD is set. No password
+    configured in the vault means no daemon and no exposure, rather than a
+    daemon guarding a container with a guessable default.
+    """
+    password = os.environ.get('PASEO_PASSWORD', '').strip()
+
+    if not password:
+        logger.info("⊘ PASEO_PASSWORD not set — skipping Paseo daemon (this is the safe default)")
+        return
+
+    # PASEO_HOME lives under the mounted home volume so config, paired
+    # devices, and the downloaded local-speech models survive rebuilds.
+    paseo_home = '/home/magent/.paseo'
+    Path(paseo_home).mkdir(parents=True, exist_ok=True)
+    run_command(f"chown -R magent:magent {paseo_home}", check=False)
+
+    # Two daemon defaults have to be overridden to work behind Docker + Caddy:
+    #   listen: defaults to 127.0.0.1:6767. Docker port mapping forwards to
+    #     the container's interface, not its loopback, so a loopback-bound
+    #     daemon is unreachable from the host no matter how it's mapped.
+    #   hostnames: the daemon validates the Host header against an allowlist
+    #     that defaults to localhost, so proxied requests arriving with
+    #     Caddy's domain are rejected unless that domain is allowed.
+    listen = os.environ.get('PASEO_LISTEN', '0.0.0.0:6767')
+    hostnames = os.environ.get('PASEO_HOSTNAMES', 'localhost')
+
+    # `paseo daemon start` is the headless entrypoint. Bare `paseo` runs the
+    # interactive flow that prompts about enabling the relay; relay consent
+    # only happens under `paseo daemon pair --relay`, which we never call --
+    # Caddy is our transport, so the relay stays off.
+    logger.info("Starting Paseo daemon...")
+    run_command(
+        f"PASEO_PASSWORD='{password}' PASEO_HOME='{paseo_home}' "
+        f"PASEO_LISTEN='{listen}' PASEO_HOSTNAMES='{hostnames}' "
+        f"nohup paseo daemon start --web-ui > /tmp/paseo.log 2>&1 &",
+        user='magent'
+    )
+    logger.info(f"✓ Paseo daemon started on {listen} (logs: /tmp/paseo.log)")
+
+
 def start_services():
     """Start required services."""
     logger.info("=== Starting services ===")
@@ -574,6 +624,9 @@ def start_services():
 
     # Start PickiPedia preview environment
     start_pickipedia_preview()
+
+    # Start Paseo agent daemon
+    start_paseo()
 
 
 def main():
