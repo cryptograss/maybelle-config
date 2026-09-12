@@ -1,42 +1,65 @@
 ---
-- name: Clone or update maybelle-config repository
-  git:
-    repo: https://github.com/cryptograss/maybelle-config.git
-    dest: "{{ base_dir }}/maybelle-config"
-    version: production
-    force: yes
-    update: yes
+# All repository fetches run under a common environment so a stalled transfer
+# fails loudly instead of hanging forever.
+#
+# On 2026-09-03 the first task below wedged for nine days. git-remote-https
+# created a zero-byte FETCH_HEAD and then blocked: no established socket, no
+# CPU, no timeout. The repo was public and returned 200, host DNS resolved
+# instantly, and there was no credential helper — so nothing diagnosed it and
+# nothing ended it. `any_errors_fatal: true` meant the whole play sat there,
+# and because it was silent, nobody noticed hunter was undeployable.
+#
+# These do not fix the underlying wedge. They make it announce itself:
+#   GIT_HTTP_LOW_SPEED_LIMIT/TIME  abort a transfer moving under 1KB/s for 60s
+#   GIT_TERMINAL_PROMPT            fail on a credential prompt instead of
+#                                  blocking on a stdin that never arrives
+#                                  (deploy-hunter-remote.py pipes the vault
+#                                  password through `ssh -t`, so a downstream
+#                                  read blocks rather than getting EOF)
+- name: Fetch source repositories
+  environment:
+    GIT_HTTP_LOW_SPEED_LIMIT: "1000"
+    GIT_HTTP_LOW_SPEED_TIME: "60"
+    GIT_TERMINAL_PROMPT: "0"
+  block:
+    - name: Clone or update maybelle-config repository
+      git:
+        repo: https://github.com/cryptograss/maybelle-config.git
+        dest: "{{ base_dir }}/maybelle-config"
+        version: production
+        force: yes
+        update: yes
 
-- name: Force fetch latest changes from production branch
-  shell: git fetch origin production && git reset --hard origin/production
-  args:
-    chdir: "{{ base_dir }}/maybelle-config"
+    - name: Force fetch latest changes from production branch
+      shell: git fetch origin production && git reset --hard origin/production
+      args:
+        chdir: "{{ base_dir }}/maybelle-config"
 
-- name: Clone or update memory-lane repository (for watcher)
-  git:
-    repo: https://github.com/jMyles/memory-lane.git
-    dest: "{{ base_dir }}/memory-lane-source"
-    version: main
-    force: yes
-    update: yes
+    - name: Clone or update memory-lane repository (for watcher)
+      git:
+        repo: https://github.com/jMyles/memory-lane.git
+        dest: "{{ base_dir }}/memory-lane-source"
+        version: main
+        force: yes
+        update: yes
 
-- name: Force fetch latest memory-lane changes from main branch
-  shell: git fetch origin main && git reset --hard origin/main
-  args:
-    chdir: "{{ base_dir }}/memory-lane-source"
+    - name: Force fetch latest memory-lane changes from main branch
+      shell: git fetch origin main && git reset --hard origin/main
+      args:
+        chdir: "{{ base_dir }}/memory-lane-source"
 
-- name: Clone or update magenta repository (for shared CLAUDE.md)
-  git:
-    repo: https://github.com/magent-cryptograss/magenta.git
-    dest: "{{ base_dir }}/magenta-source"
-    version: main
-    force: yes
-    update: yes
+    - name: Clone or update magenta repository (for shared CLAUDE.md)
+      git:
+        repo: https://github.com/magent-cryptograss/magenta.git
+        dest: "{{ base_dir }}/magenta-source"
+        version: main
+        force: yes
+        update: yes
 
-- name: Force fetch latest magenta changes from main branch
-  shell: git fetch origin main && git reset --hard origin/main
-  args:
-    chdir: "{{ base_dir }}/magenta-source"
+    - name: Force fetch latest magenta changes from main branch
+      shell: git fetch origin main && git reset --hard origin/main
+      args:
+        chdir: "{{ base_dir }}/magenta-source"
 
 - name: Get docker group GID from host
   shell: "getent group docker | cut -d: -f3"
