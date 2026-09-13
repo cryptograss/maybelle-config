@@ -204,3 +204,144 @@ class TestSnapshotForDictAsync:
         assert saved["upload_log"] == [{"phase": "init"}]
         assert saved["preview_log"] == [{"message": "done"}]
         assert saved["finalize_log"] == []  # missing key projects to empty list
+
+
+class _FakeWikiPage:
+    """A page that remembers what was written to it."""
+
+    def __init__(self, store, title, fail_with=None):
+        self._store = store
+        self._title = title
+        self._fail_with = fail_with
+        self.exists = title in store
+
+    def text(self):
+        return self._store.get(self._title)
+
+    def save(self, content, summary=None):
+        if self._fail_with:
+            raise RuntimeError(self._fail_with)
+        self._store[self._title] = content
+        return True
+
+
+class _FakeWiki:
+    """Enough of an mwclient.Site to see whether a page actually lands.
+
+    Deliberately stores content rather than recording calls: the point of
+    these tests is what ends up on the wiki, not which methods were invoked.
+    """
+
+    def __init__(self, fail_with=None):
+        self.pages_written = {}
+        self.logged_in = True
+        self._fail_with = fail_with
+
+    @property
+    def pages(self):
+        store = self.pages_written
+        fail = self._fail_with
+
+        class _Pages:
+            def __getitem__(_self, title):
+                return _FakeWikiPage(store, title, fail)
+
+        return _Pages()
+
+
+class TestOnThePipe:
+    """Does it come out the far end?
+
+    Named for the same reason as delivery-kid and Blue Railroad: it says
+    what the thing is for. Every other test here asks whether something was
+    put *into* the pipe. These ask whether anything came out.
+
+    Every other test in this file mocks mwclient and checks that
+    snapshot_diagnostics invoked save() with the right title. All of them
+    passed throughout the months in which not one diagnostics page was ever
+    written — because the failures happened on either side of the part under
+    test: the caller discarded the result, the session silently expired, and
+    the wiki rejected the payload for want of a `type` field it has no reason
+    to carry.
+
+    Green tests plus an absence nobody was watching for is how a feature can
+    never work and never be noticed. These tests fail if a page does not
+    appear, which is the only claim worth making.
+    """
+
+    @pytest.mark.asyncio
+    async def test_terminal_transition_puts_a_page_on_the_wiki(self):
+        """The whole chain: fire-and-forget call in, page content out."""
+        import asyncio
+        from app.routes import content as content_routes
+
+        wiki = _FakeWiki()
+        state = _make_state(
+            draft_id="3fc94d4e-619f-45cc-b1ea-c643386ee315",
+            status="finalized",
+            finalize_log=[{"stage": "pinned", "message": "Pinned to IPFS as Qmbr..."}],
+        )
+
+        with patch.object(pickipedia_client, "_get_site", return_value=wiki):
+            before = set(asyncio.all_tasks())
+            content_routes._fire_diagnostics_snapshot(state)
+            spawned = set(asyncio.all_tasks()) - before
+            assert spawned, "no snapshot task was scheduled at all"
+            await asyncio.gather(*spawned)
+
+        title = "ReleaseDraft:3fc94d4e-619f-45cc-b1ea-c643386ee315/diagnostics"
+        assert title in wiki.pages_written, (
+            f"no page appeared. written: {list(wiki.pages_written)}"
+        )
+
+        written = json.loads(wiki.pages_written[title])
+        assert written["draft_id"] == "3fc94d4e-619f-45cc-b1ea-c643386ee315"
+        assert written["status"] == "finalized"
+        assert written["finalize_log"][0]["stage"] == "pinned"
+
+    @pytest.mark.asyncio
+    async def test_a_failed_write_is_reported_not_swallowed(self, caplog):
+        """A snapshot that does not land must say so.
+
+        The original code discarded the task result, so a wiki that refused
+        every write looked exactly like one that accepted them.
+        """
+        import asyncio
+        import logging
+        from app.routes import content as content_routes
+
+        wiki = _FakeWiki(fail_with="wiki said no")
+        state = _make_state(draft_id="doomed-draft", status="finalize_failed")
+
+        with caplog.at_level(logging.ERROR), \
+                patch.object(pickipedia_client, "_get_site", return_value=wiki):
+            before = set(asyncio.all_tasks())
+            content_routes._fire_diagnostics_snapshot(state)
+            spawned = set(asyncio.all_tasks()) - before
+            await asyncio.gather(*spawned)
+
+        assert not wiki.pages_written, "page should not have been written"
+
+        # Deliberately assert on the *call site's* message, not the one
+        # snapshot_diagnostics already logged for itself. The inner error
+        # existed throughout; what was missing was anything at the point of
+        # use noticing that the write had not happened. Matching either
+        # message would let this pass against the very code it guards against.
+        assert any("did not write" in r.message for r in caplog.records), (
+            "the caller did not report the failed snapshot — that discarded "
+            "result is the bug this guards against"
+        )
+
+    def test_a_stale_session_is_not_reused(self):
+        """A cached Site whose login has lapsed must not be handed back.
+
+        Observed on delivery-kid: authenticated at 01:18, and by 21:14 every
+        save was refused as logged-out for the rest of the day, because the
+        Site was cached in a module global and never revisited.
+        """
+        stale = _FakeWiki()
+        stale.logged_in = False
+        pickipedia_client._site = stale
+
+        with patch.dict("os.environ", {"PICKIPEDIA_BOT_PASSWORD": ""}, clear=False):
+            assert pickipedia_client._get_site() is not stale

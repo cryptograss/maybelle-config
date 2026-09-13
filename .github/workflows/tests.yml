@@ -1,0 +1,60 @@
+# Run the delivery-kid test suite on every push and pull request.
+#
+# Until this existed, nothing ran these tests. Not GitHub, not either
+# Jenkinsfile, and not the deploy — which rsyncs the service to the server
+# with `--exclude=tests`. The suite had only ever been executed by a person
+# choosing to type `pytest`.
+#
+# That is how four tests in test_coconut.py could assert a Coconut V1 output
+# schema for months after the code moved to V2 without anyone noticing, and
+# it is why "the tests pass" has been a claim rather than a checkable fact.
+name: tests
+
+on:
+  push:
+    paths:
+      - 'delivery-kid/pinning-service/**'
+      - '.github/workflows/tests.yml'
+  pull_request:
+    paths:
+      - 'delivery-kid/pinning-service/**'
+      - '.github/workflows/tests.yml'
+
+jobs:
+  pinning-service:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: delivery-kid/pinning-service
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Matches the Dockerfile (python:3.12-slim) so a green run here means
+      # something about the image that actually ships.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: |
+            delivery-kid/pinning-service/requirements.txt
+            delivery-kid/pinning-service/requirements-test.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-test.txt
+
+      - name: Run tests
+        # test_coconut.py is deselected deliberately and temporarily. Its four
+        # TestJobConfigBuilding cases assert a Coconut V1 output schema
+        # (hls_av1_1080p, nested video/audio blocks) that services/coconut.py
+        # stopped emitting when it moved to V2 — see the docstring there. They
+        # have been red for months.
+        #
+        # This exclusion is here, loudly, rather than hidden behind an xfail
+        # marker, because a CI that is red on arrival trains people to ignore
+        # it, and an xfail nobody revisits is a red test wearing a hat.
+        #
+        # Remove this line when cryptograss/maybelle-config#121 is resolved.
+        run: pytest -v --ignore=tests/test_coconut.py
