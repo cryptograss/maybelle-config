@@ -42,6 +42,31 @@ OPUS_BITRATE = "128k"
 POSTER_FILENAME = "poster.jpg"
 POSTER_MAX_OFFSET_SECONDS = 60.0
 
+# The quality ladder.
+#
+# A single 1080p rendition is a bet that everyone watching has bandwidth for
+# it, and there is nothing for a player to fall back to when that bet loses —
+# it simply buffers. Published releases run about 2.4 Mbps sustained, which
+# is optimistic over a phone tether.
+#
+# Heights above the source are skipped rather than upscaled: re-encoding 720p
+# footage to 1080p costs time and bytes to invent detail that was never there.
+#
+# CRF rises as resolution falls. The same CRF at a smaller frame size spends
+# bits on detail nobody can see at that size.
+VIDEO_LADDER = (
+    {"name": "1080p", "height": 1080, "crf": 32, "audio": "128k"},
+    {"name": "720p", "height": 720, "crf": 34, "audio": "128k"},
+    {"name": "360p", "height": 360, "crf": 36, "audio": "96k"},
+)
+
+# Always emitted, whatever the video ladder ends up being. Roughly fifty times
+# smaller than the 1080p rendition, which makes it the only variant certain to
+# work on a bad connection — and for an archive of music, often the one people
+# actually want. Given that, it gets the better audio bitrate.
+AUDIO_ONLY_NAME = "audio"
+AUDIO_ONLY_BITRATE = "160k"
+
 # Progress reporting. ffmpeg emits a block every ~0.5s at 1080p; forwarding all
 # of them would flood the SSE stream and the on-page log, so updates are
 # throttled to one update every this many seconds. The consumer is expected
@@ -115,6 +140,33 @@ def _format_progress(done: Optional[float], total: float,
         parts.append(f"~{_clock(remaining)} left")
 
     return " · ".join(parts)
+
+
+def _source_height(probe: Optional[dict]) -> Optional[int]:
+    """Video height of the source, or None if it cannot be determined."""
+    if not probe:
+        return None
+    for stream in probe.get("streams", []):
+        if stream.get("codec_type") == "video" and stream.get("height"):
+            try:
+                return int(stream["height"])
+            except (TypeError, ValueError):
+                return None
+    return None
+
+
+def _ladder_for(source_height: Optional[int]) -> list[dict]:
+    """The renditions worth producing for a source of this height.
+
+    Skips anything taller than the source rather than upscaling. If the height
+    is unknown, or the source is smaller than every rung, the lowest rung is
+    used — one real rendition beats none, and the audio-only variant is added
+    separately regardless.
+    """
+    if source_height is None:
+        return [VIDEO_LADDER[-1]]
+    rungs = [r for r in VIDEO_LADDER if r["height"] <= source_height]
+    return rungs or [VIDEO_LADDER[-1]]
 
 
 def _frame_rate(probe: Optional[dict]) -> float:
@@ -421,17 +473,44 @@ async def transcode_video_to_hls(
                 cmd.extend(["-to", str(trim_end - trim_start)])
             else:
                 cmd.extend(["-to", str(trim_end)])
+        # Build the ladder from what the source can actually support, then
+        # append an audio-only variant. ffmpeg writes the master playlist
+        # itself from -var_stream_map, so the variants carry real BANDWIDTH
+        # and RESOLUTION attributes and a player can choose between them.
+        rungs = _ladder_for(_source_height(source_probe))
+
+        # One split per video rung, each scaled to its height. -2 keeps the
+        # aspect ratio and rounds the width to an even number, which the
+        # encoder requires.
+        split_labels = "".join(f"[v{i}]" for i in range(len(rungs)))
+        chain = [f"[0:v]split={len(rungs)}{split_labels}"]
+        for i, rung in enumerate(rungs):
+            chain.append(f"[v{i}]scale=-2:{rung['height']}[v{i}o]")
+        cmd.extend(["-filter_complex", ";".join(chain)])
+
+        # Each video rung is mapped with its own copy of the audio, then one
+        # final bare audio mapping for the audio-only variant.
+        for i in range(len(rungs)):
+            cmd.extend(["-map", f"[v{i}o]", "-map", "0:a?"])
+        cmd.extend(["-map", "0:a?"])
+
         cmd.extend([
-            # Video: AV1 via SVT-AV1 — royalty-free, and at preset 10 faster
-            # than the libx264 profile it replaces.
             "-c:v", "libsvtav1",
             "-preset", str(AV1_PRESET),
-            "-crf", str(AV1_CRF),
             "-g", str(gop),          # keyframe every segment, see above
             "-pix_fmt", "yuv420p",   # force 8-bit — 10-bit breaks some decoders
-            # Audio: Opus — royalty-free, replaces AAC
             "-c:a", "libopus",
-            "-b:a", OPUS_BITRATE,
+        ])
+        for i, rung in enumerate(rungs):
+            cmd.extend([f"-crf:v:{i}", str(rung["crf"]),
+                        f"-b:a:{i}", rung["audio"]])
+        cmd.extend([f"-b:a:{len(rungs)}", AUDIO_ONLY_BITRATE])
+
+        stream_map = " ".join(
+            f"v:{i},a:{i},name:{rung['name']}" for i, rung in enumerate(rungs)
+        ) + f" a:{len(rungs)},name:{AUDIO_ONLY_NAME}"
+
+        cmd.extend([
             # HLS output. fMP4 segments are REQUIRED: MPEG-TS cannot carry
             # AV1 or Opus, and ffmpeg fails silently rather than loudly.
             "-f", "hls",
@@ -440,8 +519,10 @@ async def transcode_video_to_hls(
             "-hls_playlist_type", "vod",
             "-hls_segment_type", "fmp4",
             "-hls_fmp4_init_filename", "init.mp4",
-            "-hls_segment_filename", str(output_dir / "segment_%05d.m4s"),
-            str(master_playlist),
+            "-master_pl_name", master_playlist.name,
+            "-var_stream_map", stream_map,
+            "-hls_segment_filename", str(output_dir / "stream_%v" / "seg_%05d.m4s"),
+            str(output_dir / "stream_%v" / "playlist.m3u8"),
         ])
 
         # How much media we expect to encode, so percentages mean something.
@@ -542,7 +623,8 @@ async def transcode_video_to_hls(
             await progress_callback("Poster frame written", None)
 
         # Gather transcode metadata
-        segments = sorted(output_dir.glob("segment_*.m4s"))
+        # Segments now live under stream_<name>/ — one directory per variant.
+        segments = sorted(output_dir.glob("stream_*/seg_*.m4s"))
         segment_sizes = {s.name: s.stat().st_size for s in segments}
         total_output_size = sum(segment_sizes.values())
 
@@ -598,6 +680,17 @@ async def transcode_video_to_hls(
             # Relative to the pinned directory, so a player can build the URL
             # from the release CID alone. None when extraction failed.
             "poster": poster_name,
+            # What a player can actually choose between. Recorded so the
+            # Release page can say, without fetching the playlist, that a
+            # low-bandwidth or audio-only option exists.
+            "variants": [
+                {"name": r["name"], "height": r["height"], "crf": r["crf"],
+                 "audio_bitrate": r["audio"]}
+                for r in rungs
+            ] + [
+                {"name": AUDIO_ONLY_NAME, "height": None, "crf": None,
+                 "audio_bitrate": AUDIO_ONLY_BITRATE},
+            ],
             "ffmpeg_settings": {
                 "video_codec": "libsvtav1",
                 "preset": AV1_PRESET,
