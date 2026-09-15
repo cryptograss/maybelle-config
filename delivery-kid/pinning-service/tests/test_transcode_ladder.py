@@ -106,6 +106,9 @@ def test_rotated_phone_clip_end_to_end(tmp_path):
 
     info = result.transcode_info
     assert (info["output_width"], info["output_height"]) == (1080, 1920)
+    # A one-second clip once got no poster: the seek landed on the last frame.
+    assert info["poster"] == "poster.jpg"
+    assert _stream_size(out / "poster.jpg") == (1080, 1920)
     on_disk = sum(p.stat().st_size for p in out.glob("stream_*/seg_*.m4s"))
     assert info["total_output_size_bytes"] == on_disk
     # The audio-only variant alone must not account for the whole release.

@@ -257,8 +257,14 @@ async def _write_poster(input_path: Path, output_dir: Path,
 
     # Ten percent in, capped — the opening seconds of a recording are usually
     # a lens cap, a black frame, or somebody still walking to their seat.
-    offset = (trim_start or 0.0) + min(max(total_seconds * 0.1, 1.0),
-                                       POSTER_MAX_OFFSET_SECONDS)
+    into = min(max(total_seconds * 0.1, 1.0), POSTER_MAX_OFFSET_SECONDS)
+    # The one-second floor must not reach the end of a very short clip. A seek
+    # to or past the last frame leaves ffmpeg nothing to encode, and it says so
+    # misleadingly ("Non full-range YUV is non-standard" from the JPEG encoder),
+    # which once passed for an ffmpeg version problem.
+    if total_seconds > 0:
+        into = min(into, total_seconds / 2)
+    offset = (trim_start or 0.0) + into
 
     cmd = [
         "ffmpeg", "-y", "-loglevel", "error",
