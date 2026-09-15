@@ -88,7 +88,12 @@ all:
     # every episode of that show. The importer never deletes, so those pages
     # would outlive the pattern that made them — which is why this is a
     # ceiling rather than something to clean up afterwards.
-    import_max_changes: 50
+    #
+    # TEMPORARILY 800, for one night. Episode artwork (pickipedia f818e21) adds
+    # image= to all ~731 episode pages at once, which is a deliberate change,
+    # not a runaway pattern. Put this back to 50 once the status page shows the
+    # run completed.
+    import_max_changes: 800
 
     # Where the import leaves a note saying how it went, served over HTTP so
     # that the cron-health job on maybelle can see it. Cron output goes to
