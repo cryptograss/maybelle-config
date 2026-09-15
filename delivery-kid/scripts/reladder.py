@@ -92,9 +92,15 @@ def main() -> int:
     if video is None:
         raise SystemExit("no video stream — is this an audio release?")
 
-    height = int(video.get("height") or 0)
+    width = int(video.get("width") or 0)
+    # Rungs are named by the picture's short side, so an upright phone video
+    # is "1080p" at 1080x1920 just as a landscape one is at 1920x1080.
+    # Published renditions carry no rotation (the encoder applied it).
+    portrait = int(video.get("height") or 0) > width
+    height = min(width, int(video.get("height") or 0)) or int(video.get("height") or 0)
     duration = float(info.get("format", {}).get("duration") or 0)
-    print(f"  {video.get('codec_name')} {video.get('width')}x{height}"
+    print(f"  {video.get('codec_name')} {width}x{video.get('height')}"
+          f"{' (portrait)' if portrait else ''}"
           f"  {audio.get('codec_name') if audio else 'no audio'}"
           f"  {duration/60:.1f} min")
 
@@ -134,7 +140,8 @@ def main() -> int:
         labels = "".join(f"[v{i}]" for i in range(len(encode_rungs)))
         chain = [f"[0:v]split={len(encode_rungs)}{labels}"]
         for i, r in enumerate(encode_rungs):
-            chain.append(f"[v{i}]scale=-2:{r['height']}[v{i}o]")
+            scale = f"scale={r['height']}:-2" if portrait else f"scale=-2:{r['height']}"
+            chain.append(f"[v{i}]{scale}[v{i}o]")
         cmd.extend(["-filter_complex", ";".join(chain)])
 
     # Copied rung first, so it is variant 0 and the highest quality.
