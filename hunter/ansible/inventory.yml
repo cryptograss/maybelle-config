@@ -25,6 +25,11 @@ all:
         ssh_port: 2222
         port_range_start: 14000  # 14000-14009
         code_server_password: "{{ code_server_password }}"
+        # One shared secret across all users, like code_server_password above:
+        # each of us runs our own daemon, but anyone can open anyone else's and
+        # watch those sessions live. Empty until it's added to the vault, and
+        # empty means the daemon does not start at all.
+        paseo_password: "{{ paseo_password | default('') }}"
         github_token: "{{ magent_github_token }}"
 
       - name: rj
@@ -35,6 +40,11 @@ all:
         ssh_port: 2223
         port_range_start: 14010
         code_server_password: "{{ code_server_password }}"
+        # One shared secret across all users, like code_server_password above:
+        # each of us runs our own daemon, but anyone can open anyone else's and
+        # watch those sessions live. Empty until it's added to the vault, and
+        # empty means the daemon does not start at all.
+        paseo_password: "{{ paseo_password | default('') }}"
         github_token: "{{ magent_github_token }}"
 
       - name: skyler
@@ -45,6 +55,11 @@ all:
         ssh_port: 2224
         port_range_start: 14020
         code_server_password: "{{ code_server_password }}"
+        # One shared secret across all users, like code_server_password above:
+        # each of us runs our own daemon, but anyone can open anyone else's and
+        # watch those sessions live. Empty until it's added to the vault, and
+        # empty means the daemon does not start at all.
+        paseo_password: "{{ paseo_password | default('') }}"
         github_token: "{{ magent_github_token }}"
 
       - name: fibonacci
@@ -55,4 +70,9 @@ all:
         ssh_port: 2225
         port_range_start: 14030
         code_server_password: "{{ code_server_password }}"
+        # One shared secret across all users, like code_server_password above:
+        # each of us runs our own daemon, but anyone can open anyone else's and
+        # watch those sessions live. Empty until it's added to the vault, and
+        # empty means the daemon does not start at all.
+        paseo_password: "{{ paseo_password | default('') }}"
         github_token: "{{ magent_github_token }}"
