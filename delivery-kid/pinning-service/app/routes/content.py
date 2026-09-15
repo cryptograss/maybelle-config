@@ -199,6 +199,19 @@ def log_pre_handler_failure(draft_id: str, status_code: int,
                          draft_id[:8])
 
 
+def _transcode_band_progress(pct: float | None, previous: int) -> int:
+    """Map encoder percent onto the 10-60 band of the overall finalize bar.
+
+    Pinning takes the bar the rest of the way. Some encoder messages carry no
+    percentage ("Poster frame written", arriving after 100%); those used to be
+    read as 0, dropping the bar from 59 back to 10 for a moment. A message
+    without a number now leaves the bar where it was, and it never goes back.
+    """
+    if pct is None:
+        return previous
+    return max(previous, 10 + int(pct * 0.5))
+
+
 def _fire_diagnostics_snapshot(state: ContentDraftState) -> None:
     """Fire-and-forget snapshot of draft logs to ``ReleaseDraft:{id}/diagnostics``.
 
@@ -1047,6 +1060,7 @@ async def finalize_sse_generator(
                 )
             )
 
+            bar = 10
             while True:
                 getter = asyncio.create_task(progress_q.get())
                 done, _pending = await asyncio.wait(
@@ -1055,12 +1069,11 @@ async def finalize_sse_generator(
                 )
                 if getter in done:
                     message, pct = getter.result()
+                    bar = _transcode_band_progress(pct, bar)
                     yield await send_event("progress", {
                         "stage": "transcode",
                         "message": message,
-                        # The encode occupies the 10-60 band of the overall
-                        # finalize bar; pinning takes it the rest of the way.
-                        "progress": 10 + int((pct or 0) * 0.5),
+                        "progress": bar,
                         # Tells the client this supersedes the previous line
                         # rather than adding to it — otherwise an hour-long
                         # encode leaves hundreds of near-identical log rows.
@@ -1209,7 +1222,12 @@ async def finalize_sse_generator(
         # mirror it now or never. On failure paths we also snapshot so
         # the wiki has the latest log even if delivery-kid storage is
         # later rebuilt.
-        _fire_diagnostics_snapshot(state)
+        #
+        # On success the snapshot already fired right after the pin, before
+        # the client was told — firing again here wrote a second, identical
+        # wiki revision in the same second.
+        if not pin_success:
+            _fire_diagnostics_snapshot(state)
 
         # Only wipe the draft dir on a fully successful pin. On failure we
         # keep draft.json (with its finalize_log) so the ReleaseDraft page
