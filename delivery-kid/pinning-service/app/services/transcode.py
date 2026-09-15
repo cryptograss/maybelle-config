@@ -142,31 +142,73 @@ def _format_progress(done: Optional[float], total: float,
     return " · ".join(parts)
 
 
-def _source_height(probe: Optional[dict]) -> Optional[int]:
-    """Video height of the source, or None if it cannot be determined."""
+def _rotation_degrees(stream: dict) -> int:
+    """Display rotation of a video stream, as ffprobe reports it.
+
+    Phones record upright video as landscape frames plus an instruction to
+    rotate them — newer ffprobe puts it in a display-matrix side_data entry,
+    older builds in a ``rotate`` tag.
+    """
+    for side in stream.get("side_data_list") or []:
+        if "rotation" in side:
+            try:
+                return int(round(float(side["rotation"])))
+            except (TypeError, ValueError):
+                pass
+    try:
+        return int((stream.get("tags") or {}).get("rotate", 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _display_size(probe: Optional[dict]) -> Optional[tuple[int, int]]:
+    """Width and height of the source as it is meant to be seen.
+
+    ffmpeg applies the rotation before any filter runs, so this — not the
+    coded frame size — is what the scale filter actually receives. An iPhone
+    portrait clip probes as 1920x1080 with a -90 rotation and is 1080x1920.
+    """
     if not probe:
         return None
     for stream in probe.get("streams", []):
-        if stream.get("codec_type") == "video" and stream.get("height"):
-            try:
-                return int(stream["height"])
-            except (TypeError, ValueError):
-                return None
+        if stream.get("codec_type") != "video":
+            continue
+        try:
+            width, height = int(stream["width"]), int(stream["height"])
+        except (KeyError, TypeError, ValueError):
+            return None
+        if abs(_rotation_degrees(stream)) % 180 == 90:
+            width, height = height, width
+        return width, height
     return None
 
 
-def _ladder_for(source_height: Optional[int]) -> list[dict]:
-    """The renditions worth producing for a source of this height.
+def _ladder_for(short_side: Optional[int]) -> list[dict]:
+    """The renditions worth producing for a source whose short side is this.
 
-    Skips anything taller than the source rather than upscaling. If the height
+    A rung's "height" is its short side, which is what "1080p" means for a
+    portrait phone video as much as for a landscape one. Measuring the long
+    way instead turned 1080x1920 uploads into a 608x1080 top rendition.
+
+    Skips anything larger than the source rather than upscaling. If the size
     is unknown, or the source is smaller than every rung, the lowest rung is
     used — one real rendition beats none, and the audio-only variant is added
     separately regardless.
     """
-    if source_height is None:
+    if short_side is None:
         return [VIDEO_LADDER[-1]]
-    rungs = [r for r in VIDEO_LADDER if r["height"] <= source_height]
+    rungs = [r for r in VIDEO_LADDER if r["height"] <= short_side]
     return rungs or [VIDEO_LADDER[-1]]
+
+
+def _scale_filter(short_side: int, portrait: bool) -> str:
+    """Scale so the frame's short side is ``short_side``, keeping aspect.
+
+    -2 rounds the other dimension to an even number, which the encoder needs.
+    """
+    if portrait:
+        return f"scale={short_side}:-2"
+    return f"scale=-2:{short_side}"
 
 
 def _frame_rate(probe: Optional[dict]) -> float:
@@ -477,15 +519,16 @@ async def transcode_video_to_hls(
         # append an audio-only variant. ffmpeg writes the master playlist
         # itself from -var_stream_map, so the variants carry real BANDWIDTH
         # and RESOLUTION attributes and a player can choose between them.
-        rungs = _ladder_for(_source_height(source_probe))
+        display = _display_size(source_probe)
+        portrait = bool(display and display[1] > display[0])
+        rungs = _ladder_for(min(display) if display else None)
 
-        # One split per video rung, each scaled to its height. -2 keeps the
-        # aspect ratio and rounds the width to an even number, which the
-        # encoder requires.
+        # One split per video rung, each scaled so its short side matches the
+        # rung.
         split_labels = "".join(f"[v{i}]" for i in range(len(rungs)))
         chain = [f"[0:v]split={len(rungs)}{split_labels}"]
         for i, rung in enumerate(rungs):
-            chain.append(f"[v{i}]scale=-2:{rung['height']}[v{i}o]")
+            chain.append(f"[v{i}]{_scale_filter(rung['height'], portrait)}[v{i}o]")
         cmd.extend(["-filter_complex", ";".join(chain)])
 
         # Each video rung is mapped with its own copy of the audio, then one
@@ -624,9 +667,12 @@ async def transcode_video_to_hls(
 
         # Gather transcode metadata
         # Segments now live under stream_<name>/ — one directory per variant.
+        # Every variant numbers its segments from seg_00000, so sizes must be
+        # summed per file rather than keyed by bare filename — keying by name
+        # kept only the last variant's segments and reported the audio stream's
+        # size as the whole release's.
         segments = sorted(output_dir.glob("stream_*/seg_*.m4s"))
-        segment_sizes = {s.name: s.stat().st_size for s in segments}
-        total_output_size = sum(segment_sizes.values())
+        total_output_size = sum(s.stat().st_size for s in segments)
 
         # Probe the playlist, not a bare segment: an fMP4 .m4s carries no
         # codec configuration on its own (that lives in init.mp4), so probing
@@ -635,8 +681,14 @@ async def transcode_video_to_hls(
         output_streams = {}
         if output_probe:
             for stream in output_probe.get("streams", []):
-                if stream["codec_type"] == "video":
+                # The master playlist probes as every variant at once. Report
+                # the largest rendition, not whichever happened to come last.
+                if stream["codec_type"] == "video" and (
+                    (stream.get("width") or 0) * (stream.get("height") or 0)
+                    >= output_streams.get("video", {}).get("area", -1)
+                ):
                     output_streams["video"] = {
+                        "area": (stream.get("width") or 0) * (stream.get("height") or 0),
                         "codec": stream.get("codec_name"),
                         "profile": stream.get("profile"),
                         "pix_fmt": stream.get("pix_fmt"),
