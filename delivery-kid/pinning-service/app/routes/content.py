@@ -264,7 +264,7 @@ async def _analyze_and_mark_uploaded(
     state: ContentDraftState,
     settings: Settings,
 ) -> list[ContentFile]:
-    """Analyse everything in upload_dir, record it on state, start any preview.
+    """Analyse everything in upload_dir and record it on state.
 
     Shared by the multipart upload handler and the URL-fetch worker — bytes
     arrive by two routes but everything after they land is identical, and
@@ -323,6 +323,17 @@ async def _analyze_and_mark_uploaded(
                        "before publishing.",
         })
     save_draft_state(draft_dir, state)
+
+    # Mirror the completed upload to the wiki. "Uploaded" is a state a draft
+    # can sit in indefinitely — the uploader may never come back to finalize,
+    # or may finalize from another machine — so it needs a record that
+    # outlives delivery-kid's staging directory, exactly as the terminal
+    # states do.
+    #
+    # Snapshots at this point used to happen by accident: the Coconut preview
+    # webhook fired one as a side effect, and removing Coconut (#126) removed
+    # it. Draft 38be9254 is the first upload with no upload-stage snapshot.
+    _fire_diagnostics_snapshot(state)
 
     return draft_files
 
