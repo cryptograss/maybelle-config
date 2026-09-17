@@ -219,9 +219,9 @@ async def snapshot_diagnostics_for_state_async(state) -> bool:
 def snapshot_diagnostics_for_dict_async(draft_id: str, draft_data: dict):
     """Async fire-and-forget snapshot from a raw draft.json dict.
 
-    Used by the Coconut webhook path, which mutates ``draft.json`` on disk
-    rather than holding a ContentDraftState object. Returns the asyncio
-    Task so the caller can ``create_task(...)`` it without awaiting.
+    For callers that mutate ``draft.json`` on disk rather than holding a
+    ContentDraftState object. Returns the asyncio Task so the caller can
+    ``create_task(...)`` it without awaiting.
     """
     payload = {
         "draft_id": draft_id,
@@ -242,11 +242,10 @@ def write_finalized_to_releasedraft(
 ) -> bool:
     """Edit the ``ReleaseDraft:{draft_id}`` wiki page YAML to mark it finalized.
 
-    Pre-V2-Coconut-migration, the browser-side JS handled this edit when
-    the finalize SSE delivered a ``complete`` event. For the slow Coconut
-    path that event never fires (the SSE closes after submission and the
-    user's browser doesn't see the eventual completion), so we write from
-    the webhook side instead.
+    The browser-side JS handles this edit when the finalize SSE delivers a
+    ``complete`` event. Writing it server-side as well means a publish is
+    still recorded on the wiki when the browser has gone away — a closed
+    laptop should not cost anyone their release.
 
     The edit:
       - Loads the current YAML

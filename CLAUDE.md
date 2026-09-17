@@ -29,7 +29,7 @@ The `maybelle-chapter-1.sh` script:
 
 ## Key Services
 
-- **Pinning Service**: Video transcoding (Coconut.co) and IPFS pinning
+- **Pinning Service**: Video transcoding (local ffmpeg, AV1/Opus) and IPFS pinning
 - **IPFS Node**: Local kubo node for redundancy alongside Pinata
 - **Jenkins**: CI/CD for arthel builds
 - **Caddy**: Reverse proxy with automatic SSL

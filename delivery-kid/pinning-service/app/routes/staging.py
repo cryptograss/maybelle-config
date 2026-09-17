@@ -65,7 +65,7 @@ async def get_staging_file(
     """Serve a file from a staging draft for preview.
 
     Used by the ReleaseDraft page to embed video/audio players.
-    Also used by Coconut to fetch source video for transcoding (via preview_token).
+    Also how the draft page plays the uploaded file before publishing.
 
     Auth: HMAC headers, HMAC query params, or preview_token query param.
     """
@@ -73,7 +73,7 @@ async def get_staging_file(
     if ".." in draft_id or "/" in draft_id or ".." in filename or "/" in filename:
         raise HTTPException(status_code=400, detail="Invalid path")
 
-    # Auth: preview_token (for Coconut), then headers, then HMAC query params
+    # Auth: preview_token, then headers, then HMAC query params
     authenticated = False
     if preview_token and _check_preview_token(draft_id, preview_token, settings):
         authenticated = True

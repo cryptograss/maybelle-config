@@ -59,21 +59,25 @@ class ContentDraftState(BaseModel):
     upload_log: list[dict] = Field(default_factory=list,
                                    description="Upload-stage progress entries: [{ts, phase, message, error?}]")
     # Finalize-stage progress trail mirrored from the SSE generator so the
-    # AV1/Coconut/local-fallback decision and any failure are visible after
-    # the SSE connection closes.
+    # encode's progress and any failure are visible after the SSE connection
+    # closes.
     finalize_log: list[dict] = Field(default_factory=list,
                                      description="Finalize-stage progress entries: [{ts, stage, message, progress?, error?}]")
-    # Preview transcoding (background, after upload)
+    # Preview of the uploaded file on the draft page.
+    #
+    # Nothing is transcoded for it: the page plays the uploaded file straight
+    # from staging. The cloud preview that used to run here never actually
+    # reached the page (it asked for an "mp4" output and looked for
+    # "mp4_preview"), so this is the behaviour that was always in effect —
+    # just without the cost and the wait. The cid fields remain so that
+    # drafts written before the removal still load, and always read null.
     preview_token: str = Field(default_factory=lambda: secrets.token_urlsafe(32),
-                               description="One-time token for Coconut to fetch source video from staging")
+                               description="Token allowing the source file to be fetched from staging")
     preview_status: str = Field(default="none", description="none, pending, processing, ready, failed")
-    preview_job_id: Optional[str] = Field(default=None, description="Coconut job ID for preview transcode")
-    preview_cid: Optional[str] = Field(default=None, description="IPFS CID of AV1 HLS output")
-    preview_mp4_cid: Optional[str] = Field(default=None, description="IPFS CID of 480p H.264 preview MP4")
-    # Progress trail captured from Coconut webhook events. Surfaced to the
-    # draft page by /draft-content so the user can see what's happening
-    # during transcoding instead of staring at "Preview is being transcoded..."
-    # for minutes. Capped at PREVIEW_LOG_MAX entries to keep draft.json small.
+    preview_cid: Optional[str] = Field(default=None, description="Legacy; always null")
+    preview_mp4_cid: Optional[str] = Field(default=None, description="Legacy; always null")
+    # Notes shown on the draft page under the player. Capped at
+    # PREVIEW_LOG_MAX entries to keep draft.json small.
     preview_log: list[dict] = Field(default_factory=list,
                                     description="Recent progress entries: [{ts, message, progress?}]")
 
@@ -89,10 +93,10 @@ class ContentDraftResponse(BaseModel):
     upload_log: list[dict] = Field(default_factory=list, description="Upload-stage progress entries")
     finalize_log: list[dict] = Field(default_factory=list, description="Finalize-stage progress entries")
     preview_status: str = Field(default="none", description="none, pending, processing, ready, failed")
-    preview_cid: Optional[str] = Field(default=None, description="IPFS CID of AV1 HLS output")
-    preview_mp4_cid: Optional[str] = Field(default=None, description="IPFS CID of 480p preview MP4")
+    preview_cid: Optional[str] = Field(default=None, description="Legacy; always null")
+    preview_mp4_cid: Optional[str] = Field(default=None, description="Legacy; always null")
     preview_token: Optional[str] = Field(default=None, description="One-time token (returned only on init)")
-    preview_log: list[dict] = Field(default_factory=list, description="Recent progress entries from Coconut webhook")
+    preview_log: list[dict] = Field(default_factory=list, description="Notes shown under the draft page's player")
 
 
 class ContentFromUrlRequest(BaseModel):
@@ -110,7 +114,8 @@ class ContentFinalizeRequest(BaseModel):
     transcoding_strategy: str = Field(
         default="auto",
         description="Transcoding strategy for video: 'auto' (local AV1/Opus), "
-                    "'local' (same), 'coconut' (opt-in cloud), 'none' (pin as-is)"
+                    "'local' (same), 'none' (pin as-is). 'coconut' is accepted "
+                    "for older clients and encodes locally like the rest."
     )
     subsequent_to: Optional[str] = Field(default=None, description="CID this content supersedes")
     transcoding_qualities: Optional[list[int]] = Field(

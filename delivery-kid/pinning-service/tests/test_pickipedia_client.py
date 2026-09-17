@@ -176,7 +176,7 @@ class TestSnapshotDiagnostics:
 class TestSnapshotForDictAsync:
     @pytest.mark.asyncio
     async def test_builds_payload_from_dict(self, monkeypatch):
-        """The dict-based variant (used by Coconut webhook) projects raw draft.json fields."""
+        """The dict-based variant projects raw draft.json fields."""
         monkeypatch.setenv("PICKIPEDIA_BOT_PASSWORD", "pw")
 
         fake_page = MagicMock()
