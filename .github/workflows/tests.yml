@@ -46,15 +46,6 @@ jobs:
           pip install -r requirements.txt -r requirements-test.txt
 
       - name: Run tests
-        # test_coconut.py is deselected deliberately and temporarily. Its four
-        # TestJobConfigBuilding cases assert a Coconut V1 output schema
-        # (hls_av1_1080p, nested video/audio blocks) that services/coconut.py
-        # stopped emitting when it moved to V2 — see the docstring there. They
-        # have been red for months.
-        #
-        # This exclusion is here, loudly, rather than hidden behind an xfail
-        # marker, because a CI that is red on arrival trains people to ignore
-        # it, and an xfail nobody revisits is a red test wearing a hat.
-        #
-        # Remove this line when cryptograss/maybelle-config#121 is resolved.
-        run: pytest -v --ignore=tests/test_coconut.py
+        # The whole suite runs. The four permanently-red Coconut tests that
+        # used to be excluded here went with the code they tested (#121).
+        run: pytest -v
