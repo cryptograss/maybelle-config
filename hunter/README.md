@@ -26,6 +26,68 @@ Each team member gets isolated container with:
 - Own `.claude` directory mounted from `/opt/magenta/{username}/`
 - Shared access to PostgreSQL database
 - SSH access via key-based routing
+- A Paseo agent daemon (see below)
+
+### Paseo Agent Daemon
+
+[Paseo](https://github.com/getpaseo/paseo) is a self-hosted orchestrator that
+gives the agents a web and mobile interface instead of a terminal. It runs
+*inside* each user container, so agents get the real environment — workspace,
+MCP servers, `gh` credentials, `~/.claude` — exactly as a terminal session
+would. It is harness-agnostic (Claude Code, Codex, Copilot, OpenCode, Pi),
+which is the main reason we picked it over a first-party client.
+
+| | |
+|---|---|
+| Container port | 6767 |
+| Host port | `19090 + (ssh_port - 2222)` — justin 19090, rj 19091, skyler 19092, fibonacci 19093 |
+| Public URL | `https://paseo.{username}.hunter.cryptograss.live` |
+| Auth | `PASEO_PASSWORD`, per user, from the vault |
+| State | `/home/magent/.paseo` (on the mounted home volume, survives rebuilds) |
+| Logs | `/tmp/paseo.log` inside the container |
+
+**The daemon does not start unless `PASEO_PASSWORD` is set.** It can run
+arbitrary code on the container by design, so an unset password means no
+daemon rather than a daemon behind a default one. To enable it, add
+`paseo_password` to the vault and re-run the playbook.
+
+The host port binds to `127.0.0.1` only. Caddy is the sole public entrance,
+which is also what terminates TLS — the mobile clients require it.
+
+#### Seeing each other's sessions
+
+`paseo_password` is one shared secret across all users, the same way
+`code_server_password` already is. Each of us runs our own daemon, but anyone
+can open anyone else's URL and watch those sessions live — no separate shared
+instance needed.
+
+Per-user daemons rather than one shared one, because a single daemon would run
+every agent as the same `magent` in one container: one home directory, one
+`~/.claude` auth, one git identity, one workspace. It would also break
+memory-lane's attribution, since the watcher maps
+`/opt/magenta/<user>/home/.claude/projects` per user — every conversation would
+land under whoever's container hosted the daemon.
+
+If we later want a genuine org-level view — all daemons in one dashboard, plus
+GitHub/Slack/Discord triggers — that's [Paseo Hub](https://paseo.sh/docs/hub),
+self-hostable with `npx @getpaseo/hub` against our existing PostgreSQL. Note
+that Hub's shared view is trigger runs and daemon status; live session viewing
+is still per-daemon.
+
+#### Two non-obvious daemon settings
+
+Both are set in the compose template and both are required here:
+
+- `PASEO_LISTEN=0.0.0.0:6767` — the daemon defaults to `127.0.0.1`, which
+  Docker port mapping cannot reach, since mapping forwards to the container's
+  interface rather than its loopback.
+- `PASEO_HOSTNAMES` — the daemon validates the `Host` header against an
+  allowlist defaulting to `localhost`, so Caddy's domain must be named or every
+  proxied request is rejected.
+
+The daemon is started with `paseo daemon start --web-ui`. Bare `paseo` runs the
+interactive flow that prompts about the relay; relay consent only happens under
+`paseo daemon pair --relay`, which we never call — Caddy is our transport.
 
 ## Files
 
