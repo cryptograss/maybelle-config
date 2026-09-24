@@ -539,9 +539,16 @@ async def transcode_video_to_hls(
 
         # Each video rung is mapped with its own copy of the audio, then one
         # final bare audio mapping for the audio-only variant.
+        #
+        # ``0:a:0?`` — the FIRST audio track, not all of them. ``0:a?`` maps
+        # every audio stream the file has, which silently works until someone
+        # uploads a file with two. -var_stream_map then names a fixed number
+        # of outputs, ffmpeg finds more streams than names, and exits 234
+        # (EINVAL) having printed nothing but the input listing. A melodica
+        # overdub recorded on an iPhone did exactly that.
         for i in range(len(rungs)):
-            cmd.extend(["-map", f"[v{i}o]", "-map", "0:a?"])
-        cmd.extend(["-map", "0:a?"])
+            cmd.extend(["-map", f"[v{i}o]", "-map", "0:a:0?"])
+        cmd.extend(["-map", "0:a:0?"])
 
         cmd.extend([
             "-c:v", "libsvtav1",
