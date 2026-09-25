@@ -61,6 +61,10 @@
       include_role:
         name: services
 
+    - name: Include housekeeping role (backup retention, cache prune, disk warning)
+      include_role:
+        name: housekeeping
+
     - name: Create magenta-net docker network
       command: docker network create magenta-net
       register: network_create
