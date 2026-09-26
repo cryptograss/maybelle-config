@@ -776,6 +776,10 @@
         - /mnt/persist/magenta
         - /mnt/persist/magenta/backups
 
+    # Registered because Dockerfile.services ends with `COPY . .` — the source
+    # is baked into the image, so new code only reaches the running services if
+    # the containers are recreated. See the recreate: line on the compose task
+    # below, which keys off this.
     - name: Clone or update memory-lane repository
       git:
         repo: https://github.com/jMyles/memory-lane.git
@@ -786,6 +790,7 @@
         depth: 1
       environment:
         GIT_TERMINAL_PROMPT: "0"
+      register: memory_lane_source
 
     - name: Create Memory Lane .env file
       copy:
@@ -883,6 +888,13 @@
               name: memory-lane-net
         mode: '0644'
 
+    # recreate: the images bake the source in, and `state: present` alone will
+    # happily leave an old container running against a freshly built image.
+    # That is what happened on 2026-09-25: the clone advanced to 3835a3a, the
+    # play reported success, and memory-lane and mcp-server stayed up for three
+    # weeks on stale code — so a merged migration never ran and a merged MCP
+    # tool never appeared. Recreate whenever new source arrived, or on
+    # --rebuild; otherwise leave the containers alone.
     - name: Start Memory Lane services
       community.docker.docker_compose_v2:
         project_src: /mnt/persist/magenta/source
@@ -890,6 +902,7 @@
           - docker-compose.maybelle.yml
         build: always
         state: present
+        recreate: "{{ 'always' if (memory_lane_source.changed or (rebuild_images | default(false) | bool)) else 'auto' }}"
 
     # Inject secrets into scrubber container (from temp file created by chapter-1.sh)
     - name: Check if scrubber secrets temp file exists
