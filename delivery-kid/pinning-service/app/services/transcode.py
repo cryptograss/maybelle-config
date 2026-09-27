@@ -194,16 +194,71 @@ def _display_size(probe: Optional[dict]) -> Optional[tuple[int, int]]:
     return None
 
 
-def _audio_stream_count(probe: Optional[dict]) -> int:
-    """How many audio tracks the source carries.
+def _audio_streams(probe: Optional[dict]) -> list[dict]:
+    """Every audio track in the file, in the order ``-map 0:a:N`` counts them.
 
-    Nothing may assume this is 1. A phone records an overdub as two; a
-    silent clip has none, and naming an audio output that does not exist
-    makes ffmpeg quit with "Conversion failed!" and no usable explanation.
+    Position matters and is not the ffmpeg stream index: an iPhone file puts
+    video at #0:0, audio at #0:1 and #0:2, and several mebx metadata streams
+    after that. The readable audio track there is ``0:a:0``.
     """
     if not probe:
-        return 0
-    return sum(1 for s in probe.get("streams", []) if s.get("codec_type") == "audio")
+        return []
+    found = []
+    for stream in probe.get("streams", []):
+        if stream.get("codec_type") != "audio":
+            continue
+        found.append({
+            "position": len(found),
+            "codec_name": (stream.get("codec_name") or "unknown").lower(),
+            "codec_tag": stream.get("codec_tag_string") or "unknown",
+            "channels": stream.get("channels"),
+        })
+    return found
+
+
+AUDIO_PROBE_SECONDS = 0.5
+
+
+async def _decodable_audio(input_path: Path,
+                           streams: list[dict]) -> tuple[list[int], list[dict]]:
+    """Ask ffmpeg to decode a moment of each track, and believe the answer.
+
+    The label is not enough. Apple's spatial audio (APAC) probes as codec
+    "none" and cannot be decoded — but a track can equally well carry a
+    codec ffmpeg names confidently and still has no decoder for in this
+    build. Guessing from metadata means the next unfamiliar codec takes the
+    whole publish down again, which is exactly how this bug arrived twice.
+
+    Half a second per track, against the same binary that will do the real
+    encode, so a pass here means the encode will not die on that stream.
+    """
+    usable: list[int] = []
+    skipped: list[dict] = []
+
+    for stream in streams:
+        proc = await asyncio.create_subprocess_exec(
+            "ffmpeg", "-v", "error",
+            "-i", str(input_path),
+            "-map", f"0:a:{stream['position']}",
+            "-t", str(AUDIO_PROBE_SECONDS),
+            "-f", "null", "-",
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _out, err = await proc.communicate()
+        if proc.returncode == 0:
+            usable.append(stream["position"])
+            continue
+
+        detail = (err or b"").decode(errors="replace").strip().splitlines()
+        skipped.append({
+            "source_stream": stream["position"],
+            "codec_tag": stream["codec_tag"],
+            "codec_name": stream["codec_name"],
+            "channels": stream["channels"],
+            "reason": detail[-1][:200] if detail else "could not be decoded",
+        })
+    return usable, skipped
 
 
 def _ladder_for(short_side: Optional[int]) -> list[dict]:
@@ -616,7 +671,17 @@ async def transcode_video_to_hls(
         # do. An earlier fix for the two-track crash published only the first
         # track; Justin pointed out that this throws away what somebody
         # uploaded, and for an overdub the second take may be the whole point.
-        audio_tracks = _audio_stream_count(source_probe)
+        usable_audio, skipped_audio = await _decodable_audio(
+            input_path, _audio_streams(source_probe))
+        audio_tracks = len(usable_audio)
+        for entry in skipped_audio:
+            note = (f"Audio track {entry['source_stream'] + 1} "
+                    f"({entry['codec_tag']}) cannot be decoded and will not be "
+                    f"published — the rest of the file is unaffected. "
+                    f"ffmpeg said: {entry['reason']}")
+            logger.warning("[transcode] %s", note)
+            if progress_callback:
+                await progress_callback(note, None)
 
         audio_bitrate_args: list[str] = []
         map_args: list[str] = []
@@ -628,11 +693,12 @@ async def transcode_video_to_hls(
                 stream_parts.append(f"v:{i},name:{rung['name']}")
 
         elif audio_tracks == 1:
+            first = usable_audio[0]
             for i, rung in enumerate(rungs):
-                map_args += ["-map", f"[v{i}o]", "-map", "0:a:0"]
+                map_args += ["-map", f"[v{i}o]", "-map", f"0:a:{first}"]
                 audio_bitrate_args += [f"-b:a:{i}", rung["audio"]]
                 stream_parts.append(f"v:{i},a:{i},name:{rung['name']}")
-            map_args += ["-map", "0:a:0"]
+            map_args += ["-map", f"0:a:{first}"]
             audio_bitrate_args += [f"-b:a:{len(rungs)}", AUDIO_ONLY_BITRATE]
             stream_parts.append(f"a:{len(rungs)},name:{AUDIO_ONLY_NAME}")
 
@@ -640,17 +706,18 @@ async def transcode_video_to_hls(
             for i, rung in enumerate(rungs):
                 map_args += ["-map", f"[v{i}o]"]
                 stream_parts.append(f"v:{i},agroup:{AUDIO_GROUP},name:{rung['name']}")
-            for track in range(audio_tracks):
-                map_args += ["-map", f"0:a:{track}"]
+            for track, source_index in enumerate(usable_audio):
+                map_args += ["-map", f"0:a:{source_index}"]
                 audio_bitrate_args += [f"-b:a:{track}", VIDEO_LADDER[0]["audio"]]
                 default = ",default:yes" if track == 0 else ""
                 stream_parts.append(
-                    f"a:{track},agroup:{AUDIO_GROUP},name:{_track_name(track)}{default}")
+                    f"a:{track},agroup:{AUDIO_GROUP},"
+                    f"name:{_track_name(source_index)}{default}")
             # A standalone audio-only rendition as well. ffmpeg writes its
             # segments but leaves it out of the master playlist once an audio
             # group is in play, so it is added afterwards by hand — see
             # _add_audio_only_variant.
-            map_args += ["-map", "0:a:0"]
+            map_args += ["-map", f"0:a:{usable_audio[0]}"]
             audio_bitrate_args += [f"-b:a:{audio_tracks}", AUDIO_ONLY_BITRATE]
             stream_parts.append(f"a:{audio_tracks},name:{AUDIO_ONLY_NAME}")
 
@@ -868,11 +935,15 @@ async def transcode_video_to_hls(
             # Every audio track the source carried, all of them published.
             # Empty for a silent video, which is now a thing that works.
             "audio_tracks": [
-                {"name": _track_name(t), "source_stream": t,
-                 "default": t == 0,
+                {"name": _track_name(source_index), "source_stream": source_index,
+                 "default": position == 0,
                  "alternate_rendition": audio_tracks > 1}
-                for t in range(audio_tracks)
+                for position, source_index in enumerate(usable_audio)
             ],
+            # Tracks the file carried that could not be decoded. Recorded
+            # rather than silently dropped: someone should be able to see
+            # that their spatial audio did not make it.
+            "audio_tracks_skipped": skipped_audio,
             "ffmpeg_settings": {
                 "video_codec": "libsvtav1",
                 "preset": AV1_PRESET,

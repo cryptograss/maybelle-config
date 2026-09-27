@@ -46,15 +46,72 @@ def _segments(directory):
                   if list(p.glob("seg_*.m4s")))
 
 
-class TestStreamCounting:
-    def test_counts_audio_streams(self):
-        probe = {"streams": [{"codec_type": "video"}, {"codec_type": "audio"},
-                             {"codec_type": "audio"}, {"codec_type": "data"}]}
-        assert transcode._audio_stream_count(probe) == 2
+class TestListingAudioStreams:
+    def test_positions_count_audio_streams_only(self):
+        """``-map 0:a:N`` counts among audio streams, not all streams. An
+        iPhone file is video, audio, audio, then several mebx metadata
+        streams; its second audio track is 0:a:1, not 0:2."""
+        probe = {"streams": [
+            {"codec_type": "video", "codec_name": "hevc"},
+            {"codec_type": "audio", "codec_name": "aac", "channels": 2},
+            {"codec_type": "audio", "codec_name": "none",
+             "codec_tag_string": "apac", "channels": 4},
+            {"codec_type": "data", "codec_name": "none", "codec_tag_string": "mebx"},
+        ]}
+        streams = transcode._audio_streams(probe)
+        assert [s["position"] for s in streams] == [0, 1]
+        assert streams[1]["codec_tag"] == "apac"
+        assert streams[1]["channels"] == 4
 
-    def test_no_audio_is_zero_not_an_error(self):
-        assert transcode._audio_stream_count({"streams": [{"codec_type": "video"}]}) == 0
-        assert transcode._audio_stream_count(None) == 0
+    def test_no_audio_is_an_empty_list(self):
+        assert transcode._audio_streams(
+            {"streams": [{"codec_type": "video", "codec_name": "h264"}]}) == []
+        assert transcode._audio_streams(None) == []
+
+
+@needs_encoder
+class TestDecodeTest:
+    """What is publishable is decided by trying to decode it, not by reading
+    the codec name. Sky's spatial audio track (APAC) probes as "none", but
+    the next surprise might be a codec ffmpeg names confidently and still
+    cannot decode — and guessing is how this bug arrived twice.
+    """
+
+    def test_a_readable_track_passes(self, tmp_path):
+        src = _make(tmp_path / "one.mp4", 1)
+        streams = transcode._audio_streams(
+            asyncio.run(transcode.probe_video(src)))
+        usable, skipped = asyncio.run(transcode._decodable_audio(src, streams))
+        assert usable == [0]
+        assert skipped == []
+
+    def test_both_readable_tracks_pass(self, tmp_path):
+        src = _make(tmp_path / "two.mp4", 2)
+        streams = transcode._audio_streams(
+            asyncio.run(transcode.probe_video(src)))
+        usable, skipped = asyncio.run(transcode._decodable_audio(src, streams))
+        assert usable == [0, 1]
+
+    def test_a_track_that_cannot_be_read_is_skipped_with_a_reason(self, tmp_path):
+        """Pointed at a stream that does not exist, the decode test must
+        report rather than raise — the same path a real undecodable track
+        takes. APAC itself cannot be synthesised here: ffmpeg decodes by
+        content, so a forged codec tag is still decoded correctly.
+        """
+        src = _make(tmp_path / "one.mp4", 1)
+        phantom = [{"position": 7, "codec_name": "none",
+                    "codec_tag": "apac", "channels": 4}]
+        usable, skipped = asyncio.run(transcode._decodable_audio(src, phantom))
+        assert usable == []
+        assert len(skipped) == 1
+        assert skipped[0]["codec_tag"] == "apac"
+        assert skipped[0]["reason"]          # carries ffmpeg's own words
+
+    def test_a_silent_file_has_nothing_to_test(self, tmp_path):
+        src = _make(tmp_path / "silent.mp4", 0)
+        streams = transcode._audio_streams(asyncio.run(transcode.probe_video(src)))
+        assert streams == []
+        assert asyncio.run(transcode._decodable_audio(src, streams)) == ([], [])
 
 
 @needs_encoder
