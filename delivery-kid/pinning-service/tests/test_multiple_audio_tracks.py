@@ -47,14 +47,20 @@ def _segments(directory):
 
 
 class TestStreamCounting:
-    def test_counts_audio_streams(self):
-        probe = {"streams": [{"codec_type": "video"}, {"codec_type": "audio"},
-                             {"codec_type": "audio"}, {"codec_type": "data"}]}
-        assert transcode._audio_stream_count(probe) == 2
+    def test_finds_the_audio_streams(self):
+        probe = {"streams": [{"codec_type": "video", "codec_name": "h264"},
+                             {"codec_type": "audio", "codec_name": "aac"},
+                             {"codec_type": "audio", "codec_name": "opus"},
+                             {"codec_type": "data", "codec_name": "none"}]}
+        usable, skipped = transcode._audio_streams(probe)
+        assert usable == [0, 1]
+        assert skipped == []
 
-    def test_no_audio_is_zero_not_an_error(self):
-        assert transcode._audio_stream_count({"streams": [{"codec_type": "video"}]}) == 0
-        assert transcode._audio_stream_count(None) == 0
+    def test_no_audio_is_empty_not_an_error(self):
+        usable, skipped = transcode._audio_streams(
+            {"streams": [{"codec_type": "video", "codec_name": "h264"}]})
+        assert usable == [] and skipped == []
+        assert transcode._audio_streams(None) == ([], [])
 
 
 @needs_encoder
@@ -119,3 +125,54 @@ def test_audio_only_survives_the_alternate_renditions(tmp_path):
     assert entry, master
     bandwidth = int(re.search(r"BANDWIDTH=(\d+)", entry[0]).group(1))
     assert 1_000 < bandwidth < 1_000_000, bandwidth
+
+
+class TestUndecodableTracks:
+    """Sky's iPhone records spatial audio as a second track in Apple's APAC
+    codec. ffmpeg has no decoder for it — it probes as codec_name "none" —
+    and mapping it killed the whole publish with "Decoding requested, but no
+    decoder found". Found on ReleaseDraft:A9c19c7d, the first upload after
+    the publish-every-track change went live.
+    """
+
+    SKY_FILE = {"streams": [
+        {"codec_type": "video", "codec_name": "hevc"},
+        {"codec_type": "audio", "codec_name": "aac", "channels": 2},
+        {"codec_type": "audio", "codec_name": "none",
+         "codec_tag_string": "apac", "channels": 4},
+        {"codec_type": "data", "codec_name": "none", "codec_tag_string": "mebx"},
+    ]}
+
+    def test_publishes_what_it_can_read_and_reports_the_rest(self):
+        usable, skipped = transcode._audio_streams(self.SKY_FILE)
+        assert usable == [0]
+        assert len(skipped) == 1
+        assert skipped[0]["codec_tag"] == "apac"
+        assert skipped[0]["source_stream"] == 1
+        assert "no decoder" in skipped[0]["reason"]
+
+    def test_an_unreadable_first_track_does_not_shift_the_others(self):
+        """-map 0:a:N counts among audio streams, so the position of a
+        readable track has to survive an unreadable one in front of it."""
+        probe = {"streams": [
+            {"codec_type": "audio", "codec_name": "none", "codec_tag_string": "apac"},
+            {"codec_type": "audio", "codec_name": "aac"},
+        ]}
+        usable, skipped = transcode._audio_streams(probe)
+        assert usable == [1]
+        assert skipped[0]["source_stream"] == 0
+
+    def test_every_track_unreadable_is_treated_as_silence(self):
+        probe = {"streams": [
+            {"codec_type": "video", "codec_name": "hevc"},
+            {"codec_type": "audio", "codec_name": "none", "codec_tag_string": "apac"},
+        ]}
+        usable, skipped = transcode._audio_streams(probe)
+        assert usable == []
+        assert len(skipped) == 1
+
+    def test_data_streams_are_not_mistaken_for_audio(self):
+        """An iPhone file carries several mebx metadata streams, which also
+        probe as codec_name "none"."""
+        _usable, skipped = transcode._audio_streams(self.SKY_FILE)
+        assert all(s["codec_tag"] != "mebx" for s in skipped)

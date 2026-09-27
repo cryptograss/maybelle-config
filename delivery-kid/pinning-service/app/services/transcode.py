@@ -194,16 +194,40 @@ def _display_size(probe: Optional[dict]) -> Optional[tuple[int, int]]:
     return None
 
 
-def _audio_stream_count(probe: Optional[dict]) -> int:
-    """How many audio tracks the source carries.
+def _audio_streams(probe: Optional[dict]) -> tuple[list[int], list[dict]]:
+    """Which audio tracks can be published, and which cannot, and why.
 
-    Nothing may assume this is 1. A phone records an overdub as two; a
-    silent clip has none, and naming an audio output that does not exist
-    makes ffmpeg quit with "Conversion failed!" and no usable explanation.
+    Returns (usable, skipped). Indices are positions among the file's audio
+    streams, which is what ``-map 0:a:N`` counts.
+
+    Nothing may assume every audio track is readable. An iPhone records
+    spatial audio as a second track in Apple's APAC codec, which ffmpeg has
+    no decoder for — it probes as codec_name "none" and mapping it kills the
+    whole encode with "Decoding requested, but no decoder found". Publishing
+    every track is right; failing the publish because one track is exotic is
+    not.
     """
+    usable: list[int] = []
+    skipped: list[dict] = []
     if not probe:
-        return 0
-    return sum(1 for s in probe.get("streams", []) if s.get("codec_type") == "audio")
+        return usable, skipped
+
+    position = -1
+    for stream in probe.get("streams", []):
+        if stream.get("codec_type") != "audio":
+            continue
+        position += 1
+        codec = (stream.get("codec_name") or "").lower()
+        if codec and codec not in ("none", "unknown"):
+            usable.append(position)
+            continue
+        skipped.append({
+            "source_stream": position,
+            "codec_tag": stream.get("codec_tag_string") or "unknown",
+            "channels": stream.get("channels"),
+            "reason": "no decoder for this codec",
+        })
+    return usable, skipped
 
 
 def _ladder_for(short_side: Optional[int]) -> list[dict]:
@@ -616,7 +640,15 @@ async def transcode_video_to_hls(
         # do. An earlier fix for the two-track crash published only the first
         # track; Justin pointed out that this throws away what somebody
         # uploaded, and for an overdub the second take may be the whole point.
-        audio_tracks = _audio_stream_count(source_probe)
+        usable_audio, skipped_audio = _audio_streams(source_probe)
+        audio_tracks = len(usable_audio)
+        for entry in skipped_audio:
+            note = (f"Audio track {entry['source_stream'] + 1} "
+                    f"({entry['codec_tag']}) cannot be decoded and will not be "
+                    f"published — the rest of the file is unaffected")
+            logger.warning("[transcode] %s", note)
+            if progress_callback:
+                await progress_callback(note, None)
 
         audio_bitrate_args: list[str] = []
         map_args: list[str] = []
@@ -628,11 +660,12 @@ async def transcode_video_to_hls(
                 stream_parts.append(f"v:{i},name:{rung['name']}")
 
         elif audio_tracks == 1:
+            first = usable_audio[0]
             for i, rung in enumerate(rungs):
-                map_args += ["-map", f"[v{i}o]", "-map", "0:a:0"]
+                map_args += ["-map", f"[v{i}o]", "-map", f"0:a:{first}"]
                 audio_bitrate_args += [f"-b:a:{i}", rung["audio"]]
                 stream_parts.append(f"v:{i},a:{i},name:{rung['name']}")
-            map_args += ["-map", "0:a:0"]
+            map_args += ["-map", f"0:a:{first}"]
             audio_bitrate_args += [f"-b:a:{len(rungs)}", AUDIO_ONLY_BITRATE]
             stream_parts.append(f"a:{len(rungs)},name:{AUDIO_ONLY_NAME}")
 
@@ -640,17 +673,18 @@ async def transcode_video_to_hls(
             for i, rung in enumerate(rungs):
                 map_args += ["-map", f"[v{i}o]"]
                 stream_parts.append(f"v:{i},agroup:{AUDIO_GROUP},name:{rung['name']}")
-            for track in range(audio_tracks):
-                map_args += ["-map", f"0:a:{track}"]
+            for track, source_index in enumerate(usable_audio):
+                map_args += ["-map", f"0:a:{source_index}"]
                 audio_bitrate_args += [f"-b:a:{track}", VIDEO_LADDER[0]["audio"]]
                 default = ",default:yes" if track == 0 else ""
                 stream_parts.append(
-                    f"a:{track},agroup:{AUDIO_GROUP},name:{_track_name(track)}{default}")
+                    f"a:{track},agroup:{AUDIO_GROUP},"
+                    f"name:{_track_name(source_index)}{default}")
             # A standalone audio-only rendition as well. ffmpeg writes its
             # segments but leaves it out of the master playlist once an audio
             # group is in play, so it is added afterwards by hand — see
             # _add_audio_only_variant.
-            map_args += ["-map", "0:a:0"]
+            map_args += ["-map", f"0:a:{usable_audio[0]}"]
             audio_bitrate_args += [f"-b:a:{audio_tracks}", AUDIO_ONLY_BITRATE]
             stream_parts.append(f"a:{audio_tracks},name:{AUDIO_ONLY_NAME}")
 
@@ -868,11 +902,15 @@ async def transcode_video_to_hls(
             # Every audio track the source carried, all of them published.
             # Empty for a silent video, which is now a thing that works.
             "audio_tracks": [
-                {"name": _track_name(t), "source_stream": t,
-                 "default": t == 0,
+                {"name": _track_name(source_index), "source_stream": source_index,
+                 "default": position == 0,
                  "alternate_rendition": audio_tracks > 1}
-                for t in range(audio_tracks)
+                for position, source_index in enumerate(usable_audio)
             ],
+            # Tracks the file carried that could not be decoded. Recorded
+            # rather than silently dropped: someone should be able to see
+            # that their spatial audio did not make it.
+            "audio_tracks_skipped": skipped_audio,
             "ffmpeg_settings": {
                 "video_codec": "libsvtav1",
                 "preset": AV1_PRESET,
