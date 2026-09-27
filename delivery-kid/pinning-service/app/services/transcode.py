@@ -282,6 +282,34 @@ TONEMAP_CHAIN = ("zscale=transfer=linear:npl=100,"
                  "format=yuv420p")
 
 
+# Half a second of frames is enough to prove the filter graph runs.
+TONEMAP_PROBE_SECONDS = 0.5
+
+
+async def _tonemap_works(input_path: Path) -> tuple[bool, str]:
+    """Can this file actually be tone mapped? Find out by doing it.
+
+    Same reasoning as _decodable_audio. Without this, an ffmpeg built
+    without zscale — or a file whose colour metadata the filter rejects —
+    turns an upload that used to publish (looking flat) into one that
+    fails outright. Flat is bad; refusing the take is worse. So we spend
+    half a second finding out, and fall back to the old behaviour with a
+    note rather than losing the video.
+    """
+    proc = await asyncio.create_subprocess_exec(
+        "ffmpeg", "-v", "error", "-i", str(input_path),
+        "-t", str(TONEMAP_PROBE_SECONDS),
+        "-vf", TONEMAP_CHAIN, "-f", "null", "-",
+        stdout=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    _, stderr = await proc.communicate()
+    if proc.returncode == 0:
+        return True, ""
+    lines = [ln for ln in (stderr or b"").decode("utf-8", "replace").splitlines() if ln.strip()]
+    return False, lines[-1] if lines else f"ffmpeg exited {proc.returncode}"
+
+
 def _hdr_transfer(probe: Optional[dict]) -> Optional[str]:
     """The source's transfer function if it is HDR, else None."""
     if not probe:
@@ -683,8 +711,22 @@ async def transcode_video_to_hls(
         # One split per video rung, each scaled so its short side matches the
         # rung.
         split_labels = "".join(f"[v{i}]" for i in range(len(rungs)))
-        hdr_transfer = _hdr_transfer(source_probe)
-        if hdr_transfer:
+        source_transfer = _hdr_transfer(source_probe)
+        tone_map = bool(source_transfer)
+        tonemap_skipped = None
+        if tone_map:
+            ok, why = await _tonemap_works(input_path)
+            if not ok:
+                # Publish it the way we did before rather than not at all.
+                tone_map = False
+                tonemap_skipped = why
+                if progress_callback:
+                    await progress_callback(
+                        f"This video is {source_transfer.upper()} HDR, but tone "
+                        f"mapping it to SDR did not work here, so it is being "
+                        f"published as it was — the colour may look flat. "
+                        f"ffmpeg said: {why}", None)
+        if tone_map:
             # Once, before the split: tone mapping every rung separately
             # would cost the same work several times over.
             chain = [f"[0:v]{TONEMAP_CHAIN}[sdr]",
@@ -764,9 +806,9 @@ async def transcode_video_to_hls(
 
         cmd.extend(map_args)
 
-        if hdr_transfer and progress_callback:
+        if tone_map and progress_callback:
             await progress_callback(
-                f"Tone mapping {hdr_transfer.upper()} HDR to SDR", None)
+                f"Tone mapping {source_transfer.upper()} HDR to SDR", None)
 
         cmd.extend([
             "-c:v", "libsvtav1",
@@ -774,7 +816,7 @@ async def transcode_video_to_hls(
             "-g", str(gop),          # keyframe every segment, see above
             "-pix_fmt", "yuv420p",   # force 8-bit — 10-bit breaks some decoders
         ])
-        if hdr_transfer:
+        if tone_map:
             # The pixels are BT.709 now; the file must say so, or players go
             # on treating them as HDR.
             cmd.extend(["-color_primaries", "bt709",
@@ -901,7 +943,7 @@ async def transcode_video_to_hls(
         # the encode so a failure here cannot cost us a successful transcode.
         poster_name = await _write_poster(
             input_path, output_dir, total_seconds, trim_start,
-            hdr=bool(hdr_transfer)
+            hdr=tone_map
         )
         if progress_callback and poster_name:
             await progress_callback("Poster frame written", None)
@@ -997,8 +1039,9 @@ async def transcode_video_to_hls(
             # that their spatial audio did not make it.
             "audio_tracks_skipped": skipped_audio,
             # What the source was, and what was done about it.
-            "source_transfer": hdr_transfer or "sdr",
-            "tone_mapped": bool(hdr_transfer),
+            "source_transfer": source_transfer or "sdr",
+            "tone_mapped": tone_map,
+            "tone_map_skipped": tonemap_skipped,
             "ffmpeg_settings": {
                 "video_codec": "libsvtav1",
                 "preset": AV1_PRESET,

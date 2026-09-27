@@ -115,9 +115,11 @@ class TestEndToEnd:
         needs the same treatment — otherwise the still a reader sees before
         pressing play is the wrong one.
 
-        It turns out to be worse than wrong: without tone mapping the JPEG
-        encoder refuses 10-bit HDR frames outright, so an HDR upload got no
-        poster at all. Tone mapping fixes that as a side effect.
+        On some ffmpeg builds it is worse than wrong: ffmpeg 8 refuses
+        10-bit HDR frames at the JPEG encoder, so no poster is written at
+        all. The Debian 7.1.5 in our image does write one — flat. Hence the
+        conditional below: what must hold everywhere is that the mapped
+        poster exists and differs from the unmapped one.
         """
         src = _hdr_clip(tmp_path / "hdr.mp4")
         (tmp_path / "a").mkdir()
@@ -136,3 +138,57 @@ class TestEndToEnd:
                     capture_output=True).stdout
                 return sum(raw) / len(raw)
             assert luma(tmp_path / "a", plain) != luma(tmp_path / "b", mapped)
+
+
+@needs_encoder
+class TestFallback:
+    """Tone mapping must never cost us a video.
+
+    Before this, an HDR upload published looking flat. If the filter chain
+    fails — an ffmpeg without zscale, a file the filter rejects — the naive
+    version of this fix would fail the whole encode, which is worse than
+    the bug it fixes. So the chain is tested on half a second of frames
+    first, exactly as undecodable audio tracks are.
+    """
+
+    def test_a_broken_chain_publishes_flat_instead_of_failing(
+            self, tmp_path, monkeypatch):
+        src = _hdr_clip(tmp_path / "hdr.mp4")
+        monkeypatch.setattr(transcode, "TONEMAP_CHAIN", "definitely_not_a_filter=1")
+
+        result = asyncio.run(transcode.transcode_video_to_hls(src, tmp_path / "out"))
+
+        assert result.success, "a tone map we cannot run must not lose the video"
+        info = result.transcode_info
+        assert info["tone_mapped"] is False
+        # The source was still HDR, and the record has to say so — otherwise
+        # a "this looks flat" report cannot be answered.
+        assert info["source_transfer"] == "smpte2084"
+        assert info["tone_map_skipped"], "no reason recorded for the fallback"
+
+    def test_the_probe_passes_on_a_file_that_can_be_mapped(self, tmp_path):
+        ok, why = asyncio.run(
+            transcode._tonemap_works(_hdr_clip(tmp_path / "hdr.mp4")))
+        assert ok, why
+
+    def test_the_probe_fails_loudly_on_one_that_cannot(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(transcode, "TONEMAP_CHAIN", "definitely_not_a_filter=1")
+        ok, why = asyncio.run(
+            transcode._tonemap_works(_hdr_clip(tmp_path / "hdr.mp4")))
+        assert not ok
+        assert why, "a failure with no reason is not much use on the page"
+
+    def test_sdr_never_pays_for_the_probe(self, tmp_path, monkeypatch):
+        """The probe costs half a second. SDR footage must not be charged
+        for it — which also means a broken chain cannot affect SDR at all."""
+        calls = []
+
+        async def spy(path):
+            calls.append(path)
+            return True, ""
+
+        monkeypatch.setattr(transcode, "_tonemap_works", spy)
+        result = asyncio.run(transcode.transcode_video_to_hls(
+            _sdr_clip(tmp_path / "sdr.mp4"), tmp_path / "out"))
+        assert result.success, result.error
+        assert calls == []
