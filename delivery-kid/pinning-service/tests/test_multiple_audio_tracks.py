@@ -1,13 +1,17 @@
-"""A file with more than one audio track must still encode.
+"""Whatever audio the uploader gave us should come out the other side.
 
 Found on ReleaseDraft:50881aeb — "Melodica overdub for 4Masks", an iPhone .mov
-whose video was stream #0:2, with two audio tracks and four `mebx` data
-streams. The encoder mapped `0:a?` (every audio stream) while -var_stream_map
-named a fixed set of outputs, so ffmpeg exited 234 having printed only its
-input listing. The upload was fine; the encode was not.
+with two audio tracks, which made ffmpeg exit 234 having printed only its
+input listing. The first fix published the first track and dropped the rest;
+Justin pointed out that this throws away what somebody uploaded, and for an
+overdub the second take may be the whole point.
+
+A silent video failed outright for the same underlying reason: the command
+named an audio output that did not exist.
 """
 
 import asyncio
+import re
 import shutil
 import subprocess
 
@@ -23,8 +27,8 @@ needs_encoder = pytest.mark.skipif(
 )
 
 
-def _make(path, audio_tracks, extra_data_stream=False):
-    """A short clip with the given number of audio tracks."""
+def _make(path, audio_tracks):
+    """A short clip carrying exactly this many audio tracks."""
     cmd = ["ffmpeg", "-v", "error", "-y",
            "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=30:duration=1"]
     for n in range(audio_tracks):
@@ -37,34 +41,81 @@ def _make(path, audio_tracks, extra_data_stream=False):
     return path
 
 
-def _audio_streams(path):
-    out = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "a",
-                          "-show_entries", "stream=index", "-of", "csv=p=0", str(path)],
-                         capture_output=True, text=True).stdout
-    return len([line for line in out.splitlines() if line.strip()])
+def _segments(directory):
+    return sorted(p.name for p in directory.glob("stream_*")
+                  if list(p.glob("seg_*.m4s")))
+
+
+class TestStreamCounting:
+    def test_counts_audio_streams(self):
+        probe = {"streams": [{"codec_type": "video"}, {"codec_type": "audio"},
+                             {"codec_type": "audio"}, {"codec_type": "data"}]}
+        assert transcode._audio_stream_count(probe) == 2
+
+    def test_no_audio_is_zero_not_an_error(self):
+        assert transcode._audio_stream_count({"streams": [{"codec_type": "video"}]}) == 0
+        assert transcode._audio_stream_count(None) == 0
 
 
 @needs_encoder
 @pytest.mark.parametrize("tracks", [1, 2, 3])
 def test_encodes_whatever_the_audio_track_count(tmp_path, tracks):
     src = _make(tmp_path / f"{tracks}track.mp4", tracks)
-    assert _audio_streams(src) == tracks
-
     result = asyncio.run(transcode.transcode_video_to_hls(src, tmp_path / f"out{tracks}"))
     assert result.success, result.error
 
 
 @needs_encoder
-def test_extra_tracks_do_not_multiply_the_variants(tmp_path):
-    """Only the first audio track is published, whatever the source carries."""
+def test_a_silent_video_publishes(tmp_path):
+    """No audio at all used to fail with "Conversion failed!" and nothing else."""
+    src = _make(tmp_path / "silent.mp4", 0)
+    out = tmp_path / "out"
+    result = asyncio.run(transcode.transcode_video_to_hls(src, out))
+    assert result.success, result.error
+    assert result.transcode_info["audio_tracks"] == []
+    # No audio-only rendition promised for a file with no audio in it.
+    assert "stream_audio" not in _segments(out)
+    assert not any(v["name"] == "audio" for v in result.transcode_info["variants"])
+
+
+@needs_encoder
+def test_every_track_is_published_not_just_the_first(tmp_path):
     src = _make(tmp_path / "two.mp4", 2)
     out = tmp_path / "out"
     result = asyncio.run(transcode.transcode_video_to_hls(src, out))
     assert result.success, result.error
 
-    # One directory per rung, plus exactly one audio-only stream.
-    streams = sorted(p.name for p in out.glob("stream_*"))
-    assert streams.count("stream_audio") == 1
-    variants = [v["name"] for v in result.transcode_info["variants"]]
-    assert variants.count("audio") == 1
-    assert len(streams) == len(variants)
+    # Both tracks have real media on disk, not just an entry in a playlist.
+    dirs = _segments(out)
+    assert "stream_track1" in dirs and "stream_track2" in dirs
+
+    # And both are offered to the player as alternate renditions, so the
+    # viewer can watch the video while choosing which take they hear.
+    master = (out / "master.m3u8").read_text()
+    assert len(re.findall(r"EXT-X-MEDIA:TYPE=AUDIO", master)) == 2
+
+    tracks = result.transcode_info["audio_tracks"]
+    assert [t["name"] for t in tracks] == ["track1", "track2"]
+    assert tracks[0]["default"] and not tracks[1]["default"]
+
+
+@needs_encoder
+def test_audio_only_survives_the_alternate_renditions(tmp_path):
+    """ffmpeg drops the audio-only rendition from the master once a group is
+    in play. It is the whole point for anyone on a tether, so it is added
+    back — and must point at media that exists."""
+    src = _make(tmp_path / "two.mp4", 2)
+    out = tmp_path / "out"
+    result = asyncio.run(transcode.transcode_video_to_hls(src, out))
+    assert result.success, result.error
+
+    master = (out / "master.m3u8").read_text()
+    assert "stream_audio/playlist.m3u8" in master
+    assert "stream_audio" in _segments(out)
+
+    # The bandwidth claimed for it should be measured, not invented.
+    entry = [line for line in master.splitlines()
+             if line.startswith("#EXT-X-STREAM-INF") and "opus" in line]
+    assert entry, master
+    bandwidth = int(re.search(r"BANDWIDTH=(\d+)", entry[0]).group(1))
+    assert 1_000 < bandwidth < 1_000_000, bandwidth
