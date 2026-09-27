@@ -194,38 +194,69 @@ def _display_size(probe: Optional[dict]) -> Optional[tuple[int, int]]:
     return None
 
 
-def _audio_streams(probe: Optional[dict]) -> tuple[list[int], list[dict]]:
-    """Which audio tracks can be published, and which cannot, and why.
+def _audio_streams(probe: Optional[dict]) -> list[dict]:
+    """Every audio track in the file, in the order ``-map 0:a:N`` counts them.
 
-    Returns (usable, skipped). Indices are positions among the file's audio
-    streams, which is what ``-map 0:a:N`` counts.
-
-    Nothing may assume every audio track is readable. An iPhone records
-    spatial audio as a second track in Apple's APAC codec, which ffmpeg has
-    no decoder for — it probes as codec_name "none" and mapping it kills the
-    whole encode with "Decoding requested, but no decoder found". Publishing
-    every track is right; failing the publish because one track is exotic is
-    not.
+    Position matters and is not the ffmpeg stream index: an iPhone file puts
+    video at #0:0, audio at #0:1 and #0:2, and several mebx metadata streams
+    after that. The readable audio track there is ``0:a:0``.
     """
-    usable: list[int] = []
-    skipped: list[dict] = []
     if not probe:
-        return usable, skipped
-
-    position = -1
+        return []
+    found = []
     for stream in probe.get("streams", []):
         if stream.get("codec_type") != "audio":
             continue
-        position += 1
-        codec = (stream.get("codec_name") or "").lower()
-        if codec and codec not in ("none", "unknown"):
-            usable.append(position)
-            continue
-        skipped.append({
-            "source_stream": position,
+        found.append({
+            "position": len(found),
+            "codec_name": (stream.get("codec_name") or "unknown").lower(),
             "codec_tag": stream.get("codec_tag_string") or "unknown",
             "channels": stream.get("channels"),
-            "reason": "no decoder for this codec",
+        })
+    return found
+
+
+AUDIO_PROBE_SECONDS = 0.5
+
+
+async def _decodable_audio(input_path: Path,
+                           streams: list[dict]) -> tuple[list[int], list[dict]]:
+    """Ask ffmpeg to decode a moment of each track, and believe the answer.
+
+    The label is not enough. Apple's spatial audio (APAC) probes as codec
+    "none" and cannot be decoded — but a track can equally well carry a
+    codec ffmpeg names confidently and still has no decoder for in this
+    build. Guessing from metadata means the next unfamiliar codec takes the
+    whole publish down again, which is exactly how this bug arrived twice.
+
+    Half a second per track, against the same binary that will do the real
+    encode, so a pass here means the encode will not die on that stream.
+    """
+    usable: list[int] = []
+    skipped: list[dict] = []
+
+    for stream in streams:
+        proc = await asyncio.create_subprocess_exec(
+            "ffmpeg", "-v", "error",
+            "-i", str(input_path),
+            "-map", f"0:a:{stream['position']}",
+            "-t", str(AUDIO_PROBE_SECONDS),
+            "-f", "null", "-",
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _out, err = await proc.communicate()
+        if proc.returncode == 0:
+            usable.append(stream["position"])
+            continue
+
+        detail = (err or b"").decode(errors="replace").strip().splitlines()
+        skipped.append({
+            "source_stream": stream["position"],
+            "codec_tag": stream["codec_tag"],
+            "codec_name": stream["codec_name"],
+            "channels": stream["channels"],
+            "reason": detail[-1][:200] if detail else "could not be decoded",
         })
     return usable, skipped
 
@@ -640,12 +671,14 @@ async def transcode_video_to_hls(
         # do. An earlier fix for the two-track crash published only the first
         # track; Justin pointed out that this throws away what somebody
         # uploaded, and for an overdub the second take may be the whole point.
-        usable_audio, skipped_audio = _audio_streams(source_probe)
+        usable_audio, skipped_audio = await _decodable_audio(
+            input_path, _audio_streams(source_probe))
         audio_tracks = len(usable_audio)
         for entry in skipped_audio:
             note = (f"Audio track {entry['source_stream'] + 1} "
                     f"({entry['codec_tag']}) cannot be decoded and will not be "
-                    f"published — the rest of the file is unaffected")
+                    f"published — the rest of the file is unaffected. "
+                    f"ffmpeg said: {entry['reason']}")
             logger.warning("[transcode] %s", note)
             if progress_callback:
                 await progress_callback(note, None)
