@@ -67,6 +67,17 @@ VIDEO_LADDER = (
 AUDIO_ONLY_NAME = "audio"
 AUDIO_ONLY_BITRATE = "160k"
 
+# When a file carries more than one audio track, they are published as HLS
+# alternate renditions in this group rather than one being chosen for the
+# viewer. "track1", "track2" are honest placeholders: the container rarely
+# says what a track is, and inventing names ("mic", "overdub") would be a
+# guess dressed as metadata.
+AUDIO_GROUP = "aud"
+
+
+def _track_name(index: int) -> str:
+    return f"track{index + 1}"
+
 # Progress reporting. ffmpeg emits a block every ~0.5s at 1080p; forwarding all
 # of them would flood the SSE stream and the on-page log, so updates are
 # throttled to one update every this many seconds. The consumer is expected
@@ -183,6 +194,18 @@ def _display_size(probe: Optional[dict]) -> Optional[tuple[int, int]]:
     return None
 
 
+def _audio_stream_count(probe: Optional[dict]) -> int:
+    """How many audio tracks the source carries.
+
+    Nothing may assume this is 1. A phone records an overdub as two; a
+    silent clip has none, and naming an audio output that does not exist
+    makes ffmpeg quit with "Conversion failed!" and no usable explanation.
+    """
+    if not probe:
+        return 0
+    return sum(1 for s in probe.get("streams", []) if s.get("codec_type") == "audio")
+
+
 def _ladder_for(short_side: Optional[int]) -> list[dict]:
     """The renditions worth producing for a source whose short side is this.
 
@@ -234,6 +257,45 @@ def _frame_rate(probe: Optional[dict]) -> float:
             except (ValueError, ZeroDivisionError):
                 continue
     return 30.0
+
+
+def _add_audio_only_variant(master: Path, audio_dir_name: str) -> bool:
+    """Advertise the audio-only rendition that ffmpeg wrote but did not list.
+
+    With an audio group in play, ffmpeg emits the standalone audio-only
+    rendition's segments and playlist, then omits it from the master. The
+    alternate renditions in EXT-X-MEDIA cannot serve that purpose: a player
+    following those still fetches a video rendition alongside, which is the
+    opposite of what someone on a phone tether wants.
+
+    So the variant is appended here. Returns whether it was added.
+    """
+    try:
+        text = master.read_text()
+    except OSError:
+        return False
+    entry = f"{audio_dir_name}/playlist.m3u8"
+    if entry in text:
+        return False
+
+    playlist = master.parent / audio_dir_name / "playlist.m3u8"
+    segments = sorted((master.parent / audio_dir_name).glob("seg_*.m4s"))
+    if not playlist.exists() or not segments:
+        return False
+
+    # Bandwidth from what was actually written, rather than a guess: total
+    # bytes over the duration the playlist declares.
+    total_bytes = sum(s.stat().st_size for s in segments)
+    durations = [float(line.split(":", 1)[1].rstrip(","))
+                 for line in playlist.read_text().splitlines()
+                 if line.startswith("#EXTINF:")]
+    seconds = sum(durations) or 1.0
+    bandwidth = int(total_bytes * 8 / seconds)
+
+    master.write_text(
+        text.rstrip("\n")
+        + f'\n#EXT-X-STREAM-INF:BANDWIDTH={bandwidth},CODECS="opus"\n{entry}\n')
+    return True
 
 
 async def _write_poster(input_path: Path, output_dir: Path,
@@ -537,27 +599,76 @@ async def transcode_video_to_hls(
             chain.append(f"[v{i}]{_scale_filter(rung['height'], portrait)}[v{i}o]")
         cmd.extend(["-filter_complex", ";".join(chain)])
 
-        # Each video rung is mapped with its own copy of the audio, then one
-        # final bare audio mapping for the audio-only variant.
-        for i in range(len(rungs)):
-            cmd.extend(["-map", f"[v{i}o]", "-map", "0:a?"])
-        cmd.extend(["-map", "0:a?"])
+        # How the audio is carried depends on what the uploader gave us.
+        #
+        #   no audio     video renditions only. A silent video used to fail
+        #                outright: the command named an audio output that did
+        #                not exist and ffmpeg quit with "Conversion failed!".
+        #   one track    muxed into each video rendition, plus a standalone
+        #                audio-only rendition. The long-standing arrangement.
+        #   many tracks  every track published as an HLS alternate rendition
+        #                (EXT-X-MEDIA), bound to the video by a group, so the
+        #                viewer can watch the video and choose which take they
+        #                hear. Audio is then encoded once rather than once per
+        #                video rung.
+        #
+        # The multi-track case exists because discarding tracks is not ours to
+        # do. An earlier fix for the two-track crash published only the first
+        # track; Justin pointed out that this throws away what somebody
+        # uploaded, and for an overdub the second take may be the whole point.
+        audio_tracks = _audio_stream_count(source_probe)
+
+        audio_bitrate_args: list[str] = []
+        map_args: list[str] = []
+        stream_parts: list[str] = []
+
+        if audio_tracks == 0:
+            for i, rung in enumerate(rungs):
+                map_args += ["-map", f"[v{i}o]"]
+                stream_parts.append(f"v:{i},name:{rung['name']}")
+
+        elif audio_tracks == 1:
+            for i, rung in enumerate(rungs):
+                map_args += ["-map", f"[v{i}o]", "-map", "0:a:0"]
+                audio_bitrate_args += [f"-b:a:{i}", rung["audio"]]
+                stream_parts.append(f"v:{i},a:{i},name:{rung['name']}")
+            map_args += ["-map", "0:a:0"]
+            audio_bitrate_args += [f"-b:a:{len(rungs)}", AUDIO_ONLY_BITRATE]
+            stream_parts.append(f"a:{len(rungs)},name:{AUDIO_ONLY_NAME}")
+
+        else:
+            for i, rung in enumerate(rungs):
+                map_args += ["-map", f"[v{i}o]"]
+                stream_parts.append(f"v:{i},agroup:{AUDIO_GROUP},name:{rung['name']}")
+            for track in range(audio_tracks):
+                map_args += ["-map", f"0:a:{track}"]
+                audio_bitrate_args += [f"-b:a:{track}", VIDEO_LADDER[0]["audio"]]
+                default = ",default:yes" if track == 0 else ""
+                stream_parts.append(
+                    f"a:{track},agroup:{AUDIO_GROUP},name:{_track_name(track)}{default}")
+            # A standalone audio-only rendition as well. ffmpeg writes its
+            # segments but leaves it out of the master playlist once an audio
+            # group is in play, so it is added afterwards by hand — see
+            # _add_audio_only_variant.
+            map_args += ["-map", "0:a:0"]
+            audio_bitrate_args += [f"-b:a:{audio_tracks}", AUDIO_ONLY_BITRATE]
+            stream_parts.append(f"a:{audio_tracks},name:{AUDIO_ONLY_NAME}")
+
+        cmd.extend(map_args)
 
         cmd.extend([
             "-c:v", "libsvtav1",
             "-preset", str(AV1_PRESET),
             "-g", str(gop),          # keyframe every segment, see above
             "-pix_fmt", "yuv420p",   # force 8-bit — 10-bit breaks some decoders
-            "-c:a", "libopus",
         ])
+        if audio_tracks:
+            cmd.extend(["-c:a", "libopus"])
         for i, rung in enumerate(rungs):
-            cmd.extend([f"-crf:v:{i}", str(rung["crf"]),
-                        f"-b:a:{i}", rung["audio"]])
-        cmd.extend([f"-b:a:{len(rungs)}", AUDIO_ONLY_BITRATE])
+            cmd.extend([f"-crf:v:{i}", str(rung["crf"])])
+        cmd.extend(audio_bitrate_args)
 
-        stream_map = " ".join(
-            f"v:{i},a:{i},name:{rung['name']}" for i, rung in enumerate(rungs)
-        ) + f" a:{len(rungs)},name:{AUDIO_ONLY_NAME}"
+        stream_map = " ".join(stream_parts)
 
         cmd.extend([
             # HLS output. fMP4 segments are REQUIRED: MPEG-TS cannot carry
@@ -663,6 +774,11 @@ async def transcode_video_to_hls(
         if not master_playlist.exists():
             return TranscodeResult(success=False, error="master.m3u8 not created")
 
+        # With alternate audio renditions, ffmpeg leaves the audio-only
+        # rendition out of the master playlist even though it wrote it.
+        if audio_tracks > 1:
+            _add_audio_only_variant(master_playlist, f"stream_{AUDIO_ONLY_NAME}")
+
         # A still for the player to show before playback starts. Written after
         # the encode so a failure here cannot cost us a successful transcode.
         poster_name = await _write_poster(
@@ -745,9 +861,17 @@ async def transcode_video_to_hls(
                 {"name": r["name"], "height": r["height"], "crf": r["crf"],
                  "audio_bitrate": r["audio"]}
                 for r in rungs
-            ] + [
+            ] + ([
                 {"name": AUDIO_ONLY_NAME, "height": None, "crf": None,
                  "audio_bitrate": AUDIO_ONLY_BITRATE},
+            ] if audio_tracks else []),
+            # Every audio track the source carried, all of them published.
+            # Empty for a silent video, which is now a thing that works.
+            "audio_tracks": [
+                {"name": _track_name(t), "source_stream": t,
+                 "default": t == 0,
+                 "alternate_rendition": audio_tracks > 1}
+                for t in range(audio_tracks)
             ],
             "ffmpeg_settings": {
                 "video_codec": "libsvtav1",
