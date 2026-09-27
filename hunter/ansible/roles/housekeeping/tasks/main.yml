@@ -1,0 +1,141 @@
+---
+# Housekeeping: keep hunter's disk from filling up quietly.
+#
+# Three timers and a login banner, all of them boring on purpose. See
+# maybelle-config#131 for how the disk got to 90% without anyone noticing.
+
+- name: Install the backup retention script
+  copy:
+    src: prune-backups.py
+    dest: /usr/local/sbin/prune-pickipedia-backups
+    mode: "0755"
+
+- name: Install the disk report script
+  copy:
+    src: disk-report.sh
+    dest: /usr/local/sbin/hunter-disk-report
+    mode: "0755"
+
+# The mirror maybelle rsyncs into. Its own prune runs on maybelle's copy and
+# the rsync has no --delete, so without this it grows forever.
+- name: Backup retention service
+  copy:
+    dest: /etc/systemd/system/pickipedia-backup-retention.service
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=Bound the pickipedia backup mirror (daily 14, weekly 8, monthly 12)
+      Documentation=https://github.com/cryptograss/maybelle-config/issues/131
+
+      [Service]
+      Type=oneshot
+      ExecStart=/usr/local/sbin/prune-pickipedia-backups --apply
+      Nice=10
+      IOSchedulingClass=idle
+
+- name: Backup retention timer
+  copy:
+    dest: /etc/systemd/system/pickipedia-backup-retention.timer
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=Run the pickipedia backup retention daily
+
+      [Timer]
+      # After maybelle's nightly dump and rsync have landed.
+      OnCalendar=*-*-* 05:30:00
+      Persistent=true
+      RandomizedDelaySec=300
+
+      [Install]
+      WantedBy=timers.target
+
+# Reclaimed 14GB by hand on 2026-09-20. The only cost of pruning it is a
+# slower next build, so there is no reason to do this by hand again.
+- name: Docker build cache prune service
+  copy:
+    dest: /etc/systemd/system/docker-builder-prune.service
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=Prune the Docker build cache
+      Documentation=https://github.com/cryptograss/maybelle-config/issues/131
+      After=docker.service
+      Requires=docker.service
+
+      [Service]
+      Type=oneshot
+      ExecStart=/usr/bin/docker builder prune -a -f
+      Nice=10
+      IOSchedulingClass=idle
+
+- name: Docker build cache prune timer
+  copy:
+    dest: /etc/systemd/system/docker-builder-prune.timer
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=Prune the Docker build cache weekly
+
+      [Timer]
+      OnCalendar=Sun *-*-* 04:00:00
+      Persistent=true
+      RandomizedDelaySec=600
+
+      [Install]
+      WantedBy=timers.target
+
+# Reports, never deletes. Unused images (~25GB, including a 10.6GB
+# magenta-arthel) are deliberately left alone: several are locally built and
+# expensive to rebuild, and this box is shared. That is a human decision.
+- name: Disk report service
+  copy:
+    dest: /etc/systemd/system/hunter-disk-report.service
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=Report disk usage, loudly above 85%
+      Documentation=https://github.com/cryptograss/maybelle-config/issues/131
+
+      [Service]
+      Type=oneshot
+      # SuccessExitStatus so a warning lands in the journal as a warning
+      # rather than a failed unit nobody reads.
+      ExecStart=/usr/local/sbin/hunter-disk-report
+      SuccessExitStatus=0 1 2
+
+- name: Disk report timer
+  copy:
+    dest: /etc/systemd/system/hunter-disk-report.timer
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=Check disk usage daily
+
+      [Timer]
+      OnCalendar=*-*-* 06:00:00
+      Persistent=true
+
+      [Install]
+      WantedBy=timers.target
+
+# The part a person actually sees. Silent on a healthy box; a banner at 85%,
+# a red one at 92%.
+- name: Disk warning in the login banner
+  copy:
+    dest: /etc/update-motd.d/99-hunter-disk
+    mode: "0755"
+    content: |
+      #!/bin/sh
+      exec /usr/local/sbin/hunter-disk-report --motd
+
+- name: Enable the housekeeping timers
+  systemd:
+    name: "{{ item }}"
+    enabled: yes
+    state: started
+    daemon_reload: yes
+  loop:
+    - pickipedia-backup-retention.timer
+    - docker-builder-prune.timer
+    - hunter-disk-report.timer
