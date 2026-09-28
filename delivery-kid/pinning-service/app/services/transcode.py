@@ -216,6 +216,32 @@ def _audio_streams(probe: Optional[dict]) -> list[dict]:
     return found
 
 
+# The Opus bitrates in the ladder are tuned for one or two channels. A 5.1
+# take squeezed into 128k gets about 21k per channel and sounds like it —
+# and, being a successful encode, says nothing about why. Opus couples
+# channels, so surround does not need six times a mono rate; roughly 48k a
+# channel is the usual guidance, and past 256k the returns stop.
+MULTICHANNEL_KBPS_PER_CHANNEL = 48
+MULTICHANNEL_KBPS_CEILING = 256
+
+
+def _audio_bitrate(base: str, channels: Optional[int]) -> str:
+    """The bitrate for one track, given how many channels it carries.
+
+    Mono and stereo return ``base`` unchanged: almost every upload is one
+    of those, and nothing about them should move. Only surround is raised,
+    and never lowered below what the rung already asked for.
+    """
+    if not channels or channels <= 2:
+        return base
+    try:
+        have = int(str(base).rstrip("k"))
+    except ValueError:
+        return base
+    want = min(channels * MULTICHANNEL_KBPS_PER_CHANNEL, MULTICHANNEL_KBPS_CEILING)
+    return f"{max(have, want)}k"
+
+
 AUDIO_PROBE_SECONDS = 0.5
 
 
@@ -754,8 +780,10 @@ async def transcode_video_to_hls(
         # do. An earlier fix for the two-track crash published only the first
         # track; Justin pointed out that this throws away what somebody
         # uploaded, and for an overdub the second take may be the whole point.
+        audio_streams = _audio_streams(source_probe)
         usable_audio, skipped_audio = await _decodable_audio(
-            input_path, _audio_streams(source_probe))
+            input_path, audio_streams)
+        channels_at = {s["position"]: s.get("channels") for s in audio_streams}
         audio_tracks = len(usable_audio)
         for entry in skipped_audio:
             note = (f"Audio track {entry['source_stream'] + 1} "
@@ -779,10 +807,13 @@ async def transcode_video_to_hls(
             first = usable_audio[0]
             for i, rung in enumerate(rungs):
                 map_args += ["-map", f"[v{i}o]", "-map", f"0:a:{first}"]
-                audio_bitrate_args += [f"-b:a:{i}", rung["audio"]]
+                audio_bitrate_args += [
+                    f"-b:a:{i}", _audio_bitrate(rung["audio"], channels_at.get(first))]
                 stream_parts.append(f"v:{i},a:{i},name:{rung['name']}")
             map_args += ["-map", f"0:a:{first}"]
-            audio_bitrate_args += [f"-b:a:{len(rungs)}", AUDIO_ONLY_BITRATE]
+            audio_bitrate_args += [
+                f"-b:a:{len(rungs)}",
+                _audio_bitrate(AUDIO_ONLY_BITRATE, channels_at.get(first))]
             stream_parts.append(f"a:{len(rungs)},name:{AUDIO_ONLY_NAME}")
 
         else:
@@ -791,7 +822,10 @@ async def transcode_video_to_hls(
                 stream_parts.append(f"v:{i},agroup:{AUDIO_GROUP},name:{rung['name']}")
             for track, source_index in enumerate(usable_audio):
                 map_args += ["-map", f"0:a:{source_index}"]
-                audio_bitrate_args += [f"-b:a:{track}", VIDEO_LADDER[0]["audio"]]
+                audio_bitrate_args += [
+                    f"-b:a:{track}",
+                    _audio_bitrate(VIDEO_LADDER[0]["audio"],
+                                   channels_at.get(source_index))]
                 default = ",default:yes" if track == 0 else ""
                 stream_parts.append(
                     f"a:{track},agroup:{AUDIO_GROUP},"
@@ -801,7 +835,10 @@ async def transcode_video_to_hls(
             # group is in play, so it is added afterwards by hand — see
             # _add_audio_only_variant.
             map_args += ["-map", f"0:a:{usable_audio[0]}"]
-            audio_bitrate_args += [f"-b:a:{audio_tracks}", AUDIO_ONLY_BITRATE]
+            audio_bitrate_args += [
+                f"-b:a:{audio_tracks}",
+                _audio_bitrate(AUDIO_ONLY_BITRATE,
+                               channels_at.get(usable_audio[0]))]
             stream_parts.append(f"a:{audio_tracks},name:{AUDIO_ONLY_NAME}")
 
         cmd.extend(map_args)
@@ -1031,7 +1068,12 @@ async def transcode_video_to_hls(
             "audio_tracks": [
                 {"name": _track_name(source_index), "source_stream": source_index,
                  "default": position == 0,
-                 "alternate_rendition": audio_tracks > 1}
+                 "alternate_rendition": audio_tracks > 1,
+                 "channels": channels_at.get(source_index),
+                 "bitrate": _audio_bitrate(
+                     VIDEO_LADDER[0]["audio"] if audio_tracks > 1
+                     else rungs[0]["audio"],
+                     channels_at.get(source_index))}
                 for position, source_index in enumerate(usable_audio)
             ],
             # Tracks the file carried that could not be decoded. Recorded
