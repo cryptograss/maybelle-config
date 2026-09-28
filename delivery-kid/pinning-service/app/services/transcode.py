@@ -261,6 +261,67 @@ async def _decodable_audio(input_path: Path,
     return usable, skipped
 
 
+# Transfer functions that mean "this is HDR". PQ is what Dolby Vision and
+# HDR10 use; HLG is the broadcast one. Anything else is treated as SDR.
+HDR_TRANSFERS = ("smpte2084", "arib-std-b67")
+
+# Tone map to SDR rather than merely dropping to 8 bits.
+#
+# The encoder outputs 8-bit yuv420p, which is right — 10-bit breaks some
+# decoders. But an HDR source run through that keeps its BT.2020 and PQ
+# labels, and 8-bit PQ is wrong twice over: PQ needs ten bits or gradients
+# band, and a player that believes the labels renders for a display the
+# viewer does not have. The first Dolby Vision upload would have published
+# looking flat, with a green encode and nothing to complain about.
+#
+# hable is chosen over reinhard for holding highlights; desat=0 keeps
+# saturation rather than washing bright areas toward grey.
+TONEMAP_CHAIN = ("zscale=transfer=linear:npl=100,"
+                 "tonemap=hable:desat=0,"
+                 "zscale=primaries=bt709:transfer=bt709:matrix=bt709,"
+                 "format=yuv420p")
+
+
+# Half a second of frames is enough to prove the filter graph runs.
+TONEMAP_PROBE_SECONDS = 0.5
+
+
+async def _tonemap_works(input_path: Path) -> tuple[bool, str]:
+    """Can this file actually be tone mapped? Find out by doing it.
+
+    Same reasoning as _decodable_audio. Without this, an ffmpeg built
+    without zscale — or a file whose colour metadata the filter rejects —
+    turns an upload that used to publish (looking flat) into one that
+    fails outright. Flat is bad; refusing the take is worse. So we spend
+    half a second finding out, and fall back to the old behaviour with a
+    note rather than losing the video.
+    """
+    proc = await asyncio.create_subprocess_exec(
+        "ffmpeg", "-v", "error", "-i", str(input_path),
+        "-t", str(TONEMAP_PROBE_SECONDS),
+        "-vf", TONEMAP_CHAIN, "-f", "null", "-",
+        stdout=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    _, stderr = await proc.communicate()
+    if proc.returncode == 0:
+        return True, ""
+    lines = [ln for ln in (stderr or b"").decode("utf-8", "replace").splitlines() if ln.strip()]
+    return False, lines[-1] if lines else f"ffmpeg exited {proc.returncode}"
+
+
+def _hdr_transfer(probe: Optional[dict]) -> Optional[str]:
+    """The source's transfer function if it is HDR, else None."""
+    if not probe:
+        return None
+    for stream in probe.get("streams", []):
+        if stream.get("codec_type") != "video":
+            continue
+        transfer = (stream.get("color_transfer") or "").lower()
+        return transfer if transfer in HDR_TRANSFERS else None
+    return None
+
+
 def _ladder_for(short_side: Optional[int]) -> list[dict]:
     """The renditions worth producing for a source whose short side is this.
 
@@ -355,7 +416,8 @@ def _add_audio_only_variant(master: Path, audio_dir_name: str) -> bool:
 
 async def _write_poster(input_path: Path, output_dir: Path,
                         total_seconds: float,
-                        trim_start: Optional[float] = None) -> Optional[str]:
+                        trim_start: Optional[float] = None,
+                        hdr: bool = False) -> Optional[str]:
     """Pull a representative still out of the video, next to the HLS output.
 
     Without one, a player shows an empty black rectangle until someone presses
@@ -389,7 +451,7 @@ async def _write_poster(input_path: Path, output_dir: Path,
         "-i", str(input_path),
         # The thumbnail filter scores a window of frames and emits the most
         # representative, which avoids landing on a black or blurred one.
-        "-vf", "thumbnail",
+        "-vf", ("thumbnail," + TONEMAP_CHAIN) if hdr else "thumbnail",
         "-frames:v", "1",
         "-q:v", "3",
         str(poster),
@@ -649,7 +711,28 @@ async def transcode_video_to_hls(
         # One split per video rung, each scaled so its short side matches the
         # rung.
         split_labels = "".join(f"[v{i}]" for i in range(len(rungs)))
-        chain = [f"[0:v]split={len(rungs)}{split_labels}"]
+        source_transfer = _hdr_transfer(source_probe)
+        tone_map = bool(source_transfer)
+        tonemap_skipped = None
+        if tone_map:
+            ok, why = await _tonemap_works(input_path)
+            if not ok:
+                # Publish it the way we did before rather than not at all.
+                tone_map = False
+                tonemap_skipped = why
+                if progress_callback:
+                    await progress_callback(
+                        f"This video is {source_transfer.upper()} HDR, but tone "
+                        f"mapping it to SDR did not work here, so it is being "
+                        f"published as it was — the colour may look flat. "
+                        f"ffmpeg said: {why}", None)
+        if tone_map:
+            # Once, before the split: tone mapping every rung separately
+            # would cost the same work several times over.
+            chain = [f"[0:v]{TONEMAP_CHAIN}[sdr]",
+                     f"[sdr]split={len(rungs)}{split_labels}"]
+        else:
+            chain = [f"[0:v]split={len(rungs)}{split_labels}"]
         for i, rung in enumerate(rungs):
             chain.append(f"[v{i}]{_scale_filter(rung['height'], portrait)}[v{i}o]")
         cmd.extend(["-filter_complex", ";".join(chain)])
@@ -723,12 +806,22 @@ async def transcode_video_to_hls(
 
         cmd.extend(map_args)
 
+        if tone_map and progress_callback:
+            await progress_callback(
+                f"Tone mapping {source_transfer.upper()} HDR to SDR", None)
+
         cmd.extend([
             "-c:v", "libsvtav1",
             "-preset", str(AV1_PRESET),
             "-g", str(gop),          # keyframe every segment, see above
             "-pix_fmt", "yuv420p",   # force 8-bit — 10-bit breaks some decoders
         ])
+        if tone_map:
+            # The pixels are BT.709 now; the file must say so, or players go
+            # on treating them as HDR.
+            cmd.extend(["-color_primaries", "bt709",
+                        "-color_trc", "bt709",
+                        "-colorspace", "bt709"])
         if audio_tracks:
             cmd.extend(["-c:a", "libopus"])
         for i, rung in enumerate(rungs):
@@ -849,7 +942,8 @@ async def transcode_video_to_hls(
         # A still for the player to show before playback starts. Written after
         # the encode so a failure here cannot cost us a successful transcode.
         poster_name = await _write_poster(
-            input_path, output_dir, total_seconds, trim_start
+            input_path, output_dir, total_seconds, trim_start,
+            hdr=tone_map
         )
         if progress_callback and poster_name:
             await progress_callback("Poster frame written", None)
@@ -944,6 +1038,10 @@ async def transcode_video_to_hls(
             # rather than silently dropped: someone should be able to see
             # that their spatial audio did not make it.
             "audio_tracks_skipped": skipped_audio,
+            # What the source was, and what was done about it.
+            "source_transfer": source_transfer or "sdr",
+            "tone_mapped": tone_map,
+            "tone_map_skipped": tonemap_skipped,
             "ffmpeg_settings": {
                 "video_codec": "libsvtav1",
                 "preset": AV1_PRESET,
