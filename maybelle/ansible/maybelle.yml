@@ -1054,6 +1054,15 @@
         minute: "0"
         job: "/mnt/persist/magenta/backup-postgres.sh"
 
+    # Give new messages their Ethereum block heights (jMyles/memory-lane#18).
+    # Ingest never calls a node; this fills eth_blockheight afterwards.
+    # flock: the first run backfills the whole corpus and may outlast 5 min.
+    - name: Schedule memory-lane block height stamping
+      ansible.builtin.cron:
+        name: "memory-lane stamp blockheights"
+        minute: "*/5"
+        job: "flock -n /tmp/stamp-blockheights.lock docker exec memory-lane python manage.py stamp_blockheights >> /var/log/memory-lane-blockheights.log 2>&1"
+
     - name: Remove old daily backup cron if exists
       ansible.builtin.cron:
         name: "postgres daily backup"
