@@ -1061,7 +1061,21 @@
       ansible.builtin.cron:
         name: "memory-lane stamp blockheights"
         minute: "*/5"
-        job: "flock -n /tmp/stamp-blockheights.lock docker exec memory-lane python manage.py stamp_blockheights >> /var/log/memory-lane-blockheights.log 2>&1"
+        job: "flock -n /tmp/stamp-blockheights.lock timeout 30m docker exec memory-lane python manage.py stamp_blockheights >> /var/log/memory-lane-blockheights.log 2>&1"
+
+    - name: Rotate the block height stamping log
+      copy:
+        dest: /etc/logrotate.d/memory-lane-blockheights
+        mode: '0644'
+        content: |
+          /var/log/memory-lane-blockheights.log {
+              weekly
+              rotate 4
+              compress
+              missingok
+              notifempty
+              copytruncate
+          }
 
     - name: Remove old daily backup cron if exists
       ansible.builtin.cron:
