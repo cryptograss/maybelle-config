@@ -10,6 +10,9 @@ This script:
 Usage:
     ./deploy-hunter-remote.py           # Normal deploy
     ./deploy-hunter-remote.py --fresh-host  # Fresh hunter rebuild (resets SSH keys)
+    ./deploy-hunter-remote.py --replay      # One-time: watcher re-ingests every
+                                            # existing JSONL line (idempotent;
+                                            # recovers lines an older watcher dropped)
 
 Prerequisites:
 - SSH access to maybelle from your laptop
@@ -42,11 +45,14 @@ def get_vault_password():
 def main():
     # Parse arguments
     fresh_host = '--fresh-host' in sys.argv
+    replay = '--replay' in sys.argv
 
     print("=" * 60)
     print("DEPLOY HUNTER VIA MAYBELLE")
     if fresh_host:
         print("(FRESH HOST - will reset SSH keys)")
+    if replay:
+        print("(REPLAY - watcher will re-ingest every existing JSONL line)")
     print("=" * 60)
     print()
 
@@ -83,10 +89,12 @@ def main():
     maybelle = 'root@maybelle.cryptograss.live'
     deploy_script = '/mnt/persist/maybelle-config/maybelle/scripts/deploy-hunter.sh'
 
-    # Pass --fresh-host flag to the remote script
+    # Pass flags through to the remote script
     script_args = f'{deploy_script} {local_user}'
     if fresh_host:
         script_args += ' --fresh-host'
+    if replay:
+        script_args += ' --replay'
 
     result = subprocess.run(
         ['ssh', '-t', maybelle, script_args],

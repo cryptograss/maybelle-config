@@ -13,7 +13,6 @@
 set -o pipefail
 # Note: NOT using 'set -e' because we want to handle errors explicitly
 
-DEPLOY_USER="${1:-remote}"
 FRESH_HOST=false
 REPO_DIR="/mnt/persist/maybelle-config"
 JENKINS_REPORTER_FILE="/root/.jenkins_reporter_password"
@@ -22,16 +21,25 @@ LOG_FILE="/mnt/persist/logs/hunter-deploy-${TIMESTAMP}.log"
 VAULT_FILE="/tmp/vault_pass_$$"
 HUNTER_HOST="hunter.cryptograss.live"
 
-# Parse arguments
-if [ "$2" = "--fresh-host" ] || [ "$1" = "--fresh-host" ]; then
-    FRESH_HOST=true
-    if [ "$1" = "--fresh-host" ]; then
-        DEPLOY_USER="remote"
-    fi
-fi
+# Parse arguments: an optional username, then any of the flags in any order.
+REPLAY=false
+DEPLOY_USER="remote"
+for arg in "$@"; do
+    case "$arg" in
+        --fresh-host) FRESH_HOST=true ;;
+        # One-time recovery: the watcher re-ingests every existing JSONL line
+        # at startup (idempotent by uuid). See jMyles/memory-lane#15.
+        --replay)     REPLAY=true ;;
+        --*)          echo "Unknown flag: $arg" >&2; exit 2 ;;
+        *)            DEPLOY_USER="$arg" ;;
+    esac
+done
 
 echo "============================================================"
 echo "DEPLOY HUNTER FROM MAYBELLE"
+if [ "$REPLAY" = true ]; then
+    echo "(REPLAY - watcher will re-ingest every existing JSONL line)"
+fi
 if [ "$FRESH_HOST" = true ]; then
     echo "(FRESH HOST - will reset SSH keys)"
 fi
@@ -122,6 +130,9 @@ cd "$REPO_DIR/hunter/ansible"
 
 # Run ansible playbook
 ANSIBLE_CMD="ansible-playbook --vault-password-file=\"$VAULT_FILE\" -i inventory.yml playbook.yml"
+if [ "$REPLAY" = true ]; then
+    ANSIBLE_CMD="$ANSIBLE_CMD -e watcher_replay_from_start=true"
+fi
 
 if bash -c "$ANSIBLE_CMD" 2>&1 | tee "$LOG_FILE"; then
     DEPLOY_STATUS="success"
