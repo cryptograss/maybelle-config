@@ -1054,6 +1054,33 @@
         minute: "0"
         job: "/mnt/persist/magenta/backup-postgres.sh"
 
+    # Give new messages their Ethereum block heights (jMyles/memory-lane#18).
+    # Ingest never calls a node; this fills eth_blockheight afterwards.
+    # flock: the first run backfills the whole corpus and may outlast 5 min.
+    # Two timeouts: docker exec doesn't forward signals (moby#9098), so the
+    # host-side one kills only the client and a hung stamper would outlive the
+    # flock. The inner 30m kills the stamper itself; the outer 35m only covers
+    # a stuck docker client.
+    - name: Schedule memory-lane block height stamping
+      ansible.builtin.cron:
+        name: "memory-lane stamp blockheights"
+        minute: "*/5"
+        job: "flock -n /tmp/stamp-blockheights.lock timeout 35m docker exec memory-lane timeout 30m python manage.py stamp_blockheights >> /var/log/memory-lane-blockheights.log 2>&1"
+
+    - name: Rotate the block height stamping log
+      copy:
+        dest: /etc/logrotate.d/memory-lane-blockheights
+        mode: '0644'
+        content: |
+          /var/log/memory-lane-blockheights.log {
+              weekly
+              rotate 4
+              compress
+              missingok
+              notifempty
+              copytruncate
+          }
+
     - name: Remove old daily backup cron if exists
       ansible.builtin.cron:
         name: "postgres daily backup"
