@@ -15,6 +15,11 @@ all:
     # Domain for subdomains
     base_domain: hunter.cryptograss.live
 
+    # Set true for exactly one deploy to make the watcher re-ingest every
+    # existing JSONL line (recovers lines an older watcher dropped; see
+    # jMyles/memory-lane#15). Idempotent. Set back to false afterwards.
+    watcher_replay_from_start: false
+
     # User instances configuration
     users:
       - name: justin

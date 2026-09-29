@@ -24,6 +24,12 @@
             - CLAUDE_LOGS_DIR={% for user in users %}/project-logs/{{ user.name }}{% if not loop.last %}:{% endif %}{% endfor %}
 
             - WATCHER_ERA_NAME=Live Conversations
+            # One-time recovery switch (jMyles/memory-lane#15). Flip
+            # watcher_replay_from_start to true in inventory.yml for a single
+            # deploy: the watcher re-ingests every existing JSONL line before
+            # tracking from the end. The importer is idempotent by uuid, so
+            # nothing duplicates. Flip it back afterwards.
+            - WATCHER_REPLAY_FROM_START={{ 'true' if (watcher_replay_from_start | default(false) | bool) else '' }}
           volumes:
       {% for user in users %}
             - /opt/magenta/{{ user.name }}/home/.claude/projects:/project-logs/{{ user.name }}:ro
