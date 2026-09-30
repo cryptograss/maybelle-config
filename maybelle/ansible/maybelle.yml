@@ -792,20 +792,9 @@
         GIT_TERMINAL_PROMPT: "0"
       register: memory_lane_source
 
-    # Django's SECRET_KEY used to be hardcoded in settings.py, which is public
-    # on GitHub. Generated once on this host and kept on the persistent volume,
-    # not in the vault: nothing outside this host needs it. `creates:` means an
-    # existing key is never replaced (that would sign everyone out).
-    - name: Generate Memory Lane Django secret key if missing
-      shell: umask 077 && python3 -c "import secrets; print(secrets.token_urlsafe(50))" > /mnt/persist/magenta/django_secret_key
-      args:
-        creates: /mnt/persist/magenta/django_secret_key
-
-    - name: Read Memory Lane Django secret key
-      slurp:
-        src: /mnt/persist/magenta/django_secret_key
-      register: secret_key_file
-
+    # DJANGO_SECRET_KEY: settings.py used to hardcode a key that is public on
+    # GitHub. It comes from the vault with no default, so a missing key fails
+    # the deploy rather than inventing one.
     - name: Create Memory Lane .env file
       copy:
         dest: /mnt/persist/magenta/source/.env
@@ -819,7 +808,7 @@
           DJANGO_DEBUG=False
           INGEST_API_KEY={{ ingest_api_key }}
           SCRUBBER_URL=http://scrubber:8001
-          DJANGO_SECRET_KEY={{ (secret_key_file.content | b64decode) | trim }}
+          DJANGO_SECRET_KEY={{ memory_lane_django_secret_key }}
           MOTION_ALLOWED_SIGNERS=/etc/magenta/allowed_signers
           # Tool I/O is kept now that pattern redaction exists (jMyles/memory-lane#26);
           # this caps each stored result.
