@@ -29,6 +29,7 @@ Usage: maybelle/scripts/audit-storage.py
 """
 
 import json
+import re
 import subprocess
 import sys
 import urllib.parse
@@ -351,6 +352,62 @@ def audit_drafts(
             "unknown_drafts": unknown_drafts}
 
 
+def parse_dag_size(raw: str) -> Optional[int]:
+    """Bytes from one `ipfs dag stat` reply, whatever shape it arrives in.
+
+    Kubo has printed this several ways across versions — JSON with
+    TotalSize, JSON with Size, and a plain "Size: N, NumBlocks: M" line —
+    so all three are accepted rather than pinning the audit to one release
+    of the node.
+    """
+    raw = (raw or "").strip()
+    if not raw:
+        return None
+    try:
+        parsed = json.loads(raw)
+        if isinstance(parsed, dict):
+            for key in ("TotalSize", "Size", "CumulativeSize"):
+                value = parsed.get(key)
+                if isinstance(value, (int, float)):
+                    return int(value)
+    except json.JSONDecodeError:
+        pass
+    match = re.search(r"(?:Total\s*)?Size:?\s*([0-9][0-9,]*)", raw, re.IGNORECASE)
+    if match:
+        return int(match.group(1).replace(",", ""))
+    return None
+
+
+def fetch_pin_sizes(cids: list[str]) -> dict[str, Optional[int]]:
+    """Total DAG size of each pin, in bytes, as {cid: bytes or None}.
+
+    Without this the orphan list cannot be acted on: eleven addresses might
+    be twenty megabytes or two gigabytes and the report reads identically
+    either way, so the only honest recommendation was "look into it".
+
+    One ssh for the whole batch. `dag stat` walks the graph, so this is not
+    free, but it runs over orphans only — a handful, not all 66 pins.
+    """
+    if not cids:
+        return {}
+    parts = [
+        f'printf "%s\\t" {cid}; '
+        f'docker exec ipfs ipfs dag stat --progress=false --enc=json {cid} '
+        f'2>/dev/null | tr -d "\\n"; printf "\\n"'
+        for cid in cids
+    ]
+    out = ssh(DK_HOST, "; ".join(parts))
+    sizes: dict[str, Optional[int]] = {cid: None for cid in cids}
+    for line in out.splitlines():
+        if "\t" not in line:
+            continue
+        cid, _, raw = line.partition("\t")
+        cid = cid.strip()
+        if cid in sizes:
+            sizes[cid] = parse_dag_size(raw)
+    return sizes
+
+
 def fetch_pin_metadata(cid: str) -> Optional[dict]:
     """Read metadata.json out of a pinned directory, if it has one.
 
@@ -501,9 +558,20 @@ def print_pin_audit(result: dict, release_count: int):
         for r in result["missing_pins"]:
             print(f"    {r['cid']} {r['title']}")
     if result["orphan_pins"]:
-        print(f"  ORPHAN PINS ({len(result['orphan_pins'])}) — pinned but no Release page:")
-        for p in result["orphan_pins"]:
-            print(f"    {p}")
+        sizes = result.get("orphan_pin_sizes") or {}
+        known = [s for s in sizes.values() if isinstance(s, int)]
+        total = f", {human_size(sum(known) // 1024)} total" if known else ""
+        print(f"  ORPHAN PINS ({len(result['orphan_pins'])}{total}) — "
+              f"pinned but no Release page:")
+        # Largest first: if one of these is worth reclaiming it is the one
+        # at the top, and if the whole list is small that is visible at a
+        # glance rather than after eleven lookups.
+        for cid in sorted(result["orphan_pins"],
+                          key=lambda c: sizes.get(c) if isinstance(sizes.get(c), int) else -1,
+                          reverse=True):
+            size = sizes.get(cid)
+            shown = human_size(size // 1024) if isinstance(size, int) else "size unknown"
+            print(f"    {cid} ({shown})")
 
     total = release_count
     d, r, m = len(result["deleted"]), len(result["retired"]), len(result["missing_pins"])
@@ -609,6 +677,9 @@ def main():
 
     print_section("IPFS Pins vs Release Pages")
     pin_result = audit_pins(releases, pins, seeding)
+    # Measure the orphans before reporting them. audit_pins stays free of
+    # I/O so it can be tested; the sizes are attached here.
+    pin_result["orphan_pin_sizes"] = fetch_pin_sizes(pin_result["orphan_pins"])
     print_pin_audit(pin_result, release_count)
 
     print_section("Seeding Dirs vs Release Pages")

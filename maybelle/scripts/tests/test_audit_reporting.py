@@ -159,6 +159,91 @@ class TestLinkifyLeavesExistingLinksAlone:
         assert "\x00" not in out
         assert out == text
 
+class TestPinSizes:
+    """Eleven addresses with no sizes is not a finding, it is a shrug.
+
+    These cannot be exercised against the live node from here — production
+    is no-touch and `dag stat` runs on delivery-kid — so what is tested is
+    the parsing and the reporting, which is where the mistakes would be.
+    """
+
+    def test_json_totalsize(self):
+        assert audit.parse_dag_size('{"TotalSize":20809992,"NumBlocks":84}') == 20809992
+
+    def test_json_size_only(self):
+        # Older kubo used Size for the same number.
+        assert audit.parse_dag_size('{"Size":1234,"NumBlocks":2}') == 1234
+
+    def test_plain_text_line(self):
+        assert audit.parse_dag_size("Size: 20809992, NumBlocks: 84") == 20809992
+
+    def test_plain_text_with_thousands_separators(self):
+        assert audit.parse_dag_size("Size: 20,809,992") == 20809992
+
+    def test_cumulative_size_from_files_stat(self):
+        assert audit.parse_dag_size('{"CumulativeSize": 4096}') == 4096
+
+    def test_nothing_is_none_not_zero(self):
+        # Zero would total up as though the pin were empty; unknown must
+        # stay unknown or the summary lies.
+        assert audit.parse_dag_size("") is None
+        assert audit.parse_dag_size(None) is None
+        assert audit.parse_dag_size("Error: merkledag: not found") is None
+
+    def test_sizes_are_reported_largest_first_with_a_total(self, capsys):
+        audit.print_pin_audit(
+            {"orphan_pins": ["QmSmall", "QmBig", "QmUnknown"],
+             "orphan_pin_sizes": {"QmSmall": 5 * 1024 * 1024,
+                                  "QmBig": 900 * 1024 * 1024,
+                                  "QmUnknown": None},
+             "deleted": [], "retired": [], "missing_pins": [],
+             "deliberately_unpinned": [], "cleanup_pending": []},
+            release_count=66)
+        out = capsys.readouterr().out
+        assert "905M total" in out, out
+        big = out.index("QmBig")
+        small = out.index("QmSmall")
+        assert big < small, "largest orphan should be listed first"
+        assert "size unknown" in out
+
+    def test_an_unmeasurable_list_still_prints(self, capsys):
+        """If every lookup fails the report must degrade, not crash."""
+        audit.print_pin_audit(
+            {"orphan_pins": ["QmA"], "orphan_pin_sizes": {"QmA": None},
+             "deleted": [], "retired": [], "missing_pins": [],
+             "deliberately_unpinned": [], "cleanup_pending": []},
+            release_count=1)
+        out = capsys.readouterr().out
+        assert "ORPHAN PINS (1)" in out
+        assert "total" not in out.split("ORPHAN PINS")[1].split("\n")[0]
+
+    def test_no_orphans_means_no_ssh(self, monkeypatch):
+        def no_ssh(*args, **kwargs):
+            raise AssertionError("should not reach for the node with nothing to ask")
+
+        monkeypatch.setattr(audit, "ssh", no_ssh)
+        assert audit.fetch_pin_sizes([]) == {}
+
+    def test_one_ssh_for_the_whole_batch(self, monkeypatch):
+        calls = []
+
+        def fake_ssh(host, command):
+            calls.append(command)
+            return ("QmA\t{\"TotalSize\":10}\n"
+                    "QmB\t{\"TotalSize\":20}\n")
+
+        monkeypatch.setattr(audit, "ssh", fake_ssh)
+        sizes = audit.fetch_pin_sizes(["QmA", "QmB"])
+        assert sizes == {"QmA": 10, "QmB": 20}
+        assert len(calls) == 1, "one round trip, not one per pin"
+
+    def test_a_pin_the_node_says_nothing_about_stays_unknown(self, monkeypatch):
+        monkeypatch.setattr(audit, "ssh",
+                            lambda host, cmd: "QmA\t{\"TotalSize\":10}\n")
+        sizes = audit.fetch_pin_sizes(["QmA", "QmMissing"])
+        assert sizes["QmA"] == 10
+        assert sizes["QmMissing"] is None
+
 
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))
