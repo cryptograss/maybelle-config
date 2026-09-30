@@ -792,6 +792,20 @@
         GIT_TERMINAL_PROMPT: "0"
       register: memory_lane_source
 
+    # Django's SECRET_KEY used to be hardcoded in settings.py, which is public
+    # on GitHub. Generated once on this host and kept on the persistent volume,
+    # not in the vault: nothing outside this host needs it. `creates:` means an
+    # existing key is never replaced (that would sign everyone out).
+    - name: Generate Memory Lane Django secret key if missing
+      shell: umask 077 && python3 -c "import secrets; print(secrets.token_urlsafe(50))" > /mnt/persist/magenta/django_secret_key
+      args:
+        creates: /mnt/persist/magenta/django_secret_key
+
+    - name: Read Memory Lane Django secret key
+      slurp:
+        src: /mnt/persist/magenta/django_secret_key
+      register: secret_key_file
+
     - name: Create Memory Lane .env file
       copy:
         dest: /mnt/persist/magenta/source/.env
@@ -805,7 +819,13 @@
           DJANGO_DEBUG=False
           INGEST_API_KEY={{ ingest_api_key }}
           SCRUBBER_URL=http://scrubber:8001
+          DJANGO_SECRET_KEY={{ (secret_key_file.content | b64decode) | trim }}
+          MOTION_ALLOWED_SIGNERS=/etc/magenta/allowed_signers
+          # Tool I/O is kept now that pattern redaction exists (jMyles/memory-lane#26);
+          # this caps each stored result.
+          TOOL_RESULT_CONTENT_CHARS=20000
         mode: '0600'
+      register: memory_lane_env
 
     - name: Create docker network for memory lane
       docker_network:
@@ -825,6 +845,24 @@
         postgres_network_external: true
         postgres_bind_address: "10.0.0.2"  # Hetzner private network - allows hunter to connect
 
+    # Who may write into Motions (jMyles/memory-lane#27): each person on the
+    # team, by the SSH key hunter already knows them by. A Motion signed with
+    # `ssh-keygen -Y sign -n magenta-motions` verifies against this file.
+    # Users whose key is empty or still a placeholder get no line.
+    # Read with lookup('file') | from_yaml, not include_vars: that inventory
+    # carries hunter-vault templates ({{ code_server_password }} and friends),
+    # and on ansible-core 2.16 touching an include_vars'd dict renders all of
+    # it, failing on vars that only hunter's vault defines.
+    - name: Write Motions allowed_signers
+      copy:
+        dest: /mnt/persist/magenta/allowed_signers
+        mode: '0644'
+        content: |
+          {% for user in (lookup('file', playbook_dir ~ '/../../hunter/ansible/inventory.yml') | from_yaml).all.vars.users if (user.ssh_pubkey | default('') | trim) is match('ssh-') %}
+          {{ user.name }} namespaces="magenta-motions" {{ user.ssh_pubkey | trim }}
+          {% endfor %}
+      register: motion_allowed_signers
+
     - name: Create Memory Lane docker-compose file
       copy:
         dest: /mnt/persist/magenta/source/docker-compose.maybelle.yml
@@ -841,6 +879,8 @@
               ports:
                 - "127.0.0.1:3000:3000"
                 - "10.0.0.2:3000:3000"
+              volumes:
+                - /mnt/persist/magenta/allowed_signers:/etc/magenta/allowed_signers:ro
               networks:
                 - memory-lane-net
               restart: unless-stopped
@@ -887,6 +927,7 @@
               external: true
               name: memory-lane-net
         mode: '0644'
+      register: memory_lane_compose
 
     # recreate: the images bake the source in, and `state: present` alone will
     # happily leave an old container running against a freshly built image.
@@ -895,6 +936,10 @@
     # weeks on stale code — so a merged migration never ran and a merged MCP
     # tool never appeared. Recreate whenever new source arrived, or on
     # --rebuild; otherwise leave the containers alone.
+    # .env, the compose file and allowed_signers count as new source too.
+    # allowed_signers is bind-mounted as a single file, and Ansible's copy
+    # replaces a file by rename, so a running container would keep reading the
+    # old inode; it has to be recreated to see a changed roster.
     - name: Start Memory Lane services
       community.docker.docker_compose_v2:
         project_src: /mnt/persist/magenta/source
@@ -902,7 +947,7 @@
           - docker-compose.maybelle.yml
         build: always
         state: present
-        recreate: "{{ 'always' if (memory_lane_source.changed or (rebuild_images | default(false) | bool)) else 'auto' }}"
+        recreate: "{{ 'always' if (memory_lane_source.changed or memory_lane_env.changed or memory_lane_compose.changed or motion_allowed_signers.changed or (rebuild_images | default(false) | bool)) else 'auto' }}"
 
     # Inject secrets into scrubber container (from temp file created by chapter-1.sh)
     - name: Check if scrubber secrets temp file exists
