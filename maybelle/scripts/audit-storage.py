@@ -289,6 +289,8 @@ def audit_drafts(
     orphan_drafts = []      # staging dir, no wiki page
     stalled_drafts = []     # wiki page + no draft.json + empty upload/
     dead_wiki_drafts = []   # wiki page, no staging, never finalized
+    unknown_drafts = []     # wiki page, no staging, could not tell — never
+                            # recommend deleting one of these
     finalized_gone = []     # wiki page, no staging, WAS finalized (expected)
     abandoned_drafts = []   # wiki page flagged `abandoned: true`
 
@@ -320,23 +322,33 @@ def audit_drafts(
                 "keep_files": info["keep_files"],
             })
             continue
-        # Check if ever finalized
+        # Was this ever finalized? The answer decides whether the report
+        # says "expected" or "safe to delete from wiki", so a lookup that
+        # did not happen must not be read as a no. Swallowing the error and
+        # defaulting to False meant one wiki hiccup could recommend deleting
+        # the record of a published release.
         is_finalized = False
+        known = True
         try:
             for c in page_comments(f"ReleaseDraft:{w}"):
-                if "pinned to IPFS" in c:
+                if "pinned to ipfs" in c.lower():
                     is_finalized = True
                     break
-        except Exception:
-            pass
+        except Exception as exc:
+            known = False
+            print(f"    could not read comments for {w}: {exc}", file=sys.stderr)
+
         if is_finalized:
             finalized_gone.append(w)
-        else:
+        elif known:
             dead_wiki_drafts.append(w)
+        else:
+            unknown_drafts.append(w)
 
     return {"orphan_drafts": orphan_drafts, "stalled_drafts": stalled_drafts,
             "dead_wiki_drafts": dead_wiki_drafts, "finalized_gone": finalized_gone,
-            "abandoned_drafts": abandoned_drafts}
+            "abandoned_drafts": abandoned_drafts,
+            "unknown_drafts": unknown_drafts}
 
 
 def fetch_pin_metadata(cid: str) -> Optional[dict]:
@@ -530,6 +542,12 @@ def print_draft_audit(result: dict, wiki_count: int, staging_count: int):
               f"never finalized, no staging (safe to delete from wiki):")
         for w in result["dead_wiki_drafts"]:
             print(f"    {w}")
+    if result.get("unknown_drafts"):
+        print(f"  UNDETERMINED ({len(result['unknown_drafts'])}) — could not read "
+              f"the page's comments, so whether these finalized is unknown. "
+              f"Do not delete on the strength of this run:")
+        for w in result["unknown_drafts"]:
+            print(f"    {w}")
     if result["abandoned_drafts"]:
         print(f"  ABANDONED DRAFTS ({len(result['abandoned_drafts'])}) — flagged `abandoned: true`:")
         for a in result["abandoned_drafts"]:
@@ -557,9 +575,22 @@ def main():
     print(f"  {release_count} Release pages")
 
     print("Fetching ReleaseDraft pages from wiki...")
-    wiki_draft_ids = allpages(3006)
+    all_draft_pages = allpages(3006)
+    # A draft's own subpages — ReleaseDraft:<id>/diagnostics — are pages in
+    # the namespace but they are not drafts. Counted as drafts they have no
+    # staging directory and were never finalized on their own, so every
+    # successful publish produced a "DEAD WIKI DRAFT ... safe to delete from
+    # wiki" line pointing at the only surviving record of that upload: what
+    # ffmpeg said, which tracks were skipped, how far the bytes got.
+    #
+    # pickipedia#114 fixed this same confusion in the extension. This path
+    # never got it.
+    wiki_draft_ids = [d for d in all_draft_pages if "/" not in d]
+    subpages = [d for d in all_draft_pages if "/" in d]
     draft_count = len(wiki_draft_ids)
-    print(f"  {draft_count} ReleaseDraft pages")
+    print(f"  {draft_count} ReleaseDraft pages"
+          + (f" ({len(subpages)} subpages, not counted as drafts)"
+             if subpages else ""))
 
     print("Fetching IPFS pins from delivery-kid...")
     pins = fetch_pins()

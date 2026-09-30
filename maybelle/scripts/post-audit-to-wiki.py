@@ -158,16 +158,34 @@ def detect_problems(audit_text: str) -> dict[str, int]:
     return found
 
 
+# A reference the audit already wrapped itself. Matched so it can be set
+# aside before the substitutions below run over the text.
+_EXISTING_LINK_RE = re.compile(r"\[\[[^\[\]]*\]\]")
+_PLACEHOLDER = "\x00%d\x00"
+
+
 def linkify_audit(text: str) -> str:
     """Wrap recognized page references in MediaWiki link syntax.
 
     Targets: ReleaseDraft:<uuid> and Release:<cid>. MediaWiki normalizes
     the first letter of a page title, so passing through whatever case
     appears in the audit output resolves to the canonical page name.
+
+    Text that is already a link is left alone. The audit prints some
+    references in link syntax itself, and wrapping those a second time put
+    [[ReleaseDraft:[[ReleaseDraft:<uuid>|<uuid>]]]] on the page — which
+    renders as visible brackets and resolves to nothing.
     """
+    kept: list[str] = []
+
+    def set_aside(match):
+        kept.append(match.group(0))
+        return _PLACEHOLDER % (len(kept) - 1)
+
+    text = _EXISTING_LINK_RE.sub(set_aside, text)
     text = _UUID_RE.sub(r"[[ReleaseDraft:\1|\1]]", text)
     text = _CID_RE.sub(r"[[Release:\1|\1]]", text)
-    return text
+    return re.sub(r"\x00(\d+)\x00", lambda m: kept[int(m.group(1))], text)
 
 
 def to_indented_pre(text: str) -> str:
