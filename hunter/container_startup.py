@@ -554,6 +554,31 @@ def setup_godot():
         logger.warning("⚠ Godot binary not responding (may need display for full init)")
 
 
+def start_motion_poller():
+    """Start memory-lane's Motion poller, if this container opted in.
+
+    Runs the deployed copy mounted read-only at /opt/motion-poller (hunter's
+    clone of memory-lane main), never a workspace checkout. It needs requests
+    (installed into /usr/bin/python3 from memory-lane's requirements), the
+    claude CLI logged in as magent, and ~/.claude/projects to resume from.
+    """
+    script = Path('/opt/motion-poller/motion_poller.py')
+    if os.environ.get('MOTION_POLLER') != '1':
+        logger.info("Motion poller not enabled for this container (MOTION_POLLER != 1)")
+        return
+    if not script.exists():
+        logger.warning(f"MOTION_POLLER=1 but {script} is missing; poller not started")
+        return
+    try:
+        # /usr/bin/python3 by path: the image's PATH puts the godogen venv
+        # first; `su -` resets PATH anyway, but don't depend on that.
+        run_command(f"nohup /usr/bin/python3 {script} --agent magent >> /tmp/motion-poller.log 2>&1 &",
+                    user='magent')
+        logger.info("✓ Motion poller started (log: /tmp/motion-poller.log)")
+    except Exception as e:
+        logger.error(f"Motion poller failed to start: {e}")
+
+
 def start_services():
     """Start required services."""
     logger.info("=== Starting services ===")
@@ -568,6 +593,8 @@ def start_services():
     logger.info("Starting code-server...")
     run_command(f"PASSWORD='{password}' nohup code-server --bind-addr 0.0.0.0:8080 --auth password /home/magent/workspace > /tmp/code-server.log 2>&1 &", user='magent')
     logger.info("✓ code-server started on port 8080")
+
+    start_motion_poller()
 
     # Note: PostgreSQL runs in separate container, not started here
     logger.info("✓ Using shared PostgreSQL container")

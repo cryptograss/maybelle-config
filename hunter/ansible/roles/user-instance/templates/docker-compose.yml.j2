@@ -24,6 +24,9 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       # PickiPedia backups (synced from maybelle daily)
       - /opt/magenta/pickipedia-backups:/opt/magenta/pickipedia-backups:ro
+      # Motion poller: the deployed memory-lane main (build-image role keeps it
+      # current), not a workspace checkout that could be on any branch
+      - {{ base_dir }}/memory-lane-source/poller:/opt/motion-poller:ro
     networks:
       - magenta-net
     environment:
@@ -50,6 +53,8 @@ services:
       - PICKIPEDIA_DEV_SENTRY_DSN={{ pickipedia_dev_sentry_dsn | default('') }}
       # Delivery-kid pinning service API key
       - DELIVERY_KID_API_KEY={{ delivery_kid_api_key }}
+      # Opt-in: container_startup.py starts the Motion poller when this is 1
+      - MOTION_POLLER={{ '1' if user.motion_poller | default(false) else '0' }}
     restart: unless-stopped
 
 networks:

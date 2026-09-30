@@ -31,6 +31,7 @@ all:
         port_range_start: 14000  # 14000-14009
         code_server_password: "{{ code_server_password }}"
         github_token: "{{ magent_github_token }}"
+        motion_poller: true  # wake a turn on web-posted @magent mentions
 
       - name: rj
         full_name: "R.J. Partington III"
