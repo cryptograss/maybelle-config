@@ -423,7 +423,10 @@ def setup_environment_variables():
         'POSTGRES_HOST',
         'POSTGRES_DB',
         'POSTGRES_USER',
-        'POSTGRES_PASSWORD'
+        'POSTGRES_PASSWORD',
+        # memory-lane previews (tools/preview.sh) connect as the restricted
+        # memory_lane_preview role with this, not as magent
+        'MEMORY_LANE_PREVIEW_DB_PASSWORD',
     ]
 
     bashrc_path = Path('/home/magent/.bashrc')
