@@ -1093,6 +1093,14 @@
           END $$;
           ALTER DEFAULT PRIVILEGES FOR ROLE magent IN SCHEMA public GRANT SELECT ON TABLES TO memory_lane_preview;
           GRANT INSERT ON conversations_message, devices, login_codes TO memory_lane_preview;
+          -- Images posted in a preview (memory-lane migration 0007); skipped
+          -- until that migration has made the table.
+          DO $$
+          BEGIN
+            IF to_regclass('public.media') IS NOT NULL THEN
+              GRANT INSERT ON public.media TO memory_lane_preview;
+            END IF;
+          END $$;
           GRANT UPDATE (used_at) ON login_codes TO memory_lane_preview;
           GRANT UPDATE (last_used_at, revoked_at) ON devices TO memory_lane_preview;
           COMMIT;
