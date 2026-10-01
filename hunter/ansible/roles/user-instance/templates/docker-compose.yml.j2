@@ -60,6 +60,12 @@ services:
       - DELIVERY_KID_API_KEY={{ delivery_kid_api_key }}
       # Opt-in: container_startup.py starts the Motion poller when this is 1
       - MOTION_POLLER={{ '1' if user.motion_poller | default(false) else '0' }}
+{% if user.motion_poller | default(false) and memory_lane_runner_key is defined %}
+      # The poller streams the turns it wakes straight into their Motions with
+      # this (memory-lane's MOTION_RUNNER_KEYS). Only the poller reads it, so it
+      # is not exported to shells.
+      - MEMORY_LANE_RUNNER_KEY={{ memory_lane_runner_key }}
+{% endif %}
     restart: unless-stopped
 
 networks:

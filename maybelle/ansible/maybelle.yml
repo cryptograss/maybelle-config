@@ -813,6 +813,11 @@
           # Tool I/O is kept now that pattern redaction exists (jMyles/memory-lane#26);
           # this caps each stored result.
           TOOL_RESULT_CONTENT_CHARS=20000
+          {% if memory_lane_runner_key is defined %}
+          # The Motion runner (memory-lane's poller, on hunter) streams the turns
+          # it wakes straight into their Motions, proving itself with this key.
+          MOTION_RUNNER_KEYS=magent:{{ memory_lane_runner_key }}
+          {% endif %}
         mode: '0600'
       register: memory_lane_env
 
