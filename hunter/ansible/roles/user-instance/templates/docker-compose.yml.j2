@@ -38,6 +38,11 @@ services:
       - POSTGRES_DB={{ postgres_db }}
       - POSTGRES_USER=magent
       - POSTGRES_PASSWORD={{ postgres_password }}
+{% if memory_lane_preview_db_password is defined %}
+      # memory-lane previews (tools/preview.sh) connect to the live record as
+      # the restricted memory_lane_preview role, not as magent
+      - MEMORY_LANE_PREVIEW_DB_PASSWORD={{ memory_lane_preview_db_password }}
+{% endif %}
       - CODE_SERVER_PASSWORD={{ user.code_server_password }}
       - GH_TOKEN={{ user.github_token | default('') }}
       - DJANGO_SECRET_KEY={{ user.django_secret_key | default('') }}
