@@ -1034,6 +1034,56 @@
         msg: "Restored database from {{ selected_backup.stdout }}"
       when: restore_result is defined and restore_result.changed | default(false)
 
+    # A restricted role for memory-lane previews (tools/preview.sh on hunter),
+    # which run a branch's unreviewed code against the live record. They used
+    # to connect as magent, the superuser, with only a per-session read-only
+    # default between them and the data. memory_lane_preview reads every table
+    # and writes only what posting a Motion turn (api_say) and signing in a
+    # device (motion_auth) write. Placed after migrations and any restore so
+    # the grants cover every table that exists.
+    # The password comes from the vault with no default: until it is there,
+    # the role is left alone rather than given an invented secret.
+    - name: Note missing memory-lane preview role password
+      debug:
+        msg: "memory_lane_preview_db_password is not in secrets/vault.yml; skipping the memory_lane_preview role. Previews keep connecting as magent."
+      when: memory_lane_preview_db_password is not defined
+
+    # The password reaches psql through the environment and \getenv, never
+    # argv, and is quoted by psql (:'preview_pw'). The statement logging is
+    # turned off for this session so a failed ALTER can't write it to the log.
+    - name: Create or update memory-lane preview role
+      command: docker exec -i -e MEMORY_LANE_PREVIEW_DB_PASSWORD magenta-postgres psql -U magent -d magenta_memory -v ON_ERROR_STOP=1 -q
+      args:
+        stdin: |
+          SET log_statement = 'none';
+          SET log_min_error_statement = panic;
+          \getenv preview_pw MEMORY_LANE_PREVIEW_DB_PASSWORD
+          SELECT 'CREATE ROLE memory_lane_preview' WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'memory_lane_preview') \gexec
+          ALTER ROLE memory_lane_preview WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS CONNECTION LIMIT 10 PASSWORD :'preview_pw';
+      environment:
+        MEMORY_LANE_PREVIEW_DB_PASSWORD: "{{ memory_lane_preview_db_password }}"
+      no_log: true
+      when: memory_lane_preview_db_password is defined
+
+    # REVOKE first, in the same transaction, so the role converges on exactly
+    # this list each deploy (revoking a table also drops its column grants).
+    # Default privileges make tables from future migrations readable too.
+    - name: Grant memory-lane preview role its privileges
+      command: docker exec -i magenta-postgres psql -U magent -d magenta_memory -v ON_ERROR_STOP=1 -q
+      args:
+        stdin: |
+          BEGIN;
+          GRANT CONNECT ON DATABASE magenta_memory TO memory_lane_preview;
+          GRANT USAGE ON SCHEMA public TO memory_lane_preview;
+          REVOKE ALL ON ALL TABLES IN SCHEMA public FROM memory_lane_preview;
+          GRANT SELECT ON ALL TABLES IN SCHEMA public TO memory_lane_preview;
+          ALTER DEFAULT PRIVILEGES FOR ROLE magent IN SCHEMA public GRANT SELECT ON TABLES TO memory_lane_preview;
+          GRANT INSERT ON conversations_message, devices, login_codes TO memory_lane_preview;
+          GRANT UPDATE (used_at) ON login_codes TO memory_lane_preview;
+          GRANT UPDATE (last_used_at, revoked_at) ON devices TO memory_lane_preview;
+          COMMIT;
+      when: memory_lane_preview_db_password is defined
+
     # PostgreSQL backups (backup directory already created above)
     # Uses custom format (-Fc) which is compressed and avoids psql \restrict issues
     - name: Create postgres backup script
