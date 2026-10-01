@@ -1068,6 +1068,11 @@
     # REVOKE first, in the same transaction, so the role converges on exactly
     # this list each deploy (revoking a table also drops its column grants).
     # Default privileges make tables from future migrations readable too.
+    # Except the tables holding live credentials and admin sessions: a preview
+    # needs none of them (Motions pages, /api/ and SSH sign-in never touch
+    # request.session or request.user), and reading django_session would let
+    # unreviewed code take over a live admin session. to_regclass skips any
+    # that don't exist (authtoken_token only appears with DRF's authtoken).
     - name: Grant memory-lane preview role its privileges
       command: docker exec -i magenta-postgres psql -U magent -d magenta_memory -v ON_ERROR_STOP=1 -q
       args:
@@ -1077,6 +1082,15 @@
           GRANT USAGE ON SCHEMA public TO memory_lane_preview;
           REVOKE ALL ON ALL TABLES IN SCHEMA public FROM memory_lane_preview;
           GRANT SELECT ON ALL TABLES IN SCHEMA public TO memory_lane_preview;
+          DO $$
+          DECLARE t text;
+          BEGIN
+            FOREACH t IN ARRAY ARRAY['django_session', 'auth_user', 'auth_user_groups', 'auth_user_user_permissions', 'authtoken_token'] LOOP
+              IF to_regclass(format('public.%I', t)) IS NOT NULL THEN
+                EXECUTE format('REVOKE SELECT ON public.%I FROM memory_lane_preview', t);
+              END IF;
+            END LOOP;
+          END $$;
           ALTER DEFAULT PRIVILEGES FOR ROLE magent IN SCHEMA public GRANT SELECT ON TABLES TO memory_lane_preview;
           GRANT INSERT ON conversations_message, devices, login_codes TO memory_lane_preview;
           GRANT UPDATE (used_at) ON login_codes TO memory_lane_preview;
