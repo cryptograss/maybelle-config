@@ -1103,6 +1103,11 @@
             IF to_regclass('public.media') IS NOT NULL THEN
               GRANT INSERT ON public.media TO memory_lane_preview;
             END IF;
+            -- Settings changed in a preview (memory-lane migration 0009):
+            -- rows are only ever added, so this too adds, never changes.
+            IF to_regclass('public.settings') IS NOT NULL THEN
+              GRANT INSERT ON public.settings TO memory_lane_preview;
+            END IF;
           END $$;
           GRANT UPDATE (used_at) ON login_codes TO memory_lane_preview;
           GRANT UPDATE (last_used_at, revoked_at) ON devices TO memory_lane_preview;
