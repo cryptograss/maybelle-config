@@ -5,6 +5,7 @@ Handles volume initialization, repository cloning, and service configuration.
 """
 
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -557,6 +558,29 @@ def setup_godot():
         logger.warning("⚠ Godot binary not responding (may need display for full init)")
 
 
+def write_runner_key():
+    """Hand the poller its runner key (memory-lane's MOTION_RUNNER_KEYS).
+
+    The poller is started by `su -`, which leaves this container's
+    environment behind, so the key goes in a file only magent can read --
+    never on a command line, where ps would show it. Without the key the
+    poller still works; woken turns reach Motions through the watcher.
+    """
+    key = os.environ.get('MEMORY_LANE_RUNNER_KEY', '').strip()
+    path = Path('/home/magent/.config/magenta/runner_key')
+    if not key:
+        path.unlink(missing_ok=True)
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, 'w') as f:
+        f.write(key + '\n')
+    os.chmod(path, 0o600)
+    for p in (path.parent.parent, path.parent, path):
+        shutil.chown(p, user='magent', group='magent')
+    logger.info(f"✓ Motion runner key written to {path}")
+
+
 def start_motion_poller():
     """Start memory-lane's Motion poller, if this container opted in.
 
@@ -572,6 +596,7 @@ def start_motion_poller():
     if not script.exists():
         logger.warning(f"MOTION_POLLER=1 but {script} is missing; poller not started")
         return
+    write_runner_key()
     try:
         # /usr/bin/python3 by path: the image's PATH puts the godogen venv
         # first; `su -` resets PATH anyway, but don't depend on that.
