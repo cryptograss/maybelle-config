@@ -14,10 +14,12 @@ on:
   push:
     paths:
       - 'delivery-kid/pinning-service/**'
+      - 'maybelle/scripts/**'
       - '.github/workflows/tests.yml'
   pull_request:
     paths:
       - 'delivery-kid/pinning-service/**'
+      - 'maybelle/scripts/**'
       - '.github/workflows/tests.yml'
 
 jobs:
@@ -49,3 +51,27 @@ jobs:
         # The whole suite runs. The four permanently-red Coconut tests that
         # used to be excluded here went with the code they tested (#121).
         run: pytest -v
+
+  # The storage audit decides what the wiki tells us to delete, so being
+  # wrong there costs records rather than a red build. Its tests arrived
+  # with #145 and nothing ran them: this workflow only watched
+  # delivery-kid/pinning-service, which is the same gap the comment at the
+  # top of this file was written about.
+  maybelle-scripts:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # These scripts have no requirements file — they run on maybelle
+      # against the system Python. Named explicitly rather than pinned so a
+      # missing import shows up here instead of on the server.
+      - name: Install dependencies
+        run: python -m pip install --upgrade pip pytest PyYAML mwclient
+
+      - name: Run tests
+        run: pytest -v maybelle/scripts/tests

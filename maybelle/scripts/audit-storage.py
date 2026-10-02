@@ -424,12 +424,59 @@ def fetch_pin_metadata(cid: str) -> Optional[dict]:
         return None
 
 
+def is_coconut_remnant(meta: Optional[dict]) -> bool:
+    """A pin that is only the paperwork of a Coconut transcode that produced
+    nothing.
+
+    Coconut was the hosted transcoder, removed in #129. When it failed it
+    still got its metadata pinned: method "coconut", no qualities, no
+    variants, zero output bytes — a directory holding one 485-byte
+    metadata.json and no media at all.
+
+    Eleven of these total five kilobytes. There is nothing to reclaim, and
+    they are the only surviving record that those uploads happened, so they
+    are reported apart from the problems rather than deleted or counted as
+    one.
+    """
+    if not isinstance(meta, dict):
+        return False
+    transcode = meta.get("transcode")
+    if not isinstance(transcode, dict):
+        return False
+    if str(transcode.get("method", "")).lower() != "coconut":
+        return False
+    if transcode.get("total_output_size_bytes") not in (0, None, "0"):
+        return False
+    # A Coconut run that actually produced something is a different animal:
+    # it has media, and an orphan pin holding media is a real finding.
+    return not transcode.get("qualities") and not transcode.get("variants")
+
+
+def split_coconut_remnants(orphan_pins: list[str],
+                           metadata: dict) -> tuple[list[str], list[dict]]:
+    """Partition orphan pins into (still worth attention, Coconut remnants)."""
+    remaining, remnants = [], []
+    for cid in orphan_pins:
+        meta = metadata.get(cid)
+        if is_coconut_remnant(meta):
+            remnants.append({
+                "cid": cid,
+                "title": (meta or {}).get("title"),
+                "uploaded_by": (meta or {}).get("uploaded_by"),
+                "created_at": (meta or {}).get("created_at"),
+            })
+        else:
+            remaining.append(cid)
+    return remaining, remnants
+
+
 def _normalise_title(title: str) -> str:
     return " ".join(str(title or "").lower().split())
 
 
 def correlate_unrecorded_publishes(orphan_pins: list[str],
-                                   dead_wiki_drafts: list[str]) -> list[dict]:
+                                   dead_wiki_drafts: list[str],
+                                   metadata: Optional[dict] = None) -> list[dict]:
     """Pair orphan pins with drafts that published without recording it.
 
     The reasoning that makes this worth doing:
@@ -465,7 +512,8 @@ def correlate_unrecorded_publishes(orphan_pins: list[str],
     matches = []
     unmatched_pins = []
     for cid in orphan_pins:
-        meta = fetch_pin_metadata(cid)
+        # Already read once for the Coconut split; one ssh per pin is enough.
+        meta = metadata.get(cid) if metadata is not None else fetch_pin_metadata(cid)
         if not meta:
             unmatched_pins.append(cid)
             continue
@@ -594,6 +642,22 @@ def print_seeding_audit(result: dict, seed_count: int):
           f"{len(result['missing_seeds'])} missing")
 
 
+def print_coconut_remnants(remnants: list[dict], sizes: dict):
+    if not remnants:
+        return
+    known = [sizes.get(r["cid"]) for r in remnants]
+    known = [s for s in known if isinstance(s, int)]
+    total = f", {human_size(sum(known) // 1024)}" if known else ""
+    print(f"  COCONUT REMNANTS ({len(remnants)}{total}) — metadata-only pins "
+          f"from the removed hosted transcoder. No media, nothing to "
+          f"reclaim; kept as the only record those uploads happened:")
+    for r in sorted(remnants, key=lambda r: r.get("created_at") or ""):
+        when = (r.get("created_at") or "")[:10]
+        who = (r.get("uploaded_by") or "unknown").replace("wiki:", "")
+        title = r.get("title") or "(no title recorded)"
+        print(f"    {when}  {who:16} {title}")
+
+
 def print_draft_audit(result: dict, wiki_count: int, staging_count: int):
     if result["orphan_drafts"]:
         print(f"  ORPHAN DRAFTS ({len(result['orphan_drafts'])}) — staging dir, no wiki page:")
@@ -680,7 +744,15 @@ def main():
     # Measure the orphans before reporting them. audit_pins stays free of
     # I/O so it can be tested; the sizes are attached here.
     pin_result["orphan_pin_sizes"] = fetch_pin_sizes(pin_result["orphan_pins"])
+    # Read each orphan's metadata once, here, and reuse it for both the
+    # Coconut split and the unrecorded-publish correlation below.
+    orphan_metadata = {cid: fetch_pin_metadata(cid)
+                       for cid in pin_result["orphan_pins"]}
+    pin_result["orphan_pins"], pin_result["coconut_remnants"] = \
+        split_coconut_remnants(pin_result["orphan_pins"], orphan_metadata)
     print_pin_audit(pin_result, release_count)
+    print_coconut_remnants(pin_result["coconut_remnants"],
+                           pin_result["orphan_pin_sizes"])
 
     print_section("Seeding Dirs vs Release Pages")
     seed_result = audit_seeding(releases, seeding, pin_result["deliberately_unpinned"])
@@ -699,7 +771,8 @@ def main():
     # together they are the signature of a finalize that succeeded and lost
     # its record. Correlate them rather than leaving a reader to notice.
     unrecorded = correlate_unrecorded_publishes(
-        pin_result["orphan_pins"], draft_result["dead_wiki_drafts"]
+        pin_result["orphan_pins"], draft_result["dead_wiki_drafts"],
+        metadata=orphan_metadata
     )
     if unrecorded:
         print_section("Possibly Published But Unrecorded")
@@ -752,6 +825,11 @@ def main():
     print(f"  Staging drafts:      {staging_count}")
     print()
     print(f"  Orphan pins:         {len(pin_result['orphan_pins'])}")
+    # Deliberately not a problem label: five kilobytes of known-dead
+    # paperwork in the same alarm box as a real fault is how the nine false
+    # "unrecorded publishes" went unexamined for weeks.
+    print(f"  Coconut remnants:    {len(pin_result.get('coconut_remnants') or [])}"
+          f"  (informational)")
     print(f"  Missing pins:        {len(pin_result['missing_pins'])}")
     print(f"  Orphan seeds:        {len(seed_result['orphan_seeds'])}")
     print(f"  Missing seeds:       {len(seed_result['missing_seeds'])}")
