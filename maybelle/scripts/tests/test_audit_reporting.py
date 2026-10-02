@@ -244,6 +244,113 @@ class TestPinSizes:
         assert sizes["QmA"] == 10
         assert sizes["QmMissing"] is None
 
+# The real thing, fetched from the gateway: one of the eleven orphan pins,
+# a directory holding nothing but this 485-byte file.
+REAL_REMNANT = {
+    "title": "learning terrapin outside Denver venue",
+    "uploaded_by": "wiki:JMyles",
+    "created_at": "2026-06-01T17:45:22.570717+00:00",
+    "transcode": {
+        "method": "coconut",
+        "output_codec": "av1",
+        "output_audio_codec": "opus",
+        "qualities": [],
+        "variants": {},
+        "total_output_size_bytes": 0,
+        "coconut_settings": {"video_codec": "av1", "audio_codec": "opus",
+                             "audio_bitrate": "128k",
+                             "hls_segment_duration": 6},
+    },
+}
+
+
+class TestCoconutRemnants:
+    """Five kilobytes of known-dead paperwork is not an action item.
+
+    Keeping it in the same warning box as a real fault is how the nine
+    false "unrecorded publishes" sat unexamined for weeks.
+    """
+
+    def test_the_real_remnant_is_recognised(self):
+        assert audit.is_coconut_remnant(REAL_REMNANT)
+
+    def test_an_untitled_remnant_is_still_one(self):
+        meta = {k: v for k, v in REAL_REMNANT.items() if k != "title"}
+        assert audit.is_coconut_remnant(meta)
+
+    def test_a_local_ffmpeg_pin_is_not_a_remnant(self):
+        assert not audit.is_coconut_remnant(
+            {"transcode": {"method": "local-ffmpeg",
+                           "total_output_size_bytes": 0,
+                           "qualities": [], "variants": {}}})
+
+    def test_a_coconut_run_that_produced_media_is_a_real_finding(self):
+        """The point of the filter is "no media". A Coconut pin holding
+        actual output is an orphan worth someone's attention."""
+        meta = {"transcode": {"method": "coconut",
+                              "total_output_size_bytes": 20809992,
+                              "qualities": ["1080p"], "variants": {"1080p": {}}}}
+        assert not audit.is_coconut_remnant(meta)
+
+    def test_zero_bytes_but_listed_qualities_is_not_dismissed(self):
+        meta = {"transcode": {"method": "coconut",
+                              "total_output_size_bytes": 0,
+                              "qualities": ["1080p"], "variants": {}}}
+        assert not audit.is_coconut_remnant(meta)
+
+    def test_a_pin_with_no_metadata_at_all_is_not_dismissed(self):
+        # Unreadable is not the same as known-dead. These stay in the list.
+        assert not audit.is_coconut_remnant(None)
+        assert not audit.is_coconut_remnant({})
+        assert not audit.is_coconut_remnant({"transcode": None})
+
+    def test_the_split_keeps_real_orphans_in_the_list(self):
+        metadata = {
+            "QmCoconut": REAL_REMNANT,
+            "QmReal": {"transcode": {"method": "local-ffmpeg",
+                                     "total_output_size_bytes": 999,
+                                     "qualities": ["1080p"], "variants": {}}},
+            "QmUnknown": None,
+        }
+        remaining, remnants = audit.split_coconut_remnants(
+            ["QmCoconut", "QmReal", "QmUnknown"], metadata)
+        assert remaining == ["QmReal", "QmUnknown"]
+        assert [r["cid"] for r in remnants] == ["QmCoconut"]
+        assert remnants[0]["title"] == "learning terrapin outside Denver venue"
+        assert remnants[0]["uploaded_by"] == "wiki:JMyles"
+
+    def test_remnants_are_reported_with_who_and_when(self, capsys):
+        audit.print_coconut_remnants(
+            [{"cid": "QmA", "title": "learning terrapin outside Denver venue",
+              "uploaded_by": "wiki:JMyles",
+              "created_at": "2026-06-01T17:45:22.570717+00:00"},
+             {"cid": "QmB", "title": None, "uploaded_by": "wiki:SkymanJenkins",
+              "created_at": "2026-09-17T13:15:33.854069+00:00"}],
+            sizes={"QmA": 485, "QmB": 485})
+        out = capsys.readouterr().out
+        assert "COCONUT REMNANTS (2" in out
+        assert "nothing to " in out and "reclaim" in out
+        assert "2026-06-01" in out and "JMyles" in out
+        assert "(no title recorded)" in out
+        # Oldest first, so the list reads as a history.
+        assert out.index("2026-06-01") < out.index("2026-09-17")
+
+    def test_nothing_printed_when_there_are_none(self, capsys):
+        audit.print_coconut_remnants([], sizes={})
+        assert capsys.readouterr().out == ""
+
+    def test_metadata_is_not_refetched_for_the_correlation(self, monkeypatch):
+        """One ssh per orphan, not two. The correlation reuses what the
+        split already read."""
+        def no_fetch(cid):
+            raise AssertionError("metadata was read twice for the same pin")
+
+        monkeypatch.setattr(audit, "fetch_pin_metadata", no_fetch)
+        matches = audit.correlate_unrecorded_publishes(
+            ["QmA"], ["68bf6490-1629-4863-97a7-d3bf3ce34e35"],
+            metadata={"QmA": REAL_REMNANT})
+        assert isinstance(matches, list)
+
 
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))
