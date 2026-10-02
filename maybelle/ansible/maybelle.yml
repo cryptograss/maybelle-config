@@ -810,6 +810,9 @@
           SCRUBBER_URL=http://scrubber:8001
           DJANGO_SECRET_KEY={{ memory_lane_django_secret_key }}
           MOTION_ALLOWED_SIGNERS=/etc/magenta/allowed_signers
+          # Who may kick, ban, scram (magenta.sh AZ5) and lift, with their SSH
+          # key (memory-lane views_admin.py). Unset: nobody can.
+          MOTION_ADMINS={{ memory_lane_motion_admins | default('justin') }}
           # Tool I/O is kept now that pattern redaction exists (jMyles/memory-lane#26);
           # this caps each stored result.
           TOOL_RESULT_CONTENT_CHARS=20000
@@ -1104,6 +1107,11 @@
           BEGIN
             IF to_regclass('public.media') IS NOT NULL THEN
               GRANT INSERT ON public.media TO memory_lane_preview;
+            END IF;
+            -- Settings changed in a preview (memory-lane migration 0009):
+            -- rows are only ever added, so this too adds, never changes.
+            IF to_regclass('public.settings') IS NOT NULL THEN
+              GRANT INSERT ON public.settings TO memory_lane_preview;
             END IF;
           END $$;
           GRANT UPDATE (used_at) ON login_codes TO memory_lane_preview;
