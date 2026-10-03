@@ -351,6 +351,17 @@
         owner: root
         group: root
 
+    # The deploy scripts tell the Moods when a server is redeployed
+    # (scripts/report-deploy.sh); memory-lane checks the same key.
+    - name: Deploy memory-lane deploy key for the deploy scripts
+      copy:
+        content: "{{ memory_lane_deploy_key }}"
+        dest: "/root/.memory_lane_deploy_key"
+        mode: '0600'
+        owner: root
+        group: root
+      when: memory_lane_deploy_key is defined
+
     - name: Create .ssh directory for jenkins user
       file:
         path: "{{ jenkins_home }}/.ssh"
@@ -820,6 +831,11 @@
           # The Motion runner (memory-lane's poller, on hunter) streams the turns
           # it wakes straight into their Motions, proving itself with this key.
           MOTION_RUNNER_KEYS=magent:{{ memory_lane_runner_key }}
+          {% endif %}
+          {% if memory_lane_deploy_key is defined %}
+          # The deploy scripts here (scripts/report-deploy.sh) tell the Moods
+          # when a server is being redeployed, proving themselves with this key.
+          MOTION_DEPLOY_KEY={{ memory_lane_deploy_key }}
           {% endif %}
         mode: '0600'
       register: memory_lane_env

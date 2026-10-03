@@ -125,6 +125,8 @@ echo "============================================================"
 echo ""
 
 START_TIME=$(date +%s)
+# Tell the Moods (memory-lane) it's under way: hunter's dot pulses, and a line says so.
+"$REPO_DIR/maybelle/scripts/report-deploy.sh" hunter started "${DEPLOY_USER:-}"
 
 cd "$REPO_DIR/hunter/ansible"
 
@@ -134,6 +136,8 @@ if [ "$REPLAY" = true ]; then
     ANSIBLE_CMD="$ANSIBLE_CMD -e watcher_replay_from_start=true"
 fi
 
+# The status of ansible, not of tee: without pipefail a failed run read as success.
+set -o pipefail
 if bash -c "$ANSIBLE_CMD" 2>&1 | tee "$LOG_FILE"; then
     DEPLOY_STATUS="success"
     EXIT_CODE=0
@@ -148,6 +152,7 @@ fi
 
 END_TIME=$(date +%s)
 DURATION=$((END_TIME - START_TIME))
+"$REPO_DIR/maybelle/scripts/report-deploy.sh" hunter "$([ "$EXIT_CODE" -eq 0 ] && echo finished || echo failed)" "${DEPLOY_USER:-}"
 
 echo ""
 echo "============================================================"

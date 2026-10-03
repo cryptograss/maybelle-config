@@ -124,6 +124,8 @@ echo "============================================================"
 echo ""
 
 START_TIME=$(date +%s)
+# Tell the Moods (memory-lane) it's under way: delivery-kid's dot pulses, and a line says so.
+"$REPO_DIR/maybelle/scripts/report-deploy.sh" delivery-kid started "${DEPLOY_USER:-}"
 
 cd "$REPO_DIR/delivery-kid/ansible"
 
@@ -135,6 +137,8 @@ fi
 
 ANSIBLE_CMD="ansible-playbook --vault-password-file=\"$VAULT_FILE\" -i inventory.yml playbook.yml $EXTRA_VARS"
 
+# The status of ansible, not of tee: without pipefail a failed run read as success.
+set -o pipefail
 if bash -c "$ANSIBLE_CMD" 2>&1 | tee "$LOG_FILE"; then
     DEPLOY_STATUS="success"
     EXIT_CODE=0
@@ -149,6 +153,7 @@ fi
 
 END_TIME=$(date +%s)
 DURATION=$((END_TIME - START_TIME))
+"$REPO_DIR/maybelle/scripts/report-deploy.sh" delivery-kid "$([ "$EXIT_CODE" -eq 0 ] && echo finished || echo failed)" "${DEPLOY_USER:-}"
 
 echo ""
 echo "============================================================"
