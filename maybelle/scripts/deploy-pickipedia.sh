@@ -111,6 +111,8 @@ echo "============================================================"
 echo ""
 
 START_TIME=$(date +%s)
+# Tell the Moods (memory-lane) it's under way: pickipedia's dot pulses, and a line says so.
+"$REPO_DIR/maybelle/scripts/report-deploy.sh" pickipedia started "${DEPLOY_USER:-}"
 
 cd "$REPO_DIR/pickipedia-vps/ansible"
 
@@ -131,6 +133,7 @@ fi
 
 END_TIME=$(date +%s)
 DURATION=$((END_TIME - START_TIME))
+"$REPO_DIR/maybelle/scripts/report-deploy.sh" pickipedia "$([ "$EXIT_CODE" -eq 0 ] && echo finished || echo failed)" "${DEPLOY_USER:-}"
 
 echo ""
 echo "============================================================"

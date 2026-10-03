@@ -125,6 +125,8 @@ echo "============================================================"
 echo ""
 
 START_TIME=$(date +%s)
+# Tell the Moods (memory-lane) it's under way: hunter's dot pulses, and a line says so.
+"$REPO_DIR/maybelle/scripts/report-deploy.sh" hunter started "${DEPLOY_USER:-}"
 
 cd "$REPO_DIR/hunter/ansible"
 
@@ -148,6 +150,7 @@ fi
 
 END_TIME=$(date +%s)
 DURATION=$((END_TIME - START_TIME))
+"$REPO_DIR/maybelle/scripts/report-deploy.sh" hunter "$([ "$EXIT_CODE" -eq 0 ] && echo finished || echo failed)" "${DEPLOY_USER:-}"
 
 echo ""
 echo "============================================================"
