@@ -94,10 +94,18 @@
       Port range: {{ user.port_range_start }}-{{ user.port_range_start + 9 }}
       Subdomains: {{ user.name }}1.{{ base_domain }} through {{ user.name }}10.{{ base_domain }}
 
+# A Mood's container lets in the people in it, by their keys.
 - name: Write user SSH public key to authorized_keys
   copy:
     dest: "{{ base_dir }}/{{ user.name }}/.ssh/authorized_keys"
-    content: "{{ user.ssh_pubkey }}\n"
+    content: |
+      {% if user.motion is defined %}
+      {% for person in users if person.name in (user.people | default([])) and person.ssh_pubkey is defined %}
+      {{ person.ssh_pubkey }}
+      {% endfor %}
+      {% else %}
+      {{ user.ssh_pubkey }}
+      {% endif %}
     owner: 1000  # magent user ID in container
     group: 1000
     mode: '0600'
@@ -115,6 +123,33 @@
       [github]
         user = {{ user.github_username }}
 
+# Bringing a session into a Mood's container, once, before it first starts:
+# the session's transcript (and its helpers' folder, if any) and the checkout
+# it works in, at the same paths, so a wake here resumes it with --resume.
+# Copied, not moved: the person's own container keeps theirs. Anything
+# already there is left alone, so what the Mood has since written stays.
+- name: Bring a session into a Mood's container
+  when: user.import_session is defined
+  shell: |
+    set -e
+    src="{{ base_dir }}/{{ user.import_session.from }}/home"
+    dst="{{ base_dir }}/{{ user.name }}/home"
+    project=".claude/projects/{{ user.import_session.project }}"
+    test -f "$src/$project/{{ user.import_session.id }}.jsonl"
+    mkdir -p "$dst/$project" "$dst/workspace"
+    if [ ! -e "$dst/$project/{{ user.import_session.id }}.jsonl" ]; then
+      cp -a "$src/$project/{{ user.import_session.id }}.jsonl" "$dst/$project/"
+    fi
+    if [ -d "$src/$project/{{ user.import_session.id }}" ] && [ ! -e "$dst/$project/{{ user.import_session.id }}" ]; then
+      cp -a "$src/$project/{{ user.import_session.id }}" "$dst/$project/"
+    fi
+    if [ ! -e "$dst/workspace/{{ user.import_session.workspace }}" ]; then
+      cp -a "$src/workspace/{{ user.import_session.workspace }}" "$dst/workspace/{{ user.import_session.workspace }}"
+    fi
+    chown -R 1000:1000 "$dst/.claude" "$dst/workspace/{{ user.import_session.workspace }}"
+  args:
+    executable: /bin/bash
+
 - name: Create user-specific docker-compose file
   template:
     src: docker-compose.yml.j2
@@ -130,6 +165,7 @@
     seconds: 5
 
 - name: Deploy .env file from vault for arthel builds
+  when: user.motion is not defined  # a Mood's container has no arthel checkout
   copy:
     content: |
       ALCHEMY_API_KEY={{ ALCHEMY_API_KEY }}

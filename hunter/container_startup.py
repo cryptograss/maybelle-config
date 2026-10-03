@@ -5,6 +5,7 @@ Handles volume initialization, repository cloning, and service configuration.
 """
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -459,6 +460,10 @@ def start_pickipedia_preview():
     """Start PickiPedia preview environment using docker-compose."""
     logger.info("=== Starting PickiPedia preview ===")
 
+    if os.environ.get('MOTION_SLUG'):
+        logger.info("A Mood's container has no docker.sock: no PickiPedia preview here")
+        return
+
     pickipedia_dir = Path("/home/magent/workspace/pickipedia")
     if not pickipedia_dir.exists():
         logger.warning("PickiPedia directory not found, skipping preview startup")
@@ -600,7 +605,18 @@ def start_motion_poller():
     try:
         # /usr/bin/python3 by path: the image's PATH puts the godogen venv
         # first; `su -` resets PATH anyway, but don't depend on that.
-        run_command(f"nohup /usr/bin/python3 {script} --agent magent >> /tmp/motion-poller.log 2>&1 &",
+        # A Mood's own container (MOTION_SLUG) answers only that Mood, with
+        # full tools for the people in it; a person's answers what it can wake.
+        # (Plain words only: run_command wraps this in single quotes for su.)
+        args = '--agent magent'
+        slug = os.environ.get('MOTION_SLUG', '').strip()
+        if slug:
+            people = os.environ.get('MOTION_FULL_TOOLS_FOR', '').strip()
+            if not re.fullmatch(r'[a-z0-9-]+', slug) or not re.fullmatch(r'[a-z0-9_,-]*', people):
+                logger.error(f"MOTION_SLUG / MOTION_FULL_TOOLS_FOR not plain words; poller not started")
+                return
+            args += f" --motions {slug} --full-tools-for {people or ','}"
+        run_command(f"nohup /usr/bin/python3 {script} {args} >> /tmp/motion-poller.log 2>&1 &",
                     user='magent')
         logger.info("✓ Motion poller started (log: /tmp/motion-poller.log)")
     except Exception as e:
