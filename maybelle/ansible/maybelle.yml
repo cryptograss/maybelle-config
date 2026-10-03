@@ -837,6 +837,11 @@
           # when a server is being redeployed, proving themselves with this key.
           MOTION_DEPLOY_KEY={{ memory_lane_deploy_key }}
           {% endif %}
+          {% if elevenlabs_api_key is defined %}
+          # Voice in Moods (memory-lane services/voice.py): memos transcribed,
+          # messages read aloud. A key restricted to TTS, STT and reading voices.
+          ELEVENLABS_API_KEY={{ elevenlabs_api_key }}
+          {% endif %}
         mode: '0600'
       register: memory_lane_env
 
@@ -897,7 +902,10 @@
               networks:
                 - memory-lane-net
               restart: unless-stopped
-              command: gunicorn --bind 0.0.0.0:3000 --workers 2 --access-logfile - memory_viewer.wsgi:application
+              # Threads, and room to wait: transcribing a voice memo or voicing a
+              # message takes ElevenLabs a while, and must neither be cut off at
+              # gunicorn's default 30 s nor hold up every page's polling meanwhile.
+              command: gunicorn --bind 0.0.0.0:3000 --workers 2 --threads 8 --timeout 120 --access-logfile - memory_viewer.wsgi:application
 
             mcp-server:
               build:
