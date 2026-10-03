@@ -119,6 +119,8 @@ cd "$REPO_DIR/pickipedia-vps/ansible"
 # Run ansible playbook
 ANSIBLE_CMD="ansible-playbook --vault-password-file=\"$VAULT_FILE\" -i inventory.yml playbook.yml"
 
+# The status of ansible, not of tee: without pipefail a failed run read as success.
+set -o pipefail
 if bash -c "$ANSIBLE_CMD" 2>&1 | tee "$LOG_FILE"; then
     DEPLOY_STATUS="success"
     EXIT_CODE=0

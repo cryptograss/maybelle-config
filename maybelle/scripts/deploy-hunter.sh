@@ -136,6 +136,8 @@ if [ "$REPLAY" = true ]; then
     ANSIBLE_CMD="$ANSIBLE_CMD -e watcher_replay_from_start=true"
 fi
 
+# The status of ansible, not of tee: without pipefail a failed run read as success.
+set -o pipefail
 if bash -c "$ANSIBLE_CMD" 2>&1 | tee "$LOG_FILE"; then
     DEPLOY_STATUS="success"
     EXIT_CODE=0
