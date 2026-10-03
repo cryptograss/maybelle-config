@@ -1116,6 +1116,9 @@
           END $$;
           GRANT UPDATE (used_at) ON login_codes TO memory_lane_preview;
           GRANT UPDATE (last_used_at, revoked_at) ON devices TO memory_lane_preview;
+          -- Renaming a Mood in a preview: its title and description only. The
+          -- old name stays in the record (a system row the rename adds).
+          GRANT UPDATE (title, description) ON motions TO memory_lane_preview;
           COMMIT;
       when: memory_lane_preview_db_password is defined
 
