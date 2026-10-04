@@ -821,6 +821,8 @@
           SCRUBBER_URL=http://scrubber:8001
           DJANGO_SECRET_KEY={{ memory_lane_django_secret_key }}
           MOTION_ALLOWED_SIGNERS=/etc/magenta/allowed_signers
+          # Each person's PickiPedia name, shown in magenta (memory-lane wiki_auth.py).
+          MOTION_WIKI_NAMES=/etc/magenta/wiki_names
           # Who may kick, ban, scram (magenta.sh AZ5) and lift, with their SSH
           # key (memory-lane views_admin.py). Unset: nobody can.
           MOTION_ADMINS={{ memory_lane_motion_admins | default('justin') }}
@@ -836,6 +838,13 @@
           # The deploy scripts here (scripts/report-deploy.sh) tell the Moods
           # when a server is being redeployed, proving themselves with this key.
           MOTION_DEPLOY_KEY={{ memory_lane_deploy_key }}
+          {% endif %}
+          {% if pickipedia_oauth_client_id is defined and pickipedia_oauth_client_secret is defined %}
+          # "Sign in with PickiPedia": magenta's client at the wiki's OAuth
+          # extension (Special:OAuthConsumerRegistration). A wiki sign-in chats
+          # and mentions people; waking agents still takes an SSH key.
+          PICKIPEDIA_OAUTH_CLIENT_ID={{ pickipedia_oauth_client_id }}
+          PICKIPEDIA_OAUTH_CLIENT_SECRET={{ pickipedia_oauth_client_secret }}
           {% endif %}
           {% if elevenlabs_api_key is defined %}
           # Voice in Moods (memory-lane services/voice.py): memos transcribed,
@@ -881,6 +890,18 @@
           {% endfor %}
       register: motion_allowed_signers
 
+    # Each person's PickiPedia name, from the same inventory: memory-lane shows
+    # people by it, links it to their wiki user page, and takes @-mentions by it.
+    - name: Write Motions wiki_names
+      copy:
+        dest: /mnt/persist/magenta/wiki_names
+        mode: '0644'
+        content: |
+          {% for user in (lookup('file', playbook_dir ~ '/../../hunter/ansible/inventory.yml') | from_yaml).all.vars.users if user.pickipedia | default('') | trim %}
+          {{ user.name }} {{ user.pickipedia | trim }}
+          {% endfor %}
+      register: motion_wiki_names
+
     - name: Create Memory Lane docker-compose file
       copy:
         dest: /mnt/persist/magenta/source/docker-compose.maybelle.yml
@@ -899,6 +920,7 @@
                 - "10.0.0.2:3000:3000"
               volumes:
                 - /mnt/persist/magenta/allowed_signers:/etc/magenta/allowed_signers:ro
+                - /mnt/persist/magenta/wiki_names:/etc/magenta/wiki_names:ro
               networks:
                 - memory-lane-net
               restart: unless-stopped
@@ -957,8 +979,8 @@
     # weeks on stale code — so a merged migration never ran and a merged MCP
     # tool never appeared. Recreate whenever new source arrived, or on
     # --rebuild; otherwise leave the containers alone.
-    # .env, the compose file and allowed_signers count as new source too.
-    # allowed_signers is bind-mounted as a single file, and Ansible's copy
+    # .env, the compose file, allowed_signers and wiki_names count as new source too.
+    # Those two are bind-mounted as single files, and Ansible's copy
     # replaces a file by rename, so a running container would keep reading the
     # old inode; it has to be recreated to see a changed roster.
     - name: Start Memory Lane services
@@ -968,7 +990,7 @@
           - docker-compose.maybelle.yml
         build: always
         state: present
-        recreate: "{{ 'always' if (memory_lane_source.changed or memory_lane_env.changed or memory_lane_compose.changed or motion_allowed_signers.changed or (rebuild_images | default(false) | bool)) else 'auto' }}"
+        recreate: "{{ 'always' if (memory_lane_source.changed or memory_lane_env.changed or memory_lane_compose.changed or motion_allowed_signers.changed or motion_wiki_names.changed or (rebuild_images | default(false) | bool)) else 'auto' }}"
 
     # Inject secrets into scrubber container (from temp file created by chapter-1.sh)
     - name: Check if scrubber secrets temp file exists
