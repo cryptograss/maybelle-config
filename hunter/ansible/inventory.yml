@@ -32,7 +32,7 @@ all:
         port_range_start: 14000  # 14000-14009
         code_server_password: "{{ code_server_password }}"
         github_token: "{{ magent_github_token }}"
-        motion_poller: true  # wake a turn on web-posted @magent mentions
+        mood_poller: true  # wake a turn on web-posted @magent mentions
 
       - name: rj
         full_name: "R.J. Partington III"
@@ -67,8 +67,8 @@ all:
         code_server_password: "{{ code_server_password }}"
         github_token: "{{ magent_github_token }}"
 
-      # --- Moods (memory-lane Motions) with a container of their own -------
-      # (memory-lane #52.) An entry with `motion:` is a Mood's container, not a
+      # --- Moods (memory-lane Moods) with a container of their own -------
+      # (memory-lane #52.) An entry with `mood:` is a Mood's container, not a
       # person's: no docker.sock, so full tools can open up to the `people`
       # in it; a poller that answers that Mood (its sessions live only here);
       # git as magent. Reached by SSH on its own port with any of the people's
@@ -76,7 +76,7 @@ all:
       # the router, which routes each key to its owner's container. Its web
       # ports work as anyone's: <name>1.hunter.cryptograss.live and so on.
       - name: delivery-kid
-        motion: delivery-kid
+        mood: delivery-kid
         people: [justin, skyler]
         full_name: "magent-cryptograss"
         email: "magent@cryptograss.live"
@@ -85,7 +85,7 @@ all:
         port_range_start: 14040  # 14040-14049
         code_server_password: "{{ code_server_password }}"
         github_token: "{{ magent_github_token }}"
-        motion_poller: true
+        mood_poller: true
         # Brought over once, before the container first starts: Sky's
         # delivery-kid session and the checkout it works in, at the same
         # paths, so a wake here can resume it. Skipped once it's here.

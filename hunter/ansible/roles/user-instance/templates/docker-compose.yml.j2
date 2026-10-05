@@ -21,16 +21,16 @@ services:
       - {{ base_dir }}/{{ user.name }}/home:/home/magent
       # SSH keys mounted separately (read-only for security)
       - {{ base_dir }}/{{ user.name }}/.ssh:/home/magent/.ssh:ro
-{% if user.motion is not defined %}
+{% if user.mood is not defined %}
       # Root on hunter, in effect: a person's own container only. A Mood's
       # container never gets it, so full tools there stay inside it.
       - /var/run/docker.sock:/var/run/docker.sock
 {% endif %}
       # PickiPedia backups (synced from maybelle daily)
       - /opt/magenta/pickipedia-backups:/opt/magenta/pickipedia-backups:ro
-      # Motion poller: the deployed memory-lane main (build-image role keeps it
+      # Mood poller: the deployed memory-lane main (build-image role keeps it
       # current), not a workspace checkout that could be on any branch
-      - {{ base_dir }}/memory-lane-source/poller:/opt/motion-poller:ro
+      - {{ base_dir }}/memory-lane-source/poller:/opt/mood-poller:ro
     networks:
       - magenta-net
     environment:
@@ -41,7 +41,7 @@ services:
       - POSTGRES_HOST=magenta-postgres
       - POSTGRES_DB={{ postgres_db }}
       - POSTGRES_USER=magent
-{% if user.motion is not defined %}
+{% if user.mood is not defined %}
       - POSTGRES_PASSWORD={{ postgres_password }}
 {% endif %}
 {% if memory_lane_preview_db_password is defined %}
@@ -64,18 +64,18 @@ services:
       - PICKIPEDIA_DEV_SENTRY_DSN={{ pickipedia_dev_sentry_dsn | default('') }}
       # Delivery-kid pinning service API key
       - DELIVERY_KID_API_KEY={{ delivery_kid_api_key }}
-      # Opt-in: container_startup.py starts the Motion poller when this is 1
-      - MOTION_POLLER={{ '1' if user.motion_poller | default(false) else '0' }}
-{% if user.motion is defined %}
+      # Opt-in: container_startup.py starts the Mood poller when this is 1
+      - MOOD_POLLER={{ '1' if user.mood_poller | default(false) else '0' }}
+{% if user.mood is defined %}
       # A Mood's container: its poller answers this Mood, with full tools
       # for the people in it; no arthel checkout in its workspace.
-      - MOTION_SLUG={{ user.motion }}
-      - MOTION_FULL_TOOLS_FOR={{ user.people | default([]) | join(',') }}
+      - MOOD_SLUG={{ user.mood }}
+      - MOOD_FULL_TOOLS_FOR={{ user.people | default([]) | join(',') }}
       - SKIP_ARTHEL=1
 {% endif %}
-{% if user.motion_poller | default(false) and memory_lane_runner_key is defined %}
-      # The poller streams the turns it wakes straight into their Motions with
-      # this (memory-lane's MOTION_RUNNER_KEYS). Only the poller reads it, so it
+{% if user.mood_poller | default(false) and memory_lane_runner_key is defined %}
+      # The poller streams the turns it wakes straight into their Moods with
+      # this (memory-lane's MOOD_RUNNER_KEYS). Only the poller reads it, so it
       # is not exported to shells.
       - MEMORY_LANE_RUNNER_KEY={{ memory_lane_runner_key }}
 {% endif %}

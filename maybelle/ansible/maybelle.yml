@@ -820,24 +820,24 @@
           INGEST_API_KEY={{ ingest_api_key }}
           SCRUBBER_URL=http://scrubber:8001
           DJANGO_SECRET_KEY={{ memory_lane_django_secret_key }}
-          MOTION_ALLOWED_SIGNERS=/etc/magenta/allowed_signers
+          MOOD_ALLOWED_SIGNERS=/etc/magenta/allowed_signers
           # Each person's PickiPedia name, shown in magenta (memory-lane wiki_auth.py).
-          MOTION_WIKI_NAMES=/etc/magenta/wiki_names
+          MOOD_WIKI_NAMES=/etc/magenta/wiki_names
           # Who may kick, ban, scram (magenta.sh AZ5) and lift, with their SSH
           # key (memory-lane views_admin.py). Unset: nobody can.
-          MOTION_ADMINS={{ memory_lane_motion_admins | default('justin') }}
+          MOOD_ADMINS={{ memory_lane_motion_admins | default('justin') }}
           # Tool I/O is kept now that pattern redaction exists (jMyles/memory-lane#26);
           # this caps each stored result.
           TOOL_RESULT_CONTENT_CHARS=20000
           {% if memory_lane_runner_key is defined %}
-          # The Motion runner (memory-lane's poller, on hunter) streams the turns
-          # it wakes straight into their Motions, proving itself with this key.
-          MOTION_RUNNER_KEYS=magent:{{ memory_lane_runner_key }}
+          # The Mood runner (memory-lane's poller, on hunter) streams the turns
+          # it wakes straight into their Moods, proving itself with this key.
+          MOOD_RUNNER_KEYS=magent:{{ memory_lane_runner_key }}
           {% endif %}
           {% if memory_lane_deploy_key is defined %}
           # The deploy scripts here (scripts/report-deploy.sh) tell the Moods
           # when a server is being redeployed, proving themselves with this key.
-          MOTION_DEPLOY_KEY={{ memory_lane_deploy_key }}
+          MOOD_DEPLOY_KEY={{ memory_lane_deploy_key }}
           {% endif %}
           {% if pickipedia_oauth_client_id is defined and pickipedia_oauth_client_secret is defined %}
           # "Sign in with PickiPedia": magenta's client at the wiki's OAuth
@@ -872,27 +872,27 @@
         postgres_network_external: true
         postgres_bind_address: "10.0.0.2"  # Hetzner private network - allows hunter to connect
 
-    # Who may write into Motions (jMyles/memory-lane#27): each person on the
-    # team, by the SSH key hunter already knows them by. A Motion signed with
-    # `ssh-keygen -Y sign -n magenta-motions` verifies against this file.
+    # Who may write into Moods (jMyles/memory-lane#27): each person on the
+    # team, by the SSH key hunter already knows them by. A Mood signed with
+    # `ssh-keygen -Y sign -n magenta-moods` verifies against this file.
     # Users whose key is empty or still a placeholder get no line.
     # Read with lookup('file') | from_yaml, not include_vars: that inventory
     # carries hunter-vault templates ({{ code_server_password }} and friends),
     # and on ansible-core 2.16 touching an include_vars'd dict renders all of
     # it, failing on vars that only hunter's vault defines.
-    - name: Write Motions allowed_signers
+    - name: Write Moods allowed_signers
       copy:
         dest: /mnt/persist/magenta/allowed_signers
         mode: '0644'
         content: |
           {% for user in (lookup('file', playbook_dir ~ '/../../hunter/ansible/inventory.yml') | from_yaml).all.vars.users if (user.ssh_pubkey | default('') | trim) is match('ssh-') %}
-          {{ user.name }} namespaces="magenta-motions" {{ user.ssh_pubkey | trim }}
+          {{ user.name }} namespaces="magenta-moods" {{ user.ssh_pubkey | trim }}
           {% endfor %}
-      register: motion_allowed_signers
+      register: mood_allowed_signers
 
     # Each person's PickiPedia name, from the same inventory: memory-lane shows
     # people by it, links it to their wiki user page, and takes @-mentions by it.
-    - name: Write Motions wiki_names
+    - name: Write Moods wiki_names
       copy:
         dest: /mnt/persist/magenta/wiki_names
         mode: '0644'
@@ -900,7 +900,7 @@
           {% for user in (lookup('file', playbook_dir ~ '/../../hunter/ansible/inventory.yml') | from_yaml).all.vars.users if user.pickipedia | default('') | trim %}
           {{ user.name }} {{ user.pickipedia | trim }}
           {% endfor %}
-      register: motion_wiki_names
+      register: mood_wiki_names
 
     - name: Create Memory Lane docker-compose file
       copy:
@@ -990,7 +990,7 @@
           - docker-compose.maybelle.yml
         build: always
         state: present
-        recreate: "{{ 'always' if (memory_lane_source.changed or memory_lane_env.changed or memory_lane_compose.changed or motion_allowed_signers.changed or motion_wiki_names.changed or (rebuild_images | default(false) | bool)) else 'auto' }}"
+        recreate: "{{ 'always' if (memory_lane_source.changed or memory_lane_env.changed or memory_lane_compose.changed or mood_allowed_signers.changed or mood_wiki_names.changed or (rebuild_images | default(false) | bool)) else 'auto' }}"
 
     # Inject secrets into scrubber container (from temp file created by chapter-1.sh)
     - name: Check if scrubber secrets temp file exists
@@ -1092,8 +1092,8 @@
     # which run a branch's unreviewed code against the live record. They used
     # to connect as magent, the superuser, with only a per-session read-only
     # default between them and the data. memory_lane_preview reads every table
-    # and writes only what posting a Motion turn (api_say) and signing in a
-    # device (motion_auth) write. Placed after migrations and any restore so
+    # and writes only what posting a Mood turn (api_say) and signing in a
+    # device (mood_auth) write. Placed after migrations and any restore so
     # the grants cover every table that exists.
     # The password comes from the vault with no default: until it is there,
     # the role is left alone rather than given an invented secret.
@@ -1123,7 +1123,7 @@
     # this list each deploy (revoking a table also drops its column grants).
     # Default privileges make tables from future migrations readable too.
     # Except the tables holding live credentials and admin sessions: a preview
-    # needs none of them (Motions pages, /api/ and SSH sign-in never touch
+    # needs none of them (Moods pages, /api/ and SSH sign-in never touch
     # request.session or request.user), and reading django_session would let
     # unreviewed code take over a live admin session. to_regclass skips any
     # that don't exist (authtoken_token only appears with DRF's authtoken).
@@ -1162,9 +1162,26 @@
           END $$;
           GRANT UPDATE (used_at) ON login_codes TO memory_lane_preview;
           GRANT UPDATE (last_used_at, revoked_at) ON devices TO memory_lane_preview;
-          -- Renaming a Mood in a preview: its title and description only. The
-          -- old name stays in the record (a system row the rename adds).
-          GRANT UPDATE (title, description) ON motions TO memory_lane_preview;
+          -- Renaming a Mood in a preview (memory-lane migration 0014 made
+          -- moods): its title, description and the slug that follows them, and
+          -- the alias the old slug becomes. The old name stays in the record
+          -- (a system row the rename adds). Read marks (migration 0011): a
+          -- preview keeps its reader's place. Guarded, so a deploy before or
+          -- after a migration never fails on a table that isn't there.
+          DO $$
+          BEGIN
+            IF to_regclass('public.moods') IS NOT NULL THEN
+              GRANT UPDATE (slug, title, description) ON public.moods TO memory_lane_preview;
+            END IF;
+            IF to_regclass('public.mood_aliases') IS NOT NULL THEN
+              GRANT INSERT, DELETE ON public.mood_aliases TO memory_lane_preview;
+              GRANT USAGE ON SEQUENCE public.mood_aliases_id_seq TO memory_lane_preview;
+            END IF;
+            IF to_regclass('public.read_marks') IS NOT NULL THEN
+              GRANT INSERT, UPDATE (seen_at) ON public.read_marks TO memory_lane_preview;
+              GRANT USAGE ON SEQUENCE public.read_marks_id_seq TO memory_lane_preview;
+            END IF;
+          END $$;
           COMMIT;
       when: memory_lane_preview_db_password is defined
 
