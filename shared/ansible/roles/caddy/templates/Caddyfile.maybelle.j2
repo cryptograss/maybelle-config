@@ -22,6 +22,13 @@ memory-lane.{{ domain_name }} {
     reverse_proxy localhost:3000
 }
 
+# Magenta: the same memory-lane, under its own name. The bare address opens
+# the #general Mood until there's a landing page.
+magenta.cryptograss.live {
+    redir / /moods/general/ 302
+    reverse_proxy localhost:3000
+}
+
 # MCP server (for Claude Code memory access)
 mcp.{{ domain_name }} {
     reverse_proxy 10.0.0.2:8000

@@ -815,7 +815,7 @@
           POSTGRES_DB=magenta_memory
           POSTGRES_USER=magent
           POSTGRES_PASSWORD={{ memory_lane_postgres_password }}
-          DJANGO_ALLOWED_HOSTS=memory-lane.maybelle.cryptograss.live,localhost,10.0.0.2
+          DJANGO_ALLOWED_HOSTS=memory-lane.maybelle.cryptograss.live,magenta.cryptograss.live,localhost,10.0.0.2
           DJANGO_DEBUG=False
           INGEST_API_KEY={{ ingest_api_key }}
           SCRUBBER_URL=http://scrubber:8001
