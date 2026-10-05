@@ -91,7 +91,7 @@
 
           User instances deployed:
           {% for user in users %}
-          {% if user.motion is defined %}
+          {% if user.mood is defined %}
           - {{ user.name }} (a Mood's container, for {{ user.people | join(', ') }}): ssh -p {{ user.ssh_port }} magent@hunter.cryptograss.live
           {% else %}
           - {{ user.name }}: ssh {{ user.name }}@hunter.cryptograss.live (port {{ user.ssh_port }})

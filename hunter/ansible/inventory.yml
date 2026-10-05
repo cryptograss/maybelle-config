@@ -26,17 +26,19 @@ all:
         full_name: "Justin Holmes"
         email: "justin@justinholmes.com"
         github_username: "jMyles"
+        pickipedia: "JMyles"  # the name shown in magenta, linked to their wiki user page
         ssh_pubkey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINKHaQ2Nt6I/ADwE+ybNAyBUDG4APLTgu0oQ0V5Jsa0E jmyles@lukowala"  # Replace with: cat ~/.ssh/id_ed25519.pub
         ssh_port: 2222
         port_range_start: 14000  # 14000-14009
         code_server_password: "{{ code_server_password }}"
         github_token: "{{ magent_github_token }}"
-        motion_poller: true  # wake a turn on web-posted @magent mentions
+        mood_poller: true  # wake a turn on web-posted @magent mentions
 
       - name: rj
         full_name: "R.J. Partington III"
         email: "rj@example.com"
         github_username: "rjpartingtoniii"
+        pickipedia: "RJPARTINGTONIII"
         ssh_pubkey: "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC3PKuhIuPkCMX7RQu6xNK3V40gQtdbhIVrknmhskzYX4aOhAyA4sB5YpcDhCwusiNmoXTllEga6vwcAJSKpn8XafddfZXyZkfg4tWT/sBDMiwInICqah5bcImBwLfBaA2/oFo9/26Qg3s/Z4DU6EiE+VyqnoMPYdOU0KCuXCumy/xira7QKa0aRXTC7M81uXRFvFAPaYav0FYPsj4JLYD1Eg6IXapxV6mQ1KXK1Y7gbD+6OuyAvP232SyTNsQNqf5dDdAIW+CtWuSIDv90u0+nkg000wm9xC8lQUPoGzZQDy249q++jrHRlubgmONKcxZBJeZtbA5m8myNzTyfmtRx rjpartingtoniii@Richards-MacBook-Pro-2.local"
         ssh_port: 2223
         port_range_start: 14010
@@ -47,6 +49,7 @@ all:
         full_name: "Skyler Golden"
         email: "skygoldenmusic1@gmail.com"
         github_username: "AudioSkyWalker"
+        pickipedia: "SkymanJenkins"
         ssh_pubkey: "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQDJqDJ+beUtVNZhW9qm61bXkZaL9J2Z700iaYnCSlbi6RH35lzrgFqHl1jFUZ6548dDdQcfIIwKx8bIR6iA23aBNwsX0Z9wEg+FLz+b4W1R+8Y602dy6e1rNOVtXozntKJSBFkfvsId6HpLtv7Cl/zRj+8GnZ+b3WUzur2ZrXklb00BGDAza8KkMhdzi2pyJudQAnQOIhV5ZzAREfcGr9I1+hfQdwHI/2u3W4anA0T18+A/uLWkon5NxW8gGk/xfAQ+UaPfOu020B42dVOD6E6WMVByM2MlZg/q/kuj14jwoRtRV7NGqQ8+6Vd5OprSyJ2Cj9RJ1tM0GCBZSYygj9H2YIRXkNE11U/9jRk9rlcW8HMpsx9C/+EGpwJXM8z5x+so9gm4Pb7zaussCUsAPlvFucRW539PO97ttOtHk9xstVOui40buwFzvkUZ1y5x83mbv8cmWjQS0cVcEuT2NqPWAPuspCHh8QAx3cLvByMDcRQgJjELqjboYmvtgDgvg5M= skylergoldenmusic@Skylers-MBP.home"
         ssh_port: 2224
         port_range_start: 14020
@@ -57,14 +60,15 @@ all:
         full_name: "Fibonacci Emery Holmes"
         email: "fibonacci@justinholmes.com"
         github_username: "fibonacci-frames"
+        pickipedia: "Fibonacci"
         ssh_pubkey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILtUlbeGAoMsK5/ZhM+L2U77dVSwa8Ip2koo2/lbk5xU fibonacci@fibonacci-Zenbook-15-UM3504DA-UM3504DA"
         ssh_port: 2225
         port_range_start: 14030
         code_server_password: "{{ code_server_password }}"
         github_token: "{{ magent_github_token }}"
 
-      # --- Moods (memory-lane Motions) with a container of their own -------
-      # (memory-lane #52.) An entry with `motion:` is a Mood's container, not a
+      # --- Moods (memory-lane Moods) with a container of their own -------
+      # (memory-lane #52.) An entry with `mood:` is a Mood's container, not a
       # person's: no docker.sock, so full tools can open up to the `people`
       # in it; a poller that answers that Mood (its sessions live only here);
       # git as magent. Reached by SSH on its own port with any of the people's
@@ -72,7 +76,7 @@ all:
       # the router, which routes each key to its owner's container. Its web
       # ports work as anyone's: <name>1.hunter.cryptograss.live and so on.
       - name: delivery-kid
-        motion: delivery-kid
+        mood: delivery-kid
         people: [justin, skyler]
         full_name: "magent-cryptograss"
         email: "magent@cryptograss.live"
@@ -81,7 +85,7 @@ all:
         port_range_start: 14040  # 14040-14049
         code_server_password: "{{ code_server_password }}"
         github_token: "{{ magent_github_token }}"
-        motion_poller: true
+        mood_poller: true
         # Brought over once, before the container first starts: Sky's
         # delivery-kid session and the checkout it works in, at the same
         # paths, so a wake here can resume it. Skipped once it's here.

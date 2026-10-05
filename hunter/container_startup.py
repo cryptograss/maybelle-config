@@ -460,7 +460,7 @@ def start_pickipedia_preview():
     """Start PickiPedia preview environment using docker-compose."""
     logger.info("=== Starting PickiPedia preview ===")
 
-    if os.environ.get('MOTION_SLUG'):
+    if os.environ.get('MOOD_SLUG'):
         logger.info("A Mood's container has no docker.sock: no PickiPedia preview here")
         return
 
@@ -564,12 +564,12 @@ def setup_godot():
 
 
 def write_runner_key():
-    """Hand the poller its runner key (memory-lane's MOTION_RUNNER_KEYS).
+    """Hand the poller its runner key (memory-lane's MOOD_RUNNER_KEYS).
 
     The poller is started by `su -`, which leaves this container's
     environment behind, so the key goes in a file only magent can read --
     never on a command line, where ps would show it. Without the key the
-    poller still works; woken turns reach Motions through the watcher.
+    poller still works; woken turns reach Moods through the watcher.
     """
     key = os.environ.get('MEMORY_LANE_RUNNER_KEY', '').strip()
     path = Path('/home/magent/.config/magenta/runner_key')
@@ -583,44 +583,44 @@ def write_runner_key():
     os.chmod(path, 0o600)
     for p in (path.parent.parent, path.parent, path):
         shutil.chown(p, user='magent', group='magent')
-    logger.info(f"✓ Motion runner key written to {path}")
+    logger.info(f"✓ Mood runner key written to {path}")
 
 
-def start_motion_poller():
-    """Start memory-lane's Motion poller, if this container opted in.
+def start_mood_poller():
+    """Start memory-lane's Mood poller, if this container opted in.
 
-    Runs the deployed copy mounted read-only at /opt/motion-poller (hunter's
+    Runs the deployed copy mounted read-only at /opt/mood-poller (hunter's
     clone of memory-lane main), never a workspace checkout. It needs requests
     (installed into /usr/bin/python3 from memory-lane's requirements), the
     claude CLI logged in as magent, and ~/.claude/projects to resume from.
     """
-    script = Path('/opt/motion-poller/motion_poller.py')
-    if os.environ.get('MOTION_POLLER') != '1':
-        logger.info("Motion poller not enabled for this container (MOTION_POLLER != 1)")
+    script = Path('/opt/mood-poller/mood_poller.py')
+    if os.environ.get('MOOD_POLLER') != '1':
+        logger.info("Mood poller not enabled for this container (MOOD_POLLER != 1)")
         return
     if not script.exists():
-        logger.warning(f"MOTION_POLLER=1 but {script} is missing; poller not started")
+        logger.warning(f"MOOD_POLLER=1 but {script} is missing; poller not started")
         return
     write_runner_key()
     try:
         # /usr/bin/python3 by path: the image's PATH puts the godogen venv
         # first; `su -` resets PATH anyway, but don't depend on that.
-        # A Mood's own container (MOTION_SLUG) answers only that Mood, with
+        # A Mood's own container (MOOD_SLUG) answers only that Mood, with
         # full tools for the people in it; a person's answers what it can wake.
         # (Plain words only: run_command wraps this in single quotes for su.)
         args = '--agent magent'
-        slug = os.environ.get('MOTION_SLUG', '').strip()
+        slug = os.environ.get('MOOD_SLUG', '').strip()
         if slug:
-            people = os.environ.get('MOTION_FULL_TOOLS_FOR', '').strip()
+            people = os.environ.get('MOOD_FULL_TOOLS_FOR', '').strip()
             if not re.fullmatch(r'[a-z0-9-]+', slug) or not re.fullmatch(r'[a-z0-9_,-]*', people):
-                logger.error(f"MOTION_SLUG / MOTION_FULL_TOOLS_FOR not plain words; poller not started")
+                logger.error(f"MOOD_SLUG / MOOD_FULL_TOOLS_FOR not plain words; poller not started")
                 return
-            args += f" --motions {slug} --full-tools-for {people or ','}"
-        run_command(f"nohup /usr/bin/python3 {script} {args} >> /tmp/motion-poller.log 2>&1 &",
+            args += f" --moods {slug} --full-tools-for {people or ','}"
+        run_command(f"nohup /usr/bin/python3 {script} {args} >> /tmp/mood-poller.log 2>&1 &",
                     user='magent')
-        logger.info("✓ Motion poller started (log: /tmp/motion-poller.log)")
+        logger.info("✓ Mood poller started (log: /tmp/mood-poller.log)")
     except Exception as e:
-        logger.error(f"Motion poller failed to start: {e}")
+        logger.error(f"Mood poller failed to start: {e}")
 
 
 def start_services():
@@ -638,7 +638,7 @@ def start_services():
     run_command(f"PASSWORD='{password}' nohup code-server --bind-addr 0.0.0.0:8080 --auth password /home/magent/workspace > /tmp/code-server.log 2>&1 &", user='magent')
     logger.info("✓ code-server started on port 8080")
 
-    start_motion_poller()
+    start_mood_poller()
 
     # Note: PostgreSQL runs in separate container, not started here
     logger.info("✓ Using shared PostgreSQL container")

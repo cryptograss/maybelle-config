@@ -70,7 +70,7 @@
     proto: tcp
   # People's containers, and each Mood's own container (reached directly,
   # not through the router).
-  loop: "{{ ['2222', '2223', '2224'] + (users | selectattr('motion', 'defined') | map(attribute='ssh_port') | map('string') | list) }}"
+  loop: "{{ ['2222', '2223', '2224'] + (users | selectattr('mood', 'defined') | map(attribute='ssh_port') | map('string') | list) }}"
 
 - name: Configure UFW - allow HTTP/HTTPS
   ufw:
