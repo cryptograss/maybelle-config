@@ -135,7 +135,14 @@ fi
 
 END_TIME=$(date +%s)
 DURATION=$((END_TIME - START_TIME))
-"$REPO_DIR/maybelle/scripts/report-deploy.sh" pickipedia "$([ "$EXIT_CODE" -eq 0 ] && echo finished || echo failed)" "${DEPLOY_USER:-}"
+STATE=$([ "$EXIT_CODE" -eq 0 ] && echo finished || echo failed)
+# The log on PickiPedia, as DrivingThatTrain (post-deploy-log.py): the whole
+# of it if the deploy failed, a summary if not, every vault value taken out.
+LOG_URL_FILE="/tmp/deploy_log_url_$$"
+python3 "$REPO_DIR/maybelle/scripts/post-deploy-log.py" pickipedia "$STATE" "$LOG_FILE" \
+    --vault-password-file "$VAULT_FILE" --by "${DEPLOY_USER:-}" --took "$DURATION" --url-file "$LOG_URL_FILE" || true
+"$REPO_DIR/maybelle/scripts/report-deploy.sh" pickipedia "$STATE" "${DEPLOY_USER:-}" "$(cat "$LOG_URL_FILE" 2>/dev/null)"
+rm -f "$LOG_URL_FILE"
 
 echo ""
 echo "============================================================"
