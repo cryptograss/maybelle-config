@@ -851,6 +851,13 @@
           # messages read aloud. A key restricted to TTS, STT and reading voices.
           ELEVENLABS_API_KEY={{ elevenlabs_api_key }}
           {% endif %}
+          {% if memory_lane_webpush_vapid_key is defined %}
+          # Notifications with magenta closed (memory-lane services/push.py):
+          # the VAPID private key every push is signed with. Make one with
+          # `python3 manage.py vapid_key`; changing it means each device turns
+          # its bell on again.
+          WEBPUSH_VAPID_PRIVATE_KEY={{ memory_lane_webpush_vapid_key }}
+          {% endif %}
         mode: '0600'
       register: memory_lane_env
 
