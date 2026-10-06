@@ -289,6 +289,7 @@ def post(args):
     username, password = vault.get('DrivingThatTrain_Bot_Username'), vault.get('DrivingThatTrain_Bot_Password')
     if not (username and password):
         print('⚠ No DrivingThatTrain_Bot_Username / _Password in the vault; deploy log not posted')
+        tell(args, 'log not posted: no DrivingThatTrain_Bot_Username / _Password in the vault')
         return
     wiki = Wiki()
     for attempt in range(3):  # a pickipedia deploy may still be settling
@@ -303,8 +304,13 @@ def post(args):
             time.sleep(20)
     url = f"{WIKI_URL}/wiki/{urllib.parse.quote(made.replace(' ', '_'), safe=':/')}"
     print(f'✓ Deploy log: {url}')
+    tell(args, url)
+
+
+def tell(args, note):
+    """What the Moods are told with the deploy's report (its note): the page, or why there isn't one."""
     if args.url_file:
-        Path(args.url_file).write_text(url)
+        Path(args.url_file).write_text(redact(note, {})[0][:200])
 
 
 def main():
@@ -315,13 +321,15 @@ def main():
     parser.add_argument('--vault-password-file', required=True)
     parser.add_argument('--by', default='')
     parser.add_argument('--took', type=int)
-    parser.add_argument('--url-file', help='write the posted page URL here, for the deploy script to pass on')
+    parser.add_argument('--url-file', help="write the posted page's URL here -- or why it wasn't posted -- for the "
+                                           "deploy script to pass on to the Moods")
     parser.add_argument('--dry-run', action='store_true', help='print the page instead of posting it')
     args = parser.parse_args()
     try:
         post(args)
     except Exception as e:
         print(f'⚠ Deploy log not posted ({why(e)})')
+        tell(args, f'log not posted: {why(e)}')  # in the Mood's deploy line: no terminal needed to know
     return 0
 
 

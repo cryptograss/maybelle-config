@@ -185,6 +185,18 @@ def test_it_never_fails_a_deploy(monkeypatch, tmp_path, capsys):
     assert "Deploy log not posted (FileNotFoundError: ansible-vault)" in capsys.readouterr().out
 
 
+def test_why_it_wasnt_posted_goes_to_the_moods_too(monkeypatch, tmp_path):
+    def refused(*a, **k):
+        raise poster.subprocess.CalledProcessError(1, ['ansible-vault', 'view'], stderr='ERROR! Decryption failed\n')
+    monkeypatch.setattr(poster.subprocess, 'run', refused)
+    log, note = tmp_path / 'deploy.log', tmp_path / 'note'
+    log.write_text(FINISHED)
+    monkeypatch.setattr(sys, 'argv', ['post-deploy-log.py', 'hunter', 'finished', str(log),
+                                      '--vault-password-file', '/v', '--url-file', str(note)])
+    poster.main()
+    assert note.read_text() == 'log not posted: CalledProcessError: ansible-vault exited 1: ERROR! Decryption failed'
+
+
 def test_a_failure_says_why_but_never_quotes_the_vault():
     import subprocess
     import yaml
