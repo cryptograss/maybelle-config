@@ -321,9 +321,20 @@ def main():
     try:
         post(args)
     except Exception as e:
-        # Never the exception's text: it could quote what it failed on.
-        print(f'⚠ Deploy log not posted ({type(e).__name__})')
+        print(f'⚠ Deploy log not posted ({why(e)})')
     return 0
+
+
+def why(e):
+    """What went wrong, for the terminal running the deploy -- never the vault's text: a YAML
+    error quotes the line it failed on, so that one is told by its type alone."""
+    if type(e).__module__.startswith('yaml'):
+        return type(e).__name__
+    detail = str(e)
+    if isinstance(e, subprocess.CalledProcessError):
+        last = (e.stderr or '').strip().splitlines()[-1:]  # ansible-vault's own reason, e.g. a wrong password
+        detail = f"{e.cmd[0]} exited {e.returncode}" + (f': {last[0]}' if last else '')
+    return f'{type(e).__name__}: {detail}'[:300]
 
 
 if __name__ == '__main__':
