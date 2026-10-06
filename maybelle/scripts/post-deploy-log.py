@@ -274,8 +274,31 @@ class Wiki:
         raise RuntimeError(f'{title} and the next eight are all taken')
 
 
+AWAIT_FOR = 4 * 3600  # seconds a poster started early waits to be told how the deploy went
+
+
+def awaited(path):
+    """{'state', 'took'}, once the deploy script writes it to `path` (then gone); None if it never does."""
+    deadline = time.time() + AWAIT_FOR
+    while time.time() < deadline:
+        try:
+            told = json.loads(Path(path).read_text())
+            Path(path).unlink(missing_ok=True)
+            return told
+        except (FileNotFoundError, ValueError):
+            time.sleep(1)
+    return None
+
+
 def post(args):
+    # The vault first: a maybelle deploy's playbook removes its password at the end,
+    # so there the poster starts before it (--await), keeping what it reads in memory.
     secrets, vault = vault_values(args.vault_password_file)
+    if args.await_file:
+        told = awaited(args.await_file)
+        if told is None:
+            raise RuntimeError(f'never told how the deploy went ({args.await_file})')
+        args.state, args.took = told['state'], told.get('took')
     log = ANSI.sub('', Path(args.log).read_text(errors='replace'))
     log, counts = redact(log, secrets)
     commit = subprocess.run(['git', '-C', str(REPO_DIR), 'rev-parse', '--short=12', 'HEAD'],
@@ -316,13 +339,16 @@ def tell(args, note):
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     parser.add_argument('server', choices=sorted(PAGES))
-    parser.add_argument('state', choices=('finished', 'failed'))
+    parser.add_argument('state', choices=('finished', 'failed', 'later'), help="'later' with --await")
     parser.add_argument('log')
     parser.add_argument('--vault-password-file', required=True)
     parser.add_argument('--by', default='')
     parser.add_argument('--took', type=int)
     parser.add_argument('--url-file', help="write the posted page's URL here -- or why it wasn't posted -- for the "
                                            "deploy script to pass on to the Moods")
+    parser.add_argument('--await', dest='await_file', help='read the vault now, then wait for {"state", "took"} in '
+                                                          'this file before posting (for a playbook that removes '
+                                                          'its vault password as it ends: maybelle)')
     parser.add_argument('--dry-run', action='store_true', help='print the page instead of posting it')
     args = parser.parse_args()
     try:

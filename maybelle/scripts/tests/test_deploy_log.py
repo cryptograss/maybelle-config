@@ -226,3 +226,30 @@ def test_a_dry_run_prints_the_page(monkeypatch, tmp_path, capsys):
     assert out.startswith('--- Cryptograss:Delivery-kid/deploy_logs/26133806 ---')
     assert 'in 1m 01s' in out and 'maybelle-config <code>ae318170abcd</code>' in out
     assert '\x1b' not in out and 'Zq8' not in out
+
+
+def test_started_early_it_reads_the_vault_first_then_waits_to_be_told(monkeypatch, tmp_path, capsys):
+    # maybelle's playbook removes its vault password as it ends: the poster must have read it already.
+    import threading
+    order = []
+
+    def run(cmd, **k):
+        order.append(cmd[0])
+        return SimpleNamespace(stdout=VAULT_YAML if cmd[0] == 'ansible-vault' else 'ae318170abcd\n')
+    monkeypatch.setattr(poster.subprocess, 'run', run)
+    monkeypatch.setattr(poster, 'current_block', lambda: 26135100)
+    log, done = tmp_path / 'deploy.log', tmp_path / 'done'
+    log.write_text(FAILED)
+
+    def deploy_ends():
+        order.append('deploy ended')
+        done.write_text('{"state": "failed", "took": 95}')
+    threading.Timer(1.2, deploy_ends).start()
+    monkeypatch.setattr(sys, 'argv', ['post-deploy-log.py', 'maybelle', 'later', str(log), '--vault-password-file', '/v',
+                                      '--await', str(done), '--dry-run'])
+    poster.main()
+    out = capsys.readouterr().out
+    assert order[:2] == ['ansible-vault', 'deploy ended']  # the vault read before the deploy was over
+    assert out.startswith('--- Cryptograss:Maybelle/deploy_logs/26135100 ---')
+    assert "redeploy failed''' at block 26,135,100" in out and 'in 1m 35s' in out
+    assert not done.exists()  # taken
