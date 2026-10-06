@@ -1,7 +1,10 @@
 #!/bin/bash
 # Tell the Moods (memory-lane) that a server's redeploy started, finished or failed.
 #
-#   report-deploy.sh <hunter|maybelle|delivery-kid|pickipedia> <started|finished|failed> [who]
+#   report-deploy.sh <hunter|maybelle|delivery-kid|pickipedia> <started|finished|failed> [who] [note]
+#
+# The note, when a deploy has ended, is its log's page on PickiPedia
+# (post-deploy-log.py): the Moods link it.
 #
 # memory-lane announces it in the Moods it concerns (hunter's and maybelle's
 # in all of them) and pulses that server's dot while it's under way. This
@@ -12,6 +15,7 @@
 SERVER="$1"
 STATE="$2"
 BY="${3:-}"
+NOTE="${4:-}"
 KEY_FILE="${MEMORY_LANE_DEPLOY_KEY_FILE:-/root/.memory_lane_deploy_key}"
 URL="${MEMORY_LANE_URL:-https://memory-lane.maybelle.cryptograss.live}/api/deploys/"
 TRIES="${REPORT_TRIES:-1}"
@@ -21,8 +25,8 @@ if [ ! -r "$KEY_FILE" ]; then
     exit 0
 fi
 COMMIT=$(git -C /mnt/persist/maybelle-config rev-parse --short=12 HEAD 2>/dev/null || true)
-BODY=$(python3 -c 'import json, sys; print(json.dumps(dict(zip(("server", "state", "by", "commit"), sys.argv[1:]))))' \
-    "$SERVER" "$STATE" "$BY" "$COMMIT")
+BODY=$(python3 -c 'import json, sys; print(json.dumps(dict(zip(("server", "state", "by", "commit", "note"), sys.argv[1:]))))' \
+    "$SERVER" "$STATE" "$BY" "$COMMIT" "$NOTE")
 
 for i in $(seq 1 "$TRIES"); do
     # The key goes in as a header file, never on curl's command line, where ps would show it.

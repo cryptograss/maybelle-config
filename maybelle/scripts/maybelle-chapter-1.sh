@@ -181,10 +181,18 @@ echo "Log file: $LOG_FILE"
 cd "$REPO_DIR/maybelle/ansible"
 # Tell the Moods (memory-lane, which this deploy restarts) it's under way.
 "$REPO_DIR/maybelle/scripts/report-deploy.sh" maybelle started
+START_TIME=$(date +%s)
 ansible-playbook -i localhost, maybelle.yml --vault-password-file "$VAULT_PASSWORD_FILE" $EXTRA_VARS 2>&1 | tee "$LOG_FILE"
 ANSIBLE_EXIT=${PIPESTATUS[0]}
+STATE=$([ "$ANSIBLE_EXIT" -eq 0 ] && echo finished || echo failed)
+# The log on PickiPedia, as DrivingThatTrain (post-deploy-log.py): the whole
+# of it if the deploy failed, a summary if not, every vault value taken out.
+LOG_URL_FILE="/tmp/deploy_log_url_$$"
+python3 "$REPO_DIR/maybelle/scripts/post-deploy-log.py" maybelle "$STATE" "$LOG_FILE" \
+    --vault-password-file "$VAULT_PASSWORD_FILE" --took "$(( $(date +%s) - START_TIME ))" --url-file "$LOG_URL_FILE" || true
 # memory-lane may still be coming back up: keep trying for two minutes.
-REPORT_TRIES=12 "$REPO_DIR/maybelle/scripts/report-deploy.sh" maybelle "$([ "$ANSIBLE_EXIT" -eq 0 ] && echo finished || echo failed)"
+REPORT_TRIES=12 "$REPO_DIR/maybelle/scripts/report-deploy.sh" maybelle "$STATE" "" "$(cat "$LOG_URL_FILE" 2>/dev/null)"
+rm -f "$LOG_URL_FILE"
 
 echo ""
 echo "=== Chapter 1 complete ==="
