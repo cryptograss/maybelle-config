@@ -182,7 +182,19 @@ def test_it_never_fails_a_deploy(monkeypatch, tmp_path, capsys):
     monkeypatch.setattr(sys, 'argv', ['post-deploy-log.py', 'hunter', 'finished', str(log),
                                       '--vault-password-file', '/nope'])
     assert poster.main() == 0
-    assert 'Deploy log not posted (FileNotFoundError)' in capsys.readouterr().out
+    assert "Deploy log not posted (FileNotFoundError: ansible-vault)" in capsys.readouterr().out
+
+
+def test_a_failure_says_why_but_never_quotes_the_vault():
+    import subprocess
+    import yaml
+    refused = subprocess.CalledProcessError(1, ['ansible-vault', 'view'], stderr='ERROR! Decryption failed\n')
+    assert poster.why(refused) == 'CalledProcessError: ansible-vault exited 1: ERROR! Decryption failed'
+    assert poster.why(RuntimeError('wiki login: Failed: Incorrect password')) == 'RuntimeError: wiki login: Failed: Incorrect password'
+    try:
+        yaml.safe_load('secret: "s3cr3t-value\nbroken: [')
+    except yaml.YAMLError as e:
+        assert 's3cr3t' not in poster.why(e) and poster.why(e).endswith('Error')
 
 
 def test_a_dry_run_prints_the_page(monkeypatch, tmp_path, capsys):
