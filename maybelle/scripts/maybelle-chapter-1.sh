@@ -52,6 +52,10 @@ HOST=$(get_config host)
 USER=$(get_config user)
 VAULT_PASSWORD_FILE=$(get_config vault_password_file)
 
+# Who's deploying, for the Moods and the deploy log: DEPLOY_USER if set, else
+# this laptop's login (USER above is the SSH user). Letters, digits, . _ - only.
+DEPLOY_BY=$(printf '%s' "${DEPLOY_USER:-$(id -un)}" | tr -cd 'A-Za-z0-9._-' | cut -c1-40)
+
 HETZNER_VOLUME_PATH="/mnt/HC_Volume_${VOLUME_ID}"
 REPO_DIR="${MOUNT_POINT}/maybelle-config"
 SESSION_NAME="chapter-1"
@@ -180,7 +184,8 @@ echo "Running ansible playbook..."
 echo "Log file: $LOG_FILE"
 cd "$REPO_DIR/maybelle/ansible"
 # Tell the Moods (memory-lane, which this deploy restarts) it's under way.
-"$REPO_DIR/maybelle/scripts/report-deploy.sh" maybelle started
+DEPLOY_BY="__DEPLOY_BY__"
+"$REPO_DIR/maybelle/scripts/report-deploy.sh" maybelle started "$DEPLOY_BY"
 # The log on PickiPedia, as DrivingThatTrain (post-deploy-log.py): the whole
 # of it if the deploy failed, a summary if not, every vault value taken out.
 # This playbook removes the vault password as it ends, so the poster starts
@@ -189,7 +194,7 @@ cd "$REPO_DIR/maybelle/ansible"
 LOG_URL_FILE="/tmp/deploy_log_url_$$"
 DEPLOY_DONE="/tmp/deploy_done_$$"
 python3 "$REPO_DIR/maybelle/scripts/post-deploy-log.py" maybelle later "$LOG_FILE" \
-    --vault-password-file "$VAULT_PASSWORD_FILE" --await "$DEPLOY_DONE" --url-file "$LOG_URL_FILE" &
+    --vault-password-file "$VAULT_PASSWORD_FILE" --await "$DEPLOY_DONE" --url-file "$LOG_URL_FILE" --by "$DEPLOY_BY" &
 POSTER=$!
 START_TIME=$(date +%s)
 ansible-playbook -i localhost, maybelle.yml --vault-password-file "$VAULT_PASSWORD_FILE" $EXTRA_VARS 2>&1 | tee "$LOG_FILE"
@@ -200,7 +205,7 @@ mv "$DEPLOY_DONE.tmp" "$DEPLOY_DONE"  # whole, or not at all: the poster is read
 wait "$POSTER" || true
 rm -f "$DEPLOY_DONE"
 # memory-lane may still be coming back up: keep trying for two minutes.
-REPORT_TRIES=12 "$REPO_DIR/maybelle/scripts/report-deploy.sh" maybelle "$STATE" "" "$(cat "$LOG_URL_FILE" 2>/dev/null)"
+REPORT_TRIES=12 "$REPO_DIR/maybelle/scripts/report-deploy.sh" maybelle "$STATE" "$DEPLOY_BY" "$(cat "$LOG_URL_FILE" 2>/dev/null)"
 rm -f "$LOG_URL_FILE"
 
 echo ""
@@ -218,6 +223,7 @@ REMOTE_SCRIPT="${REMOTE_SCRIPT//__REPO_DIR__/$REPO_DIR}"
 REMOTE_SCRIPT="${REMOTE_SCRIPT//__VAULT_PASSWORD_FILE__/$VAULT_PASSWORD_FILE}"
 REMOTE_SCRIPT="${REMOTE_SCRIPT//__VOLUME_DEVICE__/$VOLUME_DEVICE}"
 REMOTE_SCRIPT="${REMOTE_SCRIPT//__REBUILD_IMAGES__/$REBUILD_IMAGES}"
+REMOTE_SCRIPT="${REMOTE_SCRIPT//__DEPLOY_BY__/$DEPLOY_BY}"
 
 # Copy script to maybelle and run it via mosh/tmux
 REMOTE_SCRIPT_PATH="/tmp/chapter-1-script.sh"
