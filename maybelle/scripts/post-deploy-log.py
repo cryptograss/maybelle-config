@@ -49,6 +49,9 @@ PAGES = {'hunter': 'Cryptograss:Hunter', 'maybelle': 'Cryptograss:Maybelle',
 MAX_LOG_CHARS = 1_500_000   # a wiki page holds 2 MB; a log longer than this keeps its start and its end
 TAIL_LINES = 40             # a finished deploy's summary ends with this much of the log
 MIN_VAULT_VALUE = 6         # shorter vault values aren't secrets worth the false matches
+# Nor is a plain lowercase word -- 'localhost', 'pickipedia' -- a host or a database's name,
+# which a deploy log says on every line. A secret has a digit, a capital, a space or a symbol.
+PLAIN_WORD = re.compile(r'^[a-z][a-z_.-]{0,23}$')
 
 # Block heights name the pages. As post-audit-to-wiki.py learned (pickipedia#112):
 # ask the chain, and if it won't answer, extrapolate from a recent verified
@@ -111,18 +114,21 @@ def vault_values(vault_password_file):
                 walk(f'{name}[{i}]', inner)
         elif isinstance(value, str):
             for piece in [value.strip()] + [line.strip() for line in value.splitlines()]:
-                if len(piece) >= MIN_VAULT_VALUE:  # a multi-line secret (a key file) line by line too
+                # A multi-line secret (a key file) line by line too.
+                if len(piece) >= MIN_VAULT_VALUE and not PLAIN_WORD.match(piece):
                     values.setdefault(piece, name)
     walk('', yaml.safe_load(shown) or {})
     return dict(sorted(values.items(), key=lambda kv: -len(kv[0]))), yaml.safe_load(shown) or {}
 
 
 def redact(text, secrets):
-    """(text with secrets taken out, {kind: how many})."""
-    counts = {'vault': 0, 'pattern': 0}
+    """(text with secrets taken out, {kind: how many, 'names': {vault name: how many}})."""
+    counts = {'vault': 0, 'pattern': 0, 'names': {}}
     for value, name in secrets.items():
         if value in text:
-            counts['vault'] += text.count(value)
+            n = text.count(value)
+            counts['vault'] += n
+            counts['names'][name] = counts['names'].get(name, 0) + n
             text = text.replace(value, f'[vault: {name}]')
 
     def token(match):
@@ -156,7 +162,7 @@ def summary(log):
                 recap.append(re.sub(r'\s+', ' ', line.strip()))
                 continue
             in_recap = False
-        found = re.match(r'^(?:TASK|RUNNING HANDLER) \[(.+?)\]', line)
+        found = re.match(r'^(?:TASK|RUNNING HANDLER) \[(.+)\] \*', line)
         if found:
             task = found.group(1)
         elif line.startswith('changed:') and task and task not in changed:
@@ -170,7 +176,7 @@ def failures(log):
     """[(task, its fatal line)]: where a failed deploy stopped."""
     task, out = None, []
     for line in log.splitlines():
-        found = re.match(r'^(?:TASK|RUNNING HANDLER) \[(.+?)\]', line)
+        found = re.match(r'^(?:TASK|RUNNING HANDLER) \[(.+)\] \*', line)
         if found:
             task = found.group(1)
         elif re.match(r'^(?:fatal|failed): \[', line):
@@ -193,7 +199,10 @@ def page(server, state, block, log, counts, by='', took=None, commit='', when=No
             '',
             f"Posted by DrivingThatTrain. Taken out before posting: {counts['vault']} vault "
             f"value{'s' if counts['vault'] != 1 else ''}, by exact match, and {counts['pattern']} "
-            f"secret-shaped string{'s' if counts['pattern'] != 1 else ''}.",
+            f"secret-shaped string{'s' if counts['pattern'] != 1 else ''}."
+            + (' The vault values: ' + ', '.join(f'<code>{html.escape(n)}</code> ×{c}' for n, c in
+                                                sorted(counts.get('names', {}).items(), key=lambda nc: -nc[1])) + '.'
+               if counts.get('names') else ''),
             '']
     if ok:
         recap, changed, warnings, tail = summary(log)

@@ -21,6 +21,8 @@ spec.loader.exec_module(poster)
 
 VAULT_YAML = """
 memory_lane_postgres_password: Zq8-correct-horse-battery
+pickipedia_db_server: localhost
+pickipedia_db_name: pickipedia
 DrivingThatTrain_Bot_Username: DrivingThatTrain@deploy-logs
 DrivingThatTrain_Bot_Password: abcdefghij0123456789klmnopqrstuv
 short: abc
@@ -253,3 +255,15 @@ def test_started_early_it_reads_the_vault_first_then_waits_to_be_told(monkeypatc
     assert out.startswith('--- Cryptograss:Maybelle/deploy_logs/26135100 ---')
     assert "redeploy failed''' at block 26,135,100" in out and 'in 1m 35s' in out
     assert not done.exists()  # taken
+
+
+def test_a_plain_word_in_the_vault_is_left_as_written_and_what_was_taken_is_named(secrets):
+    values, _ = secrets
+    assert 'localhost' not in values and 'pickipedia' not in values  # a host, a database's name: on every line
+    log = FINISHED.replace('hunter.cryptograss.live', 'localhost') + 'TASK [Create pickipedia [db]] ***\nchanged: [localhost]\n'
+    out, counts = poster.redact(log, values)
+    assert counts['names'] == {'memory_lane_postgres_password': 1}
+    text = poster.page('maybelle', 'finished', 1, out, counts)
+    assert 'localhost : ok=4 changed=2' in text  # the recap reads again
+    assert '* Create pickipedia [db]' in text  # a task's name, brackets and all
+    assert 'The vault values: <code>memory_lane_postgres_password</code> ×1.' in text
