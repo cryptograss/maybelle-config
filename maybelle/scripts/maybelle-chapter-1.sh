@@ -181,15 +181,24 @@ echo "Log file: $LOG_FILE"
 cd "$REPO_DIR/maybelle/ansible"
 # Tell the Moods (memory-lane, which this deploy restarts) it's under way.
 "$REPO_DIR/maybelle/scripts/report-deploy.sh" maybelle started
+# The log on PickiPedia, as DrivingThatTrain (post-deploy-log.py): the whole
+# of it if the deploy failed, a summary if not, every vault value taken out.
+# This playbook removes the vault password as it ends, so the poster starts
+# now: it reads the vault while it can, keeps it in memory only, and posts
+# once told below how the deploy went.
+LOG_URL_FILE="/tmp/deploy_log_url_$$"
+DEPLOY_DONE="/tmp/deploy_done_$$"
+python3 "$REPO_DIR/maybelle/scripts/post-deploy-log.py" maybelle later "$LOG_FILE" \
+    --vault-password-file "$VAULT_PASSWORD_FILE" --await "$DEPLOY_DONE" --url-file "$LOG_URL_FILE" &
+POSTER=$!
 START_TIME=$(date +%s)
 ansible-playbook -i localhost, maybelle.yml --vault-password-file "$VAULT_PASSWORD_FILE" $EXTRA_VARS 2>&1 | tee "$LOG_FILE"
 ANSIBLE_EXIT=${PIPESTATUS[0]}
 STATE=$([ "$ANSIBLE_EXIT" -eq 0 ] && echo finished || echo failed)
-# The log on PickiPedia, as DrivingThatTrain (post-deploy-log.py): the whole
-# of it if the deploy failed, a summary if not, every vault value taken out.
-LOG_URL_FILE="/tmp/deploy_log_url_$$"
-python3 "$REPO_DIR/maybelle/scripts/post-deploy-log.py" maybelle "$STATE" "$LOG_FILE" \
-    --vault-password-file "$VAULT_PASSWORD_FILE" --took "$(( $(date +%s) - START_TIME ))" --url-file "$LOG_URL_FILE" || true
+printf '{"state": "%s", "took": %d}\n' "$STATE" "$(( $(date +%s) - START_TIME ))" > "$DEPLOY_DONE.tmp"
+mv "$DEPLOY_DONE.tmp" "$DEPLOY_DONE"  # whole, or not at all: the poster is reading for it
+wait "$POSTER" || true
+rm -f "$DEPLOY_DONE"
 # memory-lane may still be coming back up: keep trying for two minutes.
 REPORT_TRIES=12 "$REPO_DIR/maybelle/scripts/report-deploy.sh" maybelle "$STATE" "" "$(cat "$LOG_URL_FILE" 2>/dev/null)"
 rm -f "$LOG_URL_FILE"
