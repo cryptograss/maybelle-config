@@ -858,13 +858,15 @@
           # its bell on again.
           WEBPUSH_VAPID_PRIVATE_KEY={{ memory_lane_webpush_vapid_key }}
           {% endif %}
-          {% if memory_lane_wiki_upload_username is defined and memory_lane_wiki_upload_password is defined %}
+          {% if pickipedia_upload_oauth_client_id is defined and pickipedia_upload_oauth_client_secret is defined %}
           # "→ PickiPedia" under a picture sent into a Mood (memory-lane
-          # services/wiki_upload.py): a BotPassword ('Name@grant') that may
-          # upload files and create pages, with high-volume (bot) access.
-          # Unset: pictures stay in magenta, with no button.
-          WIKI_UPLOAD_USERNAME={{ memory_lane_wiki_upload_username }}
-          WIKI_UPLOAD_PASSWORD={{ memory_lane_wiki_upload_password }}
+          # services/wiki_upload.py): a second OAuth 2 consumer, "magenta
+          # uploads", that uploads as the picture's sharer, once, with their
+          # yes. Callback https://magenta.cryptograss.live/moods/auth/wiki/upload;
+          # grants: upload new files, create/edit/move pages, edit existing
+          # pages. Unset: pictures stay in magenta, with no button.
+          PICKIPEDIA_UPLOAD_CLIENT_ID={{ pickipedia_upload_oauth_client_id }}
+          PICKIPEDIA_UPLOAD_CLIENT_SECRET={{ pickipedia_upload_oauth_client_secret }}
           {% endif %}
         mode: '0600'
       register: memory_lane_env
