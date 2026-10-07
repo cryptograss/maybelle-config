@@ -858,6 +858,14 @@
           # its bell on again.
           WEBPUSH_VAPID_PRIVATE_KEY={{ memory_lane_webpush_vapid_key }}
           {% endif %}
+          {% if memory_lane_wiki_upload_username is defined and memory_lane_wiki_upload_password is defined %}
+          # "→ PickiPedia" under a picture sent into a Mood (memory-lane
+          # services/wiki_upload.py): a BotPassword ('Name@grant') that may
+          # upload files and create pages, with high-volume (bot) access.
+          # Unset: pictures stay in magenta, with no button.
+          WIKI_UPLOAD_USERNAME={{ memory_lane_wiki_upload_username }}
+          WIKI_UPLOAD_PASSWORD={{ memory_lane_wiki_upload_password }}
+          {% endif %}
         mode: '0600'
       register: memory_lane_env
 
