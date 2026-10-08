@@ -865,6 +865,13 @@
           # never in the vault or on any server. Unset: nothing can be taken back.
           MOOD_RECOVERY_PUBLIC_KEY={{ memory_lane_recovery_public_key }}
           {% endif %}
+          {% if memory_lane_github_webhook_secret is defined %}
+          # A Mood's to-do list ticks a merged pull request at once (memory-lane
+          # services/todo.py): GitHub's webhook (pull requests) to
+          # https://magenta.cryptograss.live/api/github/hook/, signed with this.
+          # Unset: lists tick on their own, minutes later.
+          GITHUB_WEBHOOK_SECRET={{ memory_lane_github_webhook_secret }}
+          {% endif %}
           {% if pickipedia_upload_oauth_client_id is defined and pickipedia_upload_oauth_client_secret is defined %}
           # "→ PickiPedia" under a picture sent into a Mood (memory-lane
           # services/wiki_upload.py): a second OAuth 2 consumer, "magenta
