@@ -354,3 +354,43 @@ class TestCoconutRemnants:
 
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))
+
+
+class TestKeptOriginals:
+    """The biggest things delivery-kid keeps on purpose, and the only ones
+    the audit never looked at."""
+
+    def test_the_listing_parses_and_skips_noise(self):
+        out = "a9c19c7d-cca8 2048000 1\nbroken line\nace258b9 500 2\nbad x y\n"
+        assert audit.parse_originals(out) == [
+            {"id": "a9c19c7d-cca8", "size_kb": 2048000, "files": 1},
+            {"id": "ace258b9", "size_kb": 500, "files": 2},
+        ]
+        assert audit.parse_originals("") == []
+
+    def test_an_original_with_no_draft_page_is_set_apart(self):
+        kept, orphaned = audit.split_originals(
+            [{"id": "A9C19C7D", "size_kb": 1, "files": 1},
+             {"id": "gone", "size_kb": 1, "files": 1}],
+            ["a9c19c7d"])
+        assert [o["id"] for o in kept] == ["A9C19C7D"]
+        assert [o["id"] for o in orphaned] == ["gone"]
+
+    def test_they_are_listed_largest_first_with_a_total(self, capsys):
+        small = {"id": "small", "size_kb": 10, "files": 1}
+        big = {"id": "big", "size_kb": 3 * 1024 * 1024, "files": 2}
+        audit.print_originals([small], [big])
+        out = capsys.readouterr().out
+        assert "KEPT ORIGINALS (2," in out
+        assert out.index("big") < out.index("small")
+        assert "no ReleaseDraft page" in out.split("big", 1)[1].split("\n", 1)[0]
+        assert "no ReleaseDraft page" not in out.split("small", 1)[1].split("\n", 1)[0]
+
+    def test_nothing_printed_when_nothing_is_kept(self, capsys):
+        audit.print_originals([], [])
+        assert capsys.readouterr().out == ""
+
+    def test_only_orphans_raise_the_warning_box(self):
+        # Keeping an original is deliberate. One nobody can trace is not.
+        assert "Orphan originals" in poster.PROBLEM_LABELS
+        assert "Kept originals" not in poster.PROBLEM_LABELS

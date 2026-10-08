@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+from typing import Optional
 import logging
 import shutil
 import time
@@ -35,6 +36,26 @@ router = APIRouter(prefix="/draft-content", tags=["content"])
 ALLOWED_EXTENSIONS = (
     analyze.AUDIO_EXTENSIONS | analyze.VIDEO_EXTENSIONS | analyze.IMAGE_EXTENSIONS
 )
+
+
+def preserved_original_record(originals_dir: Path, draft_id: str,
+                              filenames: list[str]) -> Optional[dict]:
+    """What a release should say about an original we kept.
+
+    "Keep original file" copies the upload aside instead of deleting it, and
+    until now nothing recorded that it had: not the release, not the audit.
+    Finding out what was taking space meant going onto the server and
+    looking. This goes into metadata.json, which is pinned with the release
+    and copied onto its wiki page, so the fact travels with the thing.
+    """
+    kept = [originals_dir / name for name in filenames if (originals_dir / name).is_file()]
+    if not kept:
+        return None
+    return {
+        "location": f"staging/originals/{draft_id}",
+        "files": [p.name for p in kept],
+        "size_bytes": sum(p.stat().st_size for p in kept),
+    }
 
 
 def get_draft_dir(staging_dir: Path, draft_id: str) -> Path:
@@ -827,6 +848,7 @@ async def finalize_sse_generator(
         })
 
         # Preserve original file if requested
+        preserved_original = None
         if request.preserve_original:
             originals_dir = Path(settings.staging_dir) / "originals" / draft_id
             originals_dir.mkdir(parents=True, exist_ok=True)
@@ -835,6 +857,8 @@ async def finalize_sse_generator(
                 if src.exists():
                     shutil.copy2(src, originals_dir / f.original_filename)
             logger.info("[content:%s] Original files preserved to %s", draft_id[:8], originals_dir)
+            preserved_original = preserved_original_record(
+                originals_dir, draft_id, [f.original_filename for f in state.files])
 
         video_files = [f for f in state.files if f.media_type == "video"]
         wants_transcode = len(state.files) == 1 and video_files and _should_transcode_video(request)
@@ -950,6 +974,8 @@ async def finalize_sse_generator(
         }
         if transcode_metadata:
             metadata["transcode"] = transcode_metadata
+        # Present only when something was actually kept.
+        metadata["original_preserved"] = preserved_original
         metadata = {k: v for k, v in metadata.items() if v is not None}
 
         with open(pin_path / "metadata.json", "w") as f:

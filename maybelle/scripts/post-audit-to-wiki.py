@@ -79,6 +79,10 @@ PROBLEM_LABELS = (
     "Missing seeds",
     "Orphan drafts",
     "Stalled drafts",
+    # A kept original whose ReleaseDraft page is gone: bytes nobody can trace
+    # back to a release. Kept originals in general are deliberate and are not
+    # counted here.
+    "Orphan originals",
     "Cleanup pending",
 )
 _SUMMARY_LINE_RE = re.compile(
