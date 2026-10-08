@@ -189,13 +189,34 @@ def pre(text):
     return '<pre>' + html.escape(text, quote=False) + '</pre>'
 
 
+INVENTORY = REPO_DIR / 'hunter' / 'ansible' / 'inventory.yml'
+
+
+def wiki_user(by, inventory=INVENTORY):
+    """Who deployed, as their PickiPedia user page: hunter's inventory gives each person's
+    PickiPedia name (as maybelle.yml gives it to memory-lane). A deploy script says their
+    name there ('justin') or their PickiPedia name in any case ('jmyles'). Anyone else:
+    as the script said it."""
+    try:
+        import yaml
+        users = (yaml.safe_load(Path(inventory).read_text()) or {})['all']['vars']['users']
+    except Exception:
+        users = []
+    lower = (by or '').strip().lower()
+    for user in users:
+        wiki = str(user.get('pickipedia') or '').strip()
+        if wiki and lower in (str(user.get('name', '')).lower(), wiki.lower()):
+            return f'[[User:{wiki}|{wiki}]]'
+    return html.escape(by or '', quote=False)
+
+
 def page(server, state, block, log, counts, by='', took=None, commit='', when=None):
     when = when or time.strftime('%Y-%m-%d %H:%M UTC', time.gmtime())
     ok = state == 'finished'
     how_long = f', in {took // 60}m {took % 60:02d}s' if took is not None else ''
     head = [f"'''{'✓' if ok else '✗'} {server} {'redeployed' if ok else 'redeploy failed'}''' "
             f"at block {block:,} ({when}){how_long}"
-            + (f', by {by}' if by else '') + (f', maybelle-config <code>{commit}</code>' if commit else '') + '.',
+            + (f', by {wiki_user(by)}' if by else '') + (f', maybelle-config <code>{commit}</code>' if commit else '') + '.',
             '',
             f"Posted by DrivingThatTrain. Taken out before posting: {counts['vault']} vault "
             f"value{'s' if counts['vault'] != 1 else ''}, by exact match, and {counts['pattern']} "
