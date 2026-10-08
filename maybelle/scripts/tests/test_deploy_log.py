@@ -21,6 +21,8 @@ spec.loader.exec_module(poster)
 
 VAULT_YAML = """
 memory_lane_postgres_password: Zq8-correct-horse-battery
+pickipedia_db_server: localhost
+pickipedia_db_name: pickipedia
 DrivingThatTrain_Bot_Username: DrivingThatTrain@deploy-logs
 DrivingThatTrain_Bot_Password: abcdefghij0123456789klmnopqrstuv
 short: abc
@@ -89,7 +91,7 @@ def test_a_finished_deploy_is_summed_up(secrets):
     log, counts = poster.redact(FINISHED, secrets[0])
     text = poster.page('hunter', 'finished', 26133806, log, counts, by='jmyles', took=626, commit='ae318170abcd',
                        when='2026-10-06 14:00 UTC')
-    assert text.startswith("'''✓ hunter redeployed''' at block 26,133,806 (2026-10-06 14:00 UTC), in 10m 26s, by jmyles")
+    assert text.startswith("'''✓ hunter redeployed''' at block 26,133,806 (2026-10-06 14:00 UTC), in 10m 26s, by [[User:JMyles|JMyles]]")
     assert 'Taken out before posting: 1 vault value, by exact match' in text
     assert '* memory-lane : Write .env\n* restart caddy\n' in text  # what changed, handlers too
     assert 'ok=4 changed=2 unreachable=0 failed=0' in text
@@ -253,3 +255,26 @@ def test_started_early_it_reads_the_vault_first_then_waits_to_be_told(monkeypatc
     assert out.startswith('--- Cryptograss:Maybelle/deploy_logs/26135100 ---')
     assert "redeploy failed''' at block 26,135,100" in out and 'in 1m 35s' in out
     assert not done.exists()  # taken
+
+
+def test_a_plain_word_in_the_vault_is_left_as_written_and_what_was_taken_is_named(secrets):
+    values, _ = secrets
+    assert 'localhost' not in values and 'pickipedia' not in values  # a host, a database's name: on every line
+    log = FINISHED.replace('hunter.cryptograss.live', 'localhost') + 'TASK [Create pickipedia [db]] ***\nchanged: [localhost]\n'
+    out, counts = poster.redact(log, values)
+    assert counts['names'] == {'memory_lane_postgres_password': 1}
+    text = poster.page('maybelle', 'finished', 1, out, counts)
+    assert 'localhost : ok=4 changed=2' in text  # the recap reads again
+    assert '* Create pickipedia [db]' in text  # a task's name, brackets and all
+    assert 'The vault values: <code>memory_lane_postgres_password</code> ×1.' in text
+
+
+def test_who_deployed_is_their_pickipedia_page(tmp_path):
+    inventory = tmp_path / 'inventory.yml'
+    inventory.write_text('all:\n  vars:\n    users:\n      - name: justin\n        pickipedia: "JMyles"\n'
+                         '      - name: rj\n        pickipedia: ""\n')
+    assert poster.wiki_user('justin', inventory) == '[[User:JMyles|JMyles]]'
+    assert poster.wiki_user('jmyles', inventory) == '[[User:JMyles|JMyles]]'  # their PickiPedia name, any case
+    assert poster.wiki_user('rj', inventory) == 'rj'  # no PickiPedia name: as said
+    assert poster.wiki_user('<remote>', inventory) == '&lt;remote&gt;'
+    assert poster.wiki_user('justin', tmp_path / 'missing.yml') == 'justin'
