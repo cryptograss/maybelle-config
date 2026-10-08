@@ -718,6 +718,32 @@ def print_coconut_remnants(remnants: list[dict], sizes: dict):
         print(f"    {when}  {who:16} {title}")
 
 
+def print_staging_sizes(staging_drafts: list[dict], top: int = 15):
+    """Every staging directory by size, not just the orphans.
+
+    du already runs on each one; until now only the orphans' sizes were
+    printed. A draft that never finalized keeps its upload in staging — the
+    directory is only cleaned after a successful pin — so this is where any
+    leftover video would be, and the audit could count the directories
+    without ever saying what they weigh.
+    """
+    if not staging_drafts:
+        return
+    total = sum(d.get("size_kb", 0) for d in staging_drafts)
+    biggest = sorted(staging_drafts, key=lambda d: d.get("size_kb", 0), reverse=True)
+    print(f"  STAGING ({len(staging_drafts)} directories, {human_size(total)} total) — "
+          f"largest first:")
+    for d in biggest[:top]:
+        age = human_age(d.get("mtime", 0))
+        age_part = f", {age} old" if age else ""
+        print(f"    {d['id']} ({human_size(d.get('size_kb', 0))}, "
+              f"{d.get('upload_files', 0)} uploaded file"
+              f"{'' if d.get('upload_files', 0) == 1 else 's'}{age_part})")
+    if len(biggest) > top:
+        rest = sum(d.get("size_kb", 0) for d in biggest[top:])
+        print(f"    ... and {len(biggest) - top} more, {human_size(rest)} between them")
+
+
 def print_draft_audit(result: dict, wiki_count: int, staging_count: int):
     if result["orphan_drafts"]:
         print(f"  ORPHAN DRAFTS ({len(result['orphan_drafts'])}) — staging dir, no wiki page:")
@@ -825,6 +851,7 @@ def main():
     print_section("Staging Drafts vs Wiki ReleaseDraft Pages")
     draft_result = audit_drafts(wiki_draft_ids, staging_drafts, abandoned)
     print_draft_audit(draft_result, draft_count, staging_count)
+    print_staging_sizes(staging_drafts)
 
     print_section("Kept Originals")
     kept_originals, orphan_originals = split_originals(fetch_originals(), wiki_draft_ids)

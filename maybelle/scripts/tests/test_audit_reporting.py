@@ -394,3 +394,28 @@ class TestKeptOriginals:
         # Keeping an original is deliberate. One nobody can trace is not.
         assert "Orphan originals" in poster.PROBLEM_LABELS
         assert "Kept originals" not in poster.PROBLEM_LABELS
+
+
+class TestStagingSizes:
+    """The audit counted staging directories without ever saying what they
+    weigh. A draft that never finalized keeps its upload there."""
+
+    def test_every_directory_is_sized_largest_first_with_a_total(self, capsys):
+        audit.print_staging_sizes([
+            {"id": "small", "size_kb": 5, "upload_files": 0, "mtime": 0},
+            {"id": "video", "size_kb": 2 * 1024 * 1024, "upload_files": 1, "mtime": 0},
+        ])
+        out = capsys.readouterr().out
+        assert "STAGING (2 directories," in out
+        assert out.index("video") < out.index("small")
+        assert "1 uploaded file" in out
+
+    def test_a_long_tail_is_summarised_not_dropped(self, capsys):
+        dirs = [{"id": f"d{i}", "size_kb": i, "upload_files": 0, "mtime": 0} for i in range(20)]
+        audit.print_staging_sizes(dirs, top=5)
+        out = capsys.readouterr().out
+        assert "... and 15 more" in out
+
+    def test_nothing_printed_with_no_staging(self, capsys):
+        audit.print_staging_sizes([])
+        assert capsys.readouterr().out == ""
