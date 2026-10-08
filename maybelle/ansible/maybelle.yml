@@ -858,6 +858,13 @@
           # its bell on again.
           WEBPUSH_VAPID_PRIVATE_KEY={{ memory_lane_webpush_vapid_key }}
           {% endif %}
+          {% if memory_lane_recovery_public_key is defined %}
+          # Editing and deleting in Moods (memory-lane services/retract.py): what's
+          # taken back is sealed to this public key first, so it can be put back
+          # (manage.py unseal) by whoever holds the private half -- kept offline,
+          # never in the vault or on any server. Unset: nothing can be taken back.
+          MOOD_RECOVERY_PUBLIC_KEY={{ memory_lane_recovery_public_key }}
+          {% endif %}
           {% if pickipedia_upload_oauth_client_id is defined and pickipedia_upload_oauth_client_secret is defined %}
           # "→ PickiPedia" under a picture sent into a Mood (memory-lane
           # services/wiki_upload.py): a second OAuth 2 consumer, "magenta
