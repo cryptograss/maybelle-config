@@ -221,6 +221,23 @@ def _audio_streams(probe: Optional[dict]) -> list[dict]:
 # and, being a successful encode, says nothing about why. Opus couples
 # channels, so surround does not need six times a mono rate; roughly 48k a
 # channel is the usual guidance, and past 256k the returns stop.
+# Rungs shorter than this get a stereo downmix of surround sources.
+#
+# Justin's point, and the right one: the 360p rung exists for thin
+# connections, and spending 256k on six channels there works against the
+# reason it exists — someone choosing the smallest picture is not choosing
+# surround. The source upload is deleted after publishing unless "Keep
+# original file" was ticked, so the higher rungs and the audio-only rendition
+# are where the surround survives; they keep every channel.
+SURROUND_MIN_HEIGHT = 720
+STEREO_GROUP_SUFFIX = "_stereo"
+
+
+def _downmix_for(rung: dict, channels: Optional[int]) -> bool:
+    """Should this rung carry a stereo downmix rather than the source layout?"""
+    return bool(channels and channels > 2 and rung["height"] < SURROUND_MIN_HEIGHT)
+
+
 MULTICHANNEL_KBPS_PER_CHANNEL = 48
 MULTICHANNEL_KBPS_CEILING = 256
 
@@ -797,6 +814,7 @@ async def transcode_video_to_hls(
         audio_bitrate_args: list[str] = []
         map_args: list[str] = []
         stream_parts: list[str] = []
+        stereo_rungs: list[str] = []
 
         if audio_tracks == 0:
             for i, rung in enumerate(rungs):
@@ -807,8 +825,13 @@ async def transcode_video_to_hls(
             first = usable_audio[0]
             for i, rung in enumerate(rungs):
                 map_args += ["-map", f"[v{i}o]", "-map", f"0:a:{first}"]
-                audio_bitrate_args += [
-                    f"-b:a:{i}", _audio_bitrate(rung["audio"], channels_at.get(first))]
+                if _downmix_for(rung, channels_at.get(first)):
+                    audio_bitrate_args += [f"-ac:a:{i}", "2",
+                                           f"-b:a:{i}", rung["audio"]]
+                    stereo_rungs.append(rung["name"])
+                else:
+                    audio_bitrate_args += [
+                        f"-b:a:{i}", _audio_bitrate(rung["audio"], channels_at.get(first))]
                 stream_parts.append(f"v:{i},a:{i},name:{rung['name']}")
             map_args += ["-map", f"0:a:{first}"]
             audio_bitrate_args += [
@@ -817,9 +840,20 @@ async def transcode_video_to_hls(
             stream_parts.append(f"a:{len(rungs)},name:{AUDIO_ONLY_NAME}")
 
         else:
+            # Tracks here are shared by every rung through an audio group, so
+            # a rung cannot downmix on its own. When a surround track would
+            # otherwise reach a low rung, those rungs get a second group of
+            # stereo copies instead. Files without surround never take this
+            # path's extra branch and come out exactly as before.
+            needs_stereo = [r for r in rungs
+                            if any(_downmix_for(r, channels_at.get(s)) for s in usable_audio)]
+            stereo_group = AUDIO_GROUP + STEREO_GROUP_SUFFIX
             for i, rung in enumerate(rungs):
                 map_args += ["-map", f"[v{i}o]"]
-                stream_parts.append(f"v:{i},agroup:{AUDIO_GROUP},name:{rung['name']}")
+                group = stereo_group if rung in needs_stereo else AUDIO_GROUP
+                stream_parts.append(f"v:{i},agroup:{group},name:{rung['name']}")
+                if rung in needs_stereo:
+                    stereo_rungs.append(rung["name"])
             for track, source_index in enumerate(usable_audio):
                 map_args += ["-map", f"0:a:{source_index}"]
                 audio_bitrate_args += [
@@ -840,6 +874,21 @@ async def transcode_video_to_hls(
                 _audio_bitrate(AUDIO_ONLY_BITRATE,
                                channels_at.get(usable_audio[0]))]
             stream_parts.append(f"a:{audio_tracks},name:{AUDIO_ONLY_NAME}")
+
+            # The stereo copies, after everything else so the indices above
+            # are unchanged. Every track gets one — the low rungs need the
+            # whole group, and a stereo source simply stays stereo.
+            if needs_stereo:
+                low_rate = min((r["audio"] for r in needs_stereo),
+                               key=lambda rate: int(str(rate).rstrip("k")))
+                for track, source_index in enumerate(usable_audio):
+                    out = audio_tracks + 1 + track
+                    map_args += ["-map", f"0:a:{source_index}"]
+                    audio_bitrate_args += [f"-ac:a:{out}", "2", f"-b:a:{out}", low_rate]
+                    default = ",default:yes" if track == 0 else ""
+                    stream_parts.append(
+                        f"a:{out},agroup:{stereo_group},"
+                        f"name:{_track_name(source_index)}{STEREO_GROUP_SUFFIX}{default}")
 
         cmd.extend(map_args)
 
@@ -1080,6 +1129,9 @@ async def transcode_video_to_hls(
             # rather than silently dropped: someone should be able to see
             # that their spatial audio did not make it.
             "audio_tracks_skipped": skipped_audio,
+            # Rungs that carry a stereo downmix of a surround source. Empty
+            # for mono and stereo uploads, which nothing here touches.
+            "stereo_rungs": stereo_rungs,
             # What the source was, and what was done about it.
             "source_transfer": source_transfer or "sdr",
             "tone_mapped": tone_map,
