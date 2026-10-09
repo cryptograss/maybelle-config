@@ -37,7 +37,7 @@
 
     - name: Clone or update memory-lane repository (for watcher)
       git:
-        repo: https://github.com/jMyles/memory-lane.git
+        repo: https://github.com/cryptograss/memory-lane.git
         dest: "{{ base_dir }}/memory-lane-source"
         version: main
         force: yes
@@ -50,7 +50,7 @@
 
     - name: Clone or update magenta repository (for shared CLAUDE.md)
       git:
-        repo: https://github.com/magent-cryptograss/magenta.git
+        repo: https://github.com/cryptograss/magenta.git
         dest: "{{ base_dir }}/magenta-source"
         version: main
         force: yes

@@ -111,12 +111,12 @@ RUN git clone ${ARTHEL_REPO_URL} /home/magent/workspace/arthel \
 RUN cd /home/magent/workspace/arthel && npm install
 
 # Clone magenta repository (identity, CLAUDE.md)
-ARG MAGENTA_REPO_URL=https://github.com/magent-cryptograss/magenta.git
+ARG MAGENTA_REPO_URL=https://github.com/cryptograss/magenta.git
 ARG MAGENTA_BRANCH=main
 RUN git clone --branch ${MAGENTA_BRANCH} ${MAGENTA_REPO_URL} /home/magent/workspace/magenta
 
 # Clone memory-lane repository (Django app, MCP server)
-ARG MEMORY_LANE_REPO_URL=https://github.com/jMyles/memory-lane.git
+ARG MEMORY_LANE_REPO_URL=https://github.com/cryptograss/memory-lane.git
 ARG MEMORY_LANE_BRANCH=main
 RUN git clone --branch ${MEMORY_LANE_BRANCH} ${MEMORY_LANE_REPO_URL} /home/magent/workspace/memory-lane
 
