@@ -133,6 +133,66 @@ def fetch_seeding_dirs() -> list[str]:
     return [line.strip() for line in out.splitlines() if line.strip()]
 
 
+def parse_originals(out: str) -> list[dict]:
+    """[{id, size_kb, files}, ...] from the originals listing."""
+    found = []
+    for line in (out or "").splitlines():
+        parts = line.split()
+        if len(parts) < 3:
+            continue
+        try:
+            found.append({"id": parts[0], "size_kb": int(parts[1]), "files": int(parts[2])})
+        except ValueError:
+            continue
+    return found
+
+
+def fetch_originals() -> list[dict]:
+    """Uploads kept by "Keep original file", one entry per draft.
+
+    These are the largest things delivery-kid stores on purpose and, until
+    this, the only ones the audit never looked at. One ssh for all of them.
+    """
+    script = r"""
+cd /mnt/storage-box/staging/originals 2>/dev/null || exit 0
+for d in */; do
+  d=${d%/}
+  [ -z "$d" ] && continue
+  size_kb=$(du -sk "$d" 2>/dev/null | cut -f1)
+  files=$(find "$d" -type f 2>/dev/null | wc -l | tr -d ' ')
+  echo "$d ${size_kb:-0} ${files:-0}"
+done
+"""
+    return parse_originals(ssh(DK_HOST, script))
+
+
+def split_originals(originals: list[dict], wiki_draft_ids: list[str]) -> tuple[list[dict], list[dict]]:
+    """(kept for a draft we know about, kept for a draft with no page).
+
+    A kept original is deliberate, so it is history rather than a problem.
+    One whose ReleaseDraft page is gone is bytes nobody can trace back to
+    a release, which is worth a person's attention.
+    """
+    known = {w.lower() for w in wiki_draft_ids}
+    kept, orphaned = [], []
+    for o in originals:
+        (kept if o["id"].lower() in known else orphaned).append(o)
+    return kept, orphaned
+
+
+def print_originals(kept: list[dict], orphaned: list[dict]):
+    every = kept + orphaned
+    if not every:
+        return
+    total = sum(o["size_kb"] for o in every)
+    print(f"  KEPT ORIGINALS ({len(every)}, {human_size(total)} total) — uploads saved by "
+          f"\"Keep original file\", largest first. Deliberate; listed so their cost is visible:")
+    for o in sorted(every, key=lambda o: o["size_kb"], reverse=True):
+        mark = "" if o in kept else "   ← no ReleaseDraft page"
+        print(f"    {o['id']} ({human_size(o['size_kb'])}, {o['files']} file"
+              f"{'' if o['files'] == 1 else 's'}){mark}")
+
+
 def fetch_staging_drafts() -> list[dict]:
     """Return [{id, has_draft_json, upload_files, size_kb, mtime}, ...]."""
     script = r"""
@@ -658,6 +718,32 @@ def print_coconut_remnants(remnants: list[dict], sizes: dict):
         print(f"    {when}  {who:16} {title}")
 
 
+def print_staging_sizes(staging_drafts: list[dict], top: int = 15):
+    """Every staging directory by size, not just the orphans.
+
+    du already runs on each one; until now only the orphans' sizes were
+    printed. A draft that never finalized keeps its upload in staging — the
+    directory is only cleaned after a successful pin — so this is where any
+    leftover video would be, and the audit could count the directories
+    without ever saying what they weigh.
+    """
+    if not staging_drafts:
+        return
+    total = sum(d.get("size_kb", 0) for d in staging_drafts)
+    biggest = sorted(staging_drafts, key=lambda d: d.get("size_kb", 0), reverse=True)
+    print(f"  STAGING ({len(staging_drafts)} directories, {human_size(total)} total) — "
+          f"largest first:")
+    for d in biggest[:top]:
+        age = human_age(d.get("mtime", 0))
+        age_part = f", {age} old" if age else ""
+        print(f"    {d['id']} ({human_size(d.get('size_kb', 0))}, "
+              f"{d.get('upload_files', 0)} uploaded file"
+              f"{'' if d.get('upload_files', 0) == 1 else 's'}{age_part})")
+    if len(biggest) > top:
+        rest = sum(d.get("size_kb", 0) for d in biggest[top:])
+        print(f"    ... and {len(biggest) - top} more, {human_size(rest)} between them")
+
+
 def print_draft_audit(result: dict, wiki_count: int, staging_count: int):
     if result["orphan_drafts"]:
         print(f"  ORPHAN DRAFTS ({len(result['orphan_drafts'])}) — staging dir, no wiki page:")
@@ -765,6 +851,11 @@ def main():
     print_section("Staging Drafts vs Wiki ReleaseDraft Pages")
     draft_result = audit_drafts(wiki_draft_ids, staging_drafts, abandoned)
     print_draft_audit(draft_result, draft_count, staging_count)
+    print_staging_sizes(staging_drafts)
+
+    print_section("Kept Originals")
+    kept_originals, orphan_originals = split_originals(fetch_originals(), wiki_draft_ids)
+    print_originals(kept_originals, orphan_originals)
 
     # Both halves of the "published but unrecorded" story are now known: an
     # orphan pin exists, and a draft went dead. Neither alone means much;
@@ -830,6 +921,10 @@ def main():
     # "unrecorded publishes" went unexamined for weeks.
     print(f"  Coconut remnants:    {len(pin_result.get('coconut_remnants') or [])}"
           f"  (informational)")
+    print(f"  Kept originals:      {len(kept_originals) + len(orphan_originals)}"
+          f"  ({human_size(sum(o['size_kb'] for o in kept_originals + orphan_originals))},"
+          f" informational)")
+    print(f"  Orphan originals:    {len(orphan_originals)}")
     print(f"  Missing pins:        {len(pin_result['missing_pins'])}")
     print(f"  Orphan seeds:        {len(seed_result['orphan_seeds'])}")
     print(f"  Missing seeds:       {len(seed_result['missing_seeds'])}")
