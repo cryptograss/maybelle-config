@@ -97,6 +97,8 @@ class ContentDraftResponse(BaseModel):
     preview_mp4_cid: Optional[str] = Field(default=None, description="Legacy; always null")
     preview_token: Optional[str] = Field(default=None, description="One-time token (returned only on init)")
     preview_log: list[dict] = Field(default_factory=list, description="Notes shown under the draft page's player")
+    final_cid: Optional[str] = Field(default=None, description="IPFS CID, once finalized")
+    queue_ahead: int = Field(default=0, description="Finalizes that will run before this one (0: running, or not queued)")
 
 
 class ContentFromUrlRequest(BaseModel):
