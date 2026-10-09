@@ -1,0 +1,2 @@
+---
+caddy_version: "2.11.7"  # installed from its GitHub release where there is no Caddy yet
