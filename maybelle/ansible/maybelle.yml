@@ -865,6 +865,13 @@
           # never in the vault or on any server. Unset: nothing can be taken back.
           MOOD_RECOVERY_PUBLIC_KEY={{ memory_lane_recovery_public_key }}
           {% endif %}
+          {% if pickipedia_todo_bot_password is defined %}
+          # A merged pull request's to-do item, ticked on PickiPedia too (memory-lane
+          # services/todo_ticks.py): DrivingThatTrain's "magenta-todo" bot password,
+          # with "Edit existing pages" and "High-volume (bot) access".
+          PICKIPEDIA_TODO_BOT_USER={{ pickipedia_todo_bot_user | default('DrivingThatTrain@magenta-todo') }}
+          PICKIPEDIA_TODO_BOT_PASSWORD={{ pickipedia_todo_bot_password }}
+          {% endif %}
           {% if memory_lane_github_webhook_secret is defined %}
           # A Mood's to-do list ticks a merged pull request at once (memory-lane
           # services/todo.py): GitHub's webhook (pull requests) to
