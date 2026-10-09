@@ -22,7 +22,9 @@ from ..models.content import (
 )
 from ..services import analyze, finalize_jobs, ipfs, transcode, url_fetch
 from ..services.fsutil import safe_rmtree
-from ..services.pickipedia_client import snapshot_diagnostics_for_state_async
+from ..services.pickipedia_client import (
+    snapshot_diagnostics_for_state_async, write_finalized_to_releasedraft_async,
+)
 
 # Read uploads off the wire in 8MB slices so peak memory stays flat
 # regardless of file size.
@@ -272,6 +274,27 @@ def _fire_diagnostics_snapshot(state: ContentDraftState) -> None:
     except RuntimeError:
         logger.debug("[content:%s] No running loop; skipping diagnostics snapshot",
                      draft_id[:8])
+
+
+async def _write_finalized_to_wiki(draft_id: str, cid: str, finalized_at) -> None:
+    """Put the CID on ReleaseDraft:{id}, which is what has the bot make the Release page.
+
+    The page did this alone, after "complete" reached it, so a pin nobody was
+    watching got no Release page (Sonic Offerings, fixed by hand). Once the
+    finalize is a job that outlives the tab, that's the common case. Coconut's
+    webhook used to call this; the local path never did. Done before the
+    page hears "complete", so the page's own edit finds it written and saves
+    nothing. Bounded and never raising: the pin stands whatever the wiki says.
+    """
+    when = finalized_at.isoformat() if hasattr(finalized_at, "isoformat") else str(finalized_at)
+    try:
+        wrote = await asyncio.wait_for(write_finalized_to_releasedraft_async(draft_id, cid, when), 60)
+    except Exception as e:
+        logger.error("[content:%s] Writing the CID to ReleaseDraft failed: %r", draft_id[:8], e)
+        return
+    if not wrote:
+        logger.error("[content:%s] ReleaseDraft wasn't marked finalized (no wiki credentials, or the "
+                     "edit failed); the page's own edit, if it's still open, is all there is.", draft_id[:8])
 
 
 class NoUsableMediaError(Exception):
@@ -1040,6 +1063,7 @@ async def finalize_sse_generator(
                              draft_id[:8])
         record_finalized(Path(settings.staging_dir), draft_id, result.cid, request.title)
         _fire_diagnostics_snapshot(state)
+        await _write_finalized_to_wiki(draft_id, result.cid, state.finalized_at)
 
         # Set before the yield, not after: if the client has gone away the
         # send below raises, and the pin is no less successful for that.

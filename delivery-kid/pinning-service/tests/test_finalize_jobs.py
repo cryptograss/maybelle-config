@@ -131,3 +131,20 @@ def test_a_restart_fails_stranded_finalizes_and_says_why(tmp_path):
     assert stranded.status == "finalize_failed"
     assert "finalize again" in stranded.finalize_log[-1]["error"]
     assert content.load_draft_state(tmp_path / "drafts" / "waiting").status == "uploaded"
+
+
+@pytest.mark.asyncio
+async def test_the_cid_reaches_the_wiki_without_the_page(monkeypatch):
+    written = []
+
+    async def write(draft_id, cid, when):
+        written.append((draft_id, cid, when))
+        return True
+    monkeypatch.setattr(content, "write_finalized_to_releasedraft_async", write)
+    await content._write_finalized_to_wiki("d1", "bafy", datetime(2026, 10, 9, tzinfo=timezone.utc))
+    assert written == [("d1", "bafy", "2026-10-09T00:00:00+00:00")]
+
+    async def broken(*args):
+        raise RuntimeError("wiki down")
+    monkeypatch.setattr(content, "write_finalized_to_releasedraft_async", broken)
+    await content._write_finalized_to_wiki("d1", "bafy", "2026-10-09")  # logged, never raised
