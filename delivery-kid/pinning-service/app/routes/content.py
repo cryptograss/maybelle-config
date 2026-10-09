@@ -20,7 +20,7 @@ from ..models.content import (
     ContentFile, ContentDraftState, ContentDraftResponse, ContentFinalizeRequest,
     ContentFromUrlRequest
 )
-from ..services import analyze, ipfs, transcode, url_fetch
+from ..services import analyze, finalize_jobs, ipfs, transcode, url_fetch
 from ..services.fsutil import safe_rmtree
 from ..services.pickipedia_client import snapshot_diagnostics_for_state_async
 
@@ -730,6 +730,12 @@ async def get_content_draft(
 
     state = load_draft_state(draft_dir)
     if state is None:
+        # Published: the directory goes once the pin succeeds, the ledger stays.
+        # Someone watching a finalize (magenta, a reloaded page) learns its CID.
+        prior = load_finalized(staging_dir, draft_id)
+        if prior:  # its CID is public now; any signed-in caller may have it
+            return ContentDraftResponse(draft_id=draft_id, commit=get_commit(), status="finalized",
+                                        final_cid=prior.get("cid"))
         raise HTTPException(status_code=404, detail="Content draft not found")
 
     is_owner = state.uploaded_by.lower() == wallet_address.lower()
@@ -748,6 +754,8 @@ async def get_content_draft(
         preview_cid=state.preview_cid,
         preview_mp4_cid=state.preview_mp4_cid,
         preview_log=state.preview_log,
+        final_cid=state.final_cid,
+        queue_ahead=finalize_jobs.ahead_of(draft_id),
     )
 
 
@@ -1095,7 +1103,8 @@ async def finalize_content_draft(
     """
     Finalize a content draft — optionally transcode, then pin to IPFS.
 
-    Progress is streamed via Server-Sent Events.
+    Progress is streamed via Server-Sent Events, from a job that runs whether
+    or not anyone is still watching (services/finalize_jobs.py).
     """
     staging_dir = Path(settings.staging_dir)
     draft_dir = get_draft_dir(staging_dir, draft_id)
@@ -1121,8 +1130,51 @@ async def finalize_content_draft(
     # No ownership check — require_finalize_auth already ensures
     # the user has finalize-release permission.
 
-    return EventSourceResponse(
-        finalize_sse_generator(draft_id, request, draft_dir, state, settings),
-        media_type="text/event-stream"
+    # The work is a job of delivery-kid's own (services/finalize_jobs.py): this
+    # response only watches it, so a closed tab no longer stops an encode. A
+    # draft already queued or finalizing is joined, not finalized twice.
+    async def on_queued(ahead: int) -> dict:
+        message = (f"Queued: {ahead} finalize{'s' if ahead > 1 else ''} ahead of this one. "
+                   "It starts by itself; closing this page won't stop it.")
+        state.status = "finalizing"
+        _append_finalize_log(state, "queued", message, progress=0)
+        try:
+            save_draft_state(draft_dir, state)
+        except Exception:
+            logger.exception("[content:%s] Failed to persist queued status", draft_id[:8])
+        return {"event": "progress", "data": json.dumps({"stage": "queued", "message": message, "progress": 0})}
+
+    job = finalize_jobs.start(
+        draft_id,
+        lambda: finalize_sse_generator(draft_id, request, draft_dir, state, settings),
+        on_queued,
     )
+    return EventSourceResponse(finalize_jobs.follow(job), media_type="text/event-stream")
+
+
+def fail_stranded_finalizes(staging_dir: Path) -> list[str]:
+    """At startup: drafts left "finalizing" by the process before this one.
+
+    Finalize jobs live in memory, so a restart (a deploy, a crash) ends the
+    ones in flight. Without this their drafts would say "finalizing" forever.
+    The upload is still there -- a draft's directory is only removed once its
+    pin succeeds -- so the honest state is failed, with a line saying why and
+    that finalizing again will work. Returns the draft ids it marked.
+    """
+    marked = []
+    for draft_json in sorted((staging_dir / "drafts").glob("*/draft.json")):
+        draft_dir = draft_json.parent
+        state = load_draft_state(draft_dir)
+        if state is None or state.status != "finalizing":
+            continue
+        state.status = "finalize_failed"
+        message = ("delivery-kid restarted before this finalize finished. Nothing was published, "
+                   "and the upload is still here: finalize again.")
+        _append_finalize_log(state, "restart", message, error=message)
+        try:
+            save_draft_state(draft_dir, state)
+            marked.append(state.draft_id)
+        except Exception:
+            logger.exception("[content:%s] Failed to mark stranded finalize", state.draft_id[:8])
+    return marked
 

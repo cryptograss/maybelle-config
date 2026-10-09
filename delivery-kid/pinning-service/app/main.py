@@ -40,6 +40,12 @@ async def lifespan(app: FastAPI):
     staging_dir.mkdir(parents=True, exist_ok=True)
     (staging_dir / "drafts").mkdir(exist_ok=True)
 
+    # Finalizes in flight when the last process ended can't resume: say so on
+    # their drafts rather than leave them "finalizing" for ever.
+    stranded = content.fail_stranded_finalizes(staging_dir)
+    if stranded:
+        logger.warning("Marked %d stranded finalize(s) failed: %s", len(stranded), ", ".join(stranded))
+
     # Start BitTorrent seeder
     init_seeder(settings.seeding_dir)
 
