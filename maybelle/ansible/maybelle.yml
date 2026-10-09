@@ -793,7 +793,7 @@
     # below, which keys off this.
     - name: Clone or update memory-lane repository
       git:
-        repo: https://github.com/jMyles/memory-lane.git
+        repo: https://github.com/cryptograss/memory-lane.git
         dest: /mnt/persist/magenta/source
         version: main
         force: yes

@@ -111,7 +111,7 @@ def setup_workspace():
 
     # Clone magenta (for CLAUDE.md and identity docs)
     ensure_repo_cloned(
-        "https://github.com/magent-cryptograss/magenta.git",
+        "https://github.com/cryptograss/magenta.git",
         workspace / "magenta",
         user='magent',
         run_install=False
@@ -119,7 +119,7 @@ def setup_workspace():
 
     # Clone memory-lane (Django memory system)
     ensure_repo_cloned(
-        "https://github.com/jMyles/memory-lane.git",
+        "https://github.com/cryptograss/memory-lane.git",
         workspace / "memory-lane",
         user='magent',
         run_install=False
