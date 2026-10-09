@@ -10,22 +10,29 @@
       - apt-transport-https
     state: present
 
-- name: Add Caddy GPG key
-  apt_key:
-    url: https://dl.cloudsmith.io/public/caddy/stable/gpg.key
-    state: present
+# Caddy's Cloudsmith apt repository answers 402 Payment Required (out of
+# bandwidth since 2026-10-09; caddyserver/dist#142), and has before: left
+# configured, every apt update fails. So Caddy comes from its GitHub release:
+# the .deb, checked against the release's own SHA-512 list, and only where
+# there's no Caddy yet -- an installed one is left be.
+- name: Is Caddy installed?
+  command: dpkg-query -W -f=${Version} caddy
+  register: caddy_installed
+  changed_when: false
+  failed_when: false
 
-- name: Add Caddy repository
-  apt_repository:
-    repo: "deb https://dl.cloudsmith.io/public/caddy/stable/deb/debian any-version main"
-    state: present
-    filename: caddy-stable
+- name: Install Caddy from its GitHub release
+  when: caddy_installed.rc != 0
+  block:
+    - name: Fetch the Caddy .deb, checked against the release's SHA-512 list
+      get_url:
+        url: "https://github.com/caddyserver/caddy/releases/download/v{{ caddy_version }}/caddy_{{ caddy_version }}_linux_amd64.deb"
+        dest: "/tmp/caddy_{{ caddy_version }}_linux_amd64.deb"
+        checksum: "sha512:https://github.com/caddyserver/caddy/releases/download/v{{ caddy_version }}/caddy_{{ caddy_version }}_checksums.txt"
 
-- name: Install Caddy
-  apt:
-    name: caddy
-    state: present
-    update_cache: yes
+    - name: Install Caddy
+      apt:
+        deb: "/tmp/caddy_{{ caddy_version }}_linux_amd64.deb"
 
 - name: Create Caddy log directory
   file:

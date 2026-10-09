@@ -37,6 +37,14 @@
       - liblua5.4-dev
 
   pre_tasks:
+    # Caddy's Cloudsmith repository answers 402 (out of bandwidth since
+    # 2026-10-09): left configured, this first apt update fails. The caddy
+    # role installs from Caddy's GitHub releases instead.
+    - name: Drop Caddy's Cloudsmith apt source
+      file:
+        path: /etc/apt/sources.list.d/caddy-stable.list
+        state: absent
+
     - name: Update apt cache
       apt:
         update_cache: yes
