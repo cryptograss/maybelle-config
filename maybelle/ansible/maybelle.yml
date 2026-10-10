@@ -889,6 +889,14 @@
           PICKIPEDIA_UPLOAD_CLIENT_ID={{ pickipedia_upload_oauth_client_id }}
           PICKIPEDIA_UPLOAD_CLIENT_SECRET={{ pickipedia_upload_oauth_client_secret }}
           {% endif %}
+          {% if delivery_kid_api_key is defined %}
+          # Videos sent into a Mood go to delivery-kid (memory-lane
+          # services/delivery_kid.py): magenta mints each signed-in person a
+          # short-lived upload token with this key, as the wiki does, so the key
+          # never reaches a browser. Unset: videos can't be sent to delivery-kid.
+          DELIVERY_KID_API_KEY={{ delivery_kid_api_key }}
+          DELIVERY_KID_URL=https://delivery-kid.cryptograss.live
+          {% endif %}
         mode: '0600'
       register: memory_lane_env
 

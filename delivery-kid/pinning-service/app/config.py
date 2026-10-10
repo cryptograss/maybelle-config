@@ -48,6 +48,10 @@ class Settings(BaseSettings):
         "https://cryptograss.live",
         "https://www.cryptograss.live",
         "https://pickipedia.xyz",
+        # magenta: videos sent into a Mood upload from the browser straight
+        # here, with a token magenta's server minted (memory-lane
+        # services/delivery_kid.py).
+        "https://magenta.cryptograss.live",
     ]
     cors_origin_regex: str = r"https://[\w.-]+\.hunter\.cryptograss\.live"
 
