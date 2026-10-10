@@ -804,6 +804,13 @@ async def delete_content_draft(
     if not is_owner and not has_finalize_token(request, settings):
         raise HTTPException(status_code=403, detail="Not your draft")
 
+    # Not out from under a finalize that's queued or running: the encode is
+    # reading these files. The draft page's "Abandon — delete files" button
+    # calls this; a 409 tells it to wait.
+    job = finalize_jobs.current(draft_id)
+    if job is not None and not job.done:
+        raise HTTPException(status_code=409, detail={"error": "This draft is being finalized; delete it after"})
+
     safe_rmtree(draft_dir)
     return {"message": "Draft deleted", "draft_id": draft_id}
 
