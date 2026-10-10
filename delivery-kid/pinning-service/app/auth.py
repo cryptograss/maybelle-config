@@ -38,18 +38,27 @@ def verify_upload_token(token: str, username: str, timestamp: int, settings: Set
         timestamp: Millisecond timestamp claimed.
         settings: App settings.
         action: Expected action prefix — "upload" or "finalize".
+
+    A token signed with api_key may be either. One signed with upload_key may
+    only be an upload token, and lives upload_key_max_drift_seconds.
     """
-    if not settings.api_key:
+    # (key, how long its tokens live), the upload-only key for uploads alone.
+    keys = [(settings.api_key, settings.max_timestamp_drift_seconds)]
+    if action == "upload" and settings.upload_key:
+        keys.append((settings.upload_key, settings.upload_key_max_drift_seconds))
+    keys = [(k, life) for k, life in keys if k]
+    if not keys:
         logger.warning("HMAC verify failed: no api_key configured")
         return False
-    expected = create_upload_token(settings.api_key, username, timestamp, action=action)
-    if not hmac.compare_digest(token, expected):
+    lifetime = next((life for k, life in keys
+                     if hmac.compare_digest(token, create_upload_token(k, username, timestamp, action=action))), None)
+    if lifetime is None:
         logger.warning("HMAC verify failed: token mismatch for user=%s action=%s", username, action)
         return False
     # Check timestamp freshness
     now_ms = int(time.time() * 1000)
     drift_ms = abs(now_ms - timestamp)
-    max_drift_ms = settings.max_timestamp_drift_seconds * 1000
+    max_drift_ms = lifetime * 1000
     if drift_ms > max_drift_ms:
         logger.warning(
             "HMAC verify failed: token expired. drift=%dms (max=%dms), "
