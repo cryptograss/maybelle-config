@@ -27,11 +27,16 @@ async def lifespan(app: FastAPI):
     Lifespan context manager for startup/shutdown tasks.
 
     On startup:
-    - Run initial cleanup of orphaned drafts
-    - Start periodic orphan cleanup background task
+    - Ensure the staging directories exist
+    - Mark finalizes cut off by the last shutdown as failed
+    - Start the BitTorrent seeder
 
     On shutdown:
-    - Cancel background cleanup task
+    - Stop the seeder
+
+    Nothing here deletes drafts. Orphaned and stalled ones are reported by the
+    nightly storage audit (maybelle/scripts/audit-storage.py) for a person to
+    decide on; the automatic cleanup this used to promise was removed (#84).
     """
     settings = get_settings()
     staging_dir = Path(settings.staging_dir)
