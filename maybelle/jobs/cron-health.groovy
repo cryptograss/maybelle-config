@@ -250,28 +250,28 @@ pipelineJob('cron-health') {
                                         STALE_HOURS=30
 
                                         echo "=== pickipedia podcast import ==="
-                                        BODY=\$(curl -fsS --max-time 30 "\$STATUS_URL" 2>&1) || {
-                                            echo "WARN: no status yet at \$STATUS_URL"
+                                        BODY=\\$(curl -fsS --max-time 30 "\\$STATUS_URL" 2>&1) || {
+                                            echo "WARN: no status yet at \\$STATUS_URL"
                                             echo "      (expected until the import has run once)"
                                             exit 0
                                         }
-                                        echo "\$BODY"
+                                        echo "\\$BODY"
 
-                                        LAST_TIME=\$(echo "\$BODY" | sed -n 's/^run: //p' | tail -1)
-                                        if [ -z "\$LAST_TIME" ]; then
+                                        LAST_TIME=\\$(echo "\\$BODY" | sed -n 's/^run: //p' | tail -1)
+                                        if [ -z "\\$LAST_TIME" ]; then
                                             echo "FAIL: status file has no run timestamp"
                                             exit 1
                                         fi
-                                        LAST_EPOCH=\$(date -d "\$LAST_TIME" +%s 2>/dev/null || echo 0)
-                                        AGE_H=\$(( (\$(date +%s) - LAST_EPOCH) / 3600 ))
-                                        echo "Last run: \$LAST_TIME (\$AGE_H h ago)"
+                                        LAST_EPOCH=\\$(date -d "\\$LAST_TIME" +%s 2>/dev/null || echo 0)
+                                        AGE_H=\\$(( (\\$(date +%s) - LAST_EPOCH) / 3600 ))
+                                        echo "Last run: \\$LAST_TIME (\\$AGE_H h ago)"
 
-                                        if [ "\$AGE_H" -gt "\$STALE_HOURS" ]; then
-                                            echo "FAIL: stale (>\$STALE_HOURS h) — the daily import has not run"
+                                        if [ "\\$AGE_H" -gt "\\$STALE_HOURS" ]; then
+                                            echo "FAIL: stale (>\\$STALE_HOURS h) — the daily import has not run"
                                             exit 1
                                         fi
 
-                                        case "\$BODY" in
+                                        case "\\$BODY" in
                                             *"result: OK"*)
                                                 echo "OK" ;;
                                             *"result: HELD"*)
