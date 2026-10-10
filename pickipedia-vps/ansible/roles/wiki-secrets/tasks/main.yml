@@ -1,0 +1,69 @@
+---
+# The wiki's secrets file, LocalSettings.local.php.
+#
+# This runs straight after mariadb and before docker-wiki, so the database
+# password the wiki uses and the password the database user has can never
+# disagree for the length of a deploy. They used to: mariadb changed the
+# user's password, then docker-wiki ran update.php against the old secrets
+# file, failed, and stopped the play before mediawiki wrote the new one. The
+# wiki was down until someone stepped in, and re-running the deploy failed the
+# same way every time (2026-10-10).
+#
+# NOTE: LocalSettings.php is deployed by Jenkins from the pickipedia repo.
+# This ansible role handles secrets in LocalSettings.local.php.
+
+- name: Create web root directory
+  file:
+    path: "{{ mediawiki_root }}"
+    state: directory
+    owner: www-data
+    group: www-data
+    mode: '0755'
+
+- name: Fetch GlitchTip DSN from maybelle
+  uri:
+    url: "https://glitchtip-dsn.maybelle.cryptograss.live/pickipedia-dsn.txt"
+    user: deploy
+    password: "{{ glitchtip_dsn_fetch_password }}"
+    force_basic_auth: true
+    return_content: true
+  register: glitchtip_dsn_response
+
+- name: Create LocalSettings.local.php with secrets
+  copy:
+    dest: "{{ mediawiki_root }}/LocalSettings.local.php"
+    content: |
+      <?php
+      # PickiPedia secrets - managed by ansible, NOT checked into version control
+
+      # Database (connects via socket mounted into Docker container)
+      $wgDBtype = "mysql";
+      $wgDBserver = "localhost";
+      $wgDBname = "{{ db_name }}";
+      $wgDBuser = "{{ db_user }}";
+      $wgDBpassword = "{{ pickipedia_db_password }}";
+
+      # Security keys
+      $wgSecretKey = "{{ pickipedia_secret_key }}";
+      $wgUpgradeKey = "{{ pickipedia_upgrade_key }}";
+
+      # Sentry/GlitchTip error tracking
+      $wgSentryDsn = "{{ glitchtip_dsn_response.content | trim }}";
+
+      # Delivery-kid pinning service API key
+      $wgDeliveryKidApiKey = "{{ delivery_kid_api_key }}";
+      {% if pickipedia_oauth2_private_key is defined and pickipedia_oauth2_public_key is defined %}
+
+      # OAuth 2 signing keys: "Sign in with PickiPedia" (cryptograss/pickipedia#132).
+      # The OAuth extension loads only once both are set. An RSA pair, kept in the vault.
+      $wgOAuth2PrivateKey = <<<'KEY'
+      {{ pickipedia_oauth2_private_key | trim }}
+      KEY;
+      $wgOAuth2PublicKey = <<<'KEY'
+      {{ pickipedia_oauth2_public_key | trim }}
+      KEY;
+      {% endif %}
+    owner: www-data
+    group: www-data
+    mode: '0600'
+  register: local_settings
