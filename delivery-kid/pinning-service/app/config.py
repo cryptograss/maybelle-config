@@ -29,6 +29,14 @@ class Settings(BaseSettings):
     # Auth settings
     max_timestamp_drift_seconds: int = 30 * 24 * 3600  # 30 days — tokens are checked on draft pages that may be revisited long after creation
     api_key: str = ""  # Shared API key for server-to-server auth (e.g., from PickiPedia)
+    # A second key that can sign *upload* tokens and nothing else: no finalize
+    # tokens, no X-API-Key. magenta holds this one, so videos sent from a Mood
+    # carry the authority to upload and no more; finalizing stays with the
+    # wiki's finalize-release right (Justin, 10 Oct). Empty: no such key.
+    upload_key: str = ""
+    # Tokens signed with upload_key are minted the moment they're used, so they
+    # live a day, not the 30 the wiki's draft pages need.
+    upload_key_max_drift_seconds: int = 24 * 3600
 
     # Upload limits
     max_file_size_mb: int = 50000  # 50GB - effectively no limit for albums
