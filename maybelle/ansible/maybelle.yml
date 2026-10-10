@@ -752,6 +752,13 @@
           // DB settings point to production NFS MySQL
           $wgSecretKey = '{{ pickipedia_secret_key | replace('\\', '\\\\') | replace("'", "\\'") }}';
           $wgUpgradeKey = '{{ pickipedia_upgrade_key | replace('\\', '\\\\') | replace("'", "\\'") }}';
+          {% if pickipedia_oauth_secret_key is defined %}
+          # OAuth consumer secrets are stored as HMACs keyed with this (Extension:OAuth,
+          # Utils::hmacDBSecret). Unset, they're keyed with $wgSecretKey, so rotating that
+          # broke every OAuth consumer at once (10 Oct 2026: a 401 on every magenta sign-in
+          # and "→ PickiPedia"). Its own vault value, not rotated along with $wgSecretKey.
+          $wgOAuthSecretKey = '{{ pickipedia_oauth_secret_key | replace('\\', '\\\\') | replace("'", "\\'") }}';
+          {% endif %}
           $wgDBtype = "mysql";
           $wgDBserver = '{{ pickipedia_db_server | replace('\\', '\\\\') | replace("'", "\\'") }}';
           $wgDBname = '{{ pickipedia_db_name | replace('\\', '\\\\') | replace("'", "\\'") }}';
@@ -1590,6 +1597,13 @@
           # Security keys
           $wgSecretKey = '{{ pickipedia_secret_key | replace('\\', '\\\\') | replace("'", "\\'") }}';
           $wgUpgradeKey = '{{ pickipedia_upgrade_key | replace('\\', '\\\\') | replace("'", "\\'") }}';
+          {% if pickipedia_oauth_secret_key is defined %}
+          # OAuth consumer secrets are stored as HMACs keyed with this (Extension:OAuth,
+          # Utils::hmacDBSecret). Unset, they're keyed with $wgSecretKey, so rotating that
+          # broke every OAuth consumer at once (10 Oct 2026: a 401 on every magenta sign-in
+          # and "→ PickiPedia"). Its own vault value, not rotated along with $wgSecretKey.
+          $wgOAuthSecretKey = '{{ pickipedia_oauth_secret_key | replace('\\', '\\\\') | replace("'", "\\'") }}';
+          {% endif %}
 
           # Sentry/GlitchTip error tracking
           $wgSentryDsn = '{{ glitchtip_dsn.stdout_lines[-1] | replace('\\', '\\\\') | replace("'", "\\'") }}';
