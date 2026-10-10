@@ -1,1 +1,3 @@
 plaintext-vault.yml
+__pycache__/
+*.pyc
