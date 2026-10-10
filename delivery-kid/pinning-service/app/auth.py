@@ -69,6 +69,13 @@ def verify_upload_token(token: str, username: str, timestamp: int, settings: Set
     return True
 
 
+@dataclass
+class AuthResult:
+    valid: bool
+    address: Optional[str] = None
+    error: Optional[str] = None
+
+
 def create_auth_message(timestamp: int) -> str:
     """Create the message that must be signed for authorization."""
     return f"Authorize Blue Railroad pinning\nTimestamp: {timestamp}"
