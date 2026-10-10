@@ -750,19 +750,19 @@
           <?php
           // Secrets deployed from vault - do not edit manually
           // DB settings point to production NFS MySQL
-          $wgSecretKey = "{{ pickipedia_secret_key }}";
-          $wgUpgradeKey = "{{ pickipedia_upgrade_key }}";
+          $wgSecretKey = '{{ pickipedia_secret_key | replace('\\', '\\\\') | replace("'", "\\'") }}';
+          $wgUpgradeKey = '{{ pickipedia_upgrade_key | replace('\\', '\\\\') | replace("'", "\\'") }}';
           $wgDBtype = "mysql";
-          $wgDBserver = "{{ pickipedia_db_server }}";
-          $wgDBname = "{{ pickipedia_db_name }}";
-          $wgDBuser = "{{ pickipedia_db_user }}";
-          $wgDBpassword = "{{ pickipedia_db_password }}";
+          $wgDBserver = '{{ pickipedia_db_server | replace('\\', '\\\\') | replace("'", "\\'") }}';
+          $wgDBname = '{{ pickipedia_db_name | replace('\\', '\\\\') | replace("'", "\\'") }}';
+          $wgDBuser = '{{ pickipedia_db_user | replace('\\', '\\\\') | replace("'", "\\'") }}';
+          $wgDBpassword = '{{ pickipedia_db_password | replace('\\', '\\\\') | replace("'", "\\'") }}';
 
           // Error tracking - GlitchTip (Sentry-compatible)
-          $wgSentryDsn = "{{ pickipedia_sentry_dsn | default('') }}";
+          $wgSentryDsn = '{{ pickipedia_sentry_dsn | default('') | replace('\\', '\\\\') | replace("'", "\\'") }}';
 
           // Delivery-kid pinning service API key
-          $wgDeliveryKidApiKey = "{{ delivery_kid_api_key }}";
+          $wgDeliveryKidApiKey = '{{ delivery_kid_api_key | replace('\\', '\\\\') | replace("'", "\\'") }}';
         dest: "{{ jenkins_home }}/secrets/pickipedia/LocalSettings.local.php"
         mode: '0600'
         owner: 1000
@@ -1583,19 +1583,19 @@
           # Database
           $wgDBtype = "mysql";
           $wgDBserver = "localhost";
-          $wgDBname = "{{ pickipedia_db_name }}";
-          $wgDBuser = "{{ pickipedia_db_user }}";
-          $wgDBpassword = "{{ pickipedia_db_password }}";
+          $wgDBname = '{{ pickipedia_db_name | replace('\\', '\\\\') | replace("'", "\\'") }}';
+          $wgDBuser = '{{ pickipedia_db_user | replace('\\', '\\\\') | replace("'", "\\'") }}';
+          $wgDBpassword = '{{ pickipedia_db_password | replace('\\', '\\\\') | replace("'", "\\'") }}';
 
           # Security keys
-          $wgSecretKey = "{{ pickipedia_secret_key }}";
-          $wgUpgradeKey = "{{ pickipedia_upgrade_key }}";
+          $wgSecretKey = '{{ pickipedia_secret_key | replace('\\', '\\\\') | replace("'", "\\'") }}';
+          $wgUpgradeKey = '{{ pickipedia_upgrade_key | replace('\\', '\\\\') | replace("'", "\\'") }}';
 
           # Sentry/GlitchTip error tracking
-          $wgSentryDsn = "{{ glitchtip_dsn.stdout_lines[-1] }}";
+          $wgSentryDsn = '{{ glitchtip_dsn.stdout_lines[-1] | replace('\\', '\\\\') | replace("'", "\\'") }}';
 
           # Delivery-kid pinning service API key
-          $wgDeliveryKidApiKey = "{{ delivery_kid_api_key }}";
+          $wgDeliveryKidApiKey = '{{ delivery_kid_api_key | replace('\\', '\\\\') | replace("'", "\\'") }}';
 
     # IPFS/Pinning service removed - now handled by delivery-kid
 

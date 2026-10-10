@@ -39,19 +39,19 @@
       # Database (connects via socket mounted into Docker container)
       $wgDBtype = "mysql";
       $wgDBserver = "localhost";
-      $wgDBname = "{{ db_name }}";
-      $wgDBuser = "{{ db_user }}";
-      $wgDBpassword = "{{ pickipedia_db_password }}";
+      $wgDBname = '{{ db_name | replace('\\', '\\\\') | replace("'", "\\'") }}';
+      $wgDBuser = '{{ db_user | replace('\\', '\\\\') | replace("'", "\\'") }}';
+      $wgDBpassword = '{{ pickipedia_db_password | replace('\\', '\\\\') | replace("'", "\\'") }}';
 
       # Security keys
-      $wgSecretKey = "{{ pickipedia_secret_key }}";
-      $wgUpgradeKey = "{{ pickipedia_upgrade_key }}";
+      $wgSecretKey = '{{ pickipedia_secret_key | replace('\\', '\\\\') | replace("'", "\\'") }}';
+      $wgUpgradeKey = '{{ pickipedia_upgrade_key | replace('\\', '\\\\') | replace("'", "\\'") }}';
 
       # Sentry/GlitchTip error tracking
-      $wgSentryDsn = "{{ glitchtip_dsn_response.content | trim }}";
+      $wgSentryDsn = '{{ glitchtip_dsn_response.content | trim | replace('\\', '\\\\') | replace("'", "\\'") }}';
 
       # Delivery-kid pinning service API key
-      $wgDeliveryKidApiKey = "{{ delivery_kid_api_key }}";
+      $wgDeliveryKidApiKey = '{{ delivery_kid_api_key | replace('\\', '\\\\') | replace("'", "\\'") }}';
       {% if pickipedia_oauth2_private_key is defined and pickipedia_oauth2_public_key is defined %}
 
       # OAuth 2 signing keys: "Sign in with PickiPedia" (cryptograss/pickipedia#132).
