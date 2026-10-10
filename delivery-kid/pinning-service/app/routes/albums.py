@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from ..auth import require_auth, require_wallet_auth
+from ..auth import require_finalize_auth, require_wallet_auth
 from ..config import get_settings, Settings
 from ..services import ipfs
 
@@ -126,16 +126,21 @@ async def album_tracks(album_cid: str):
     }
 
 
+# Pinning and unpinning by bare CID answer to the same auth as finalizing.
+# They took any upload token before, and the wiki hands one of those to every
+# signed-in account on every page, so any account could have unpinned any
+# release. Nothing calls these two from the wiki or the scripts; they are
+# here for an operator with the API key.
 @router.post("/pin/{cid}")
 async def pin_cid(
     cid: str,
-    identity: str = Depends(require_auth),
+    identity: str = Depends(require_finalize_auth),
     settings: Settings = Depends(get_settings),
 ):
     """
     Pin a CID to the local IPFS node.
 
-    Accepts API key, HMAC token, or wallet auth.
+    Accepts API key, a finalize HMAC token, or wallet auth.
     """
     result = await ipfs.pin_cid(cid)
 
@@ -155,12 +160,12 @@ async def pin_cid(
 @router.delete("/unpin/{cid}")
 async def unpin_cid(
     cid: str,
-    identity: str = Depends(require_auth),
+    identity: str = Depends(require_finalize_auth),
 ):
     """
     Unpin a CID from both local IPFS and Pinata.
 
-    Accepts API key, HMAC token, or wallet auth.
+    Accepts API key, a finalize HMAC token, or wallet auth.
     """
     result = await ipfs.unpin(cid)
 
