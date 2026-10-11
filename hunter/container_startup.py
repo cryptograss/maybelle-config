@@ -623,6 +623,130 @@ def start_mood_poller():
         logger.error(f"Mood poller failed to start: {e}")
 
 
+# --- Agents besides magent (hunter/CONTAINERS.md) ---------------------------
+# A container belongs to a Mood; the agents in it are its residents. magent
+# is the unix user `magent`, as always. Each other agent is its own unix
+# user with its own home, credentials, harness and poller: the same tools
+# and network, none of magent's keys, and its own memory in memory-lane.
+
+AGENT_NAME = re.compile(r'[a-z][a-z0-9-]{0,30}')
+MEDIAWIKI_MCP = '@professional-wiki/mediawiki-mcp-server@latest'
+
+
+def agents():
+    """The agents besides magent this container hosts (AGENTS, from the inventory)."""
+    import json
+    try:
+        found = json.loads(os.environ.get('AGENTS') or '[]')
+    except ValueError:
+        logger.error("AGENTS is not JSON; no other agents set up")
+        return []
+    return [a for a in found if isinstance(a, dict) and AGENT_NAME.fullmatch(str(a.get('name', '')))
+            and a['name'] != 'magent']
+
+
+def write_private(path, text, owner):
+    """A file only `owner` can read: credentials never go on a command line."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, 'w') as f:
+        f.write(text)
+    os.chmod(path, 0o600)
+    shutil.chown(path, user=owner, group=owner)
+
+
+def setup_agent(agent):
+    """One resident agent: its user, its keys, its tools, its own clones."""
+    import json
+    name = agent['name']
+    home = Path('/home') / name
+    if subprocess.run(['id', '-u', name], capture_output=True).returncode != 0:
+        run_command(f"useradd -m -d {home} -s /bin/bash {name}")
+    # The others can't read magent's home, where its GitHub token, wiki
+    # password and runner key are; nor magent theirs.
+    os.chmod('/home/magent', 0o750)
+    os.chmod(home, 0o750)
+    secret = lambda key: os.environ.get(f"AGENT_{name.upper().replace('-', '_')}_{key}", '').strip()
+
+    config = home / '.config'
+    runner_key = secret('RUNNER_KEY')
+    if runner_key:
+        write_private(config / 'magenta' / 'runner_key', runner_key + '\n', name)
+    # What the poller exports into the harness: the model provider's key,
+    # under the name the harness reads it by (e.g. OPENROUTER_API_KEY).
+    env = []
+    if secret('MODEL_KEY') and re.fullmatch(r'[A-Z][A-Z0-9_]*', agent.get('model_key_env', '')):
+        env.append(f"{agent['model_key_env']}={secret('MODEL_KEY')}")
+    write_private(config / 'magenta' / 'agent.env', ''.join(f'{line}\n' for line in env), name)
+
+    # Its MCP servers: the memory record, and PickiPedia as its own bot
+    # account. Pi reads them from ~/.pi/agent/mcp.json.
+    servers = {'magenta-memory-v2': {'url': os.environ.get('MCP_MEMORY_URL', 'https://mcp.maybelle.cryptograss.live'),
+                                     'description': 'The record: what was said in the Moods and sessions.'}}
+    wiki_password = secret('PICKIPEDIA_BOT_PASSWORD')
+    if wiki_password and agent.get('wiki_user'):
+        wiki_config = config / 'mediawiki-mcp' / 'config.json'
+        write_private(wiki_config, json.dumps({'defaultWiki': 'pickipedia.xyz', 'wikis': {'pickipedia.xyz': {
+            'sitename': 'PickiPedia', 'server': 'https://pickipedia.xyz', 'articlepath': '/wiki', 'scriptpath': '',
+            'username': agent['wiki_user'], 'password': wiki_password, 'private': False}}}, indent=2), name)
+        servers['pickipedia'] = {'command': 'npx', 'args': ['-y', MEDIAWIKI_MCP], 'env': {'CONFIG': str(wiki_config)},
+                                 'description': 'PickiPedia, the wiki, as this agent\'s own bot account.'}
+    pi_dir = home / '.pi' / 'agent'
+    write_private(pi_dir / 'mcp.json', json.dumps({'mcpServers': servers}, indent=2), name)
+
+    # Its own clones of the public repositories: it reads the code, runs the
+    # tests and writes docs; it pushes nothing (no GitHub account).
+    workspace = home / 'workspace'
+    workspace.mkdir(exist_ok=True)
+    shutil.chown(workspace, user=name, group=name)
+    for repo in agent.get('repos', []):
+        if not re.fullmatch(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+', repo):
+            continue
+        target = workspace / repo.split('/')[1]
+        if not target.exists():
+            run_command(f"git clone --quiet https://github.com/{repo}.git {target}", user=name, check=False)
+    run_command(f"git config --global user.name {name}", user=name, check=False)
+    run_command(f"git config --global user.email {name}@cryptograss.live", user=name, check=False)
+    # Its rules, where Pi looks for standing instructions.
+    rules = agent.get('rules')
+    if rules and (home / rules).exists():
+        link = pi_dir / 'AGENTS.md'
+        link.unlink(missing_ok=True)
+        link.symlink_to(home / rules)
+    for p in (home / '.pi', pi_dir, config, config / 'magenta'):
+        if p.exists():
+            shutil.chown(p, user=name, group=name)
+    logger.info(f"✓ Agent {name} set up as its own user ({agent.get('harness', 'claude-code')})")
+
+
+def start_agent_poller(agent):
+    """The agent's own poller: answers mentions of it in this container's
+    Mood, through its own harness, posting to memory-lane with its own key."""
+    script = Path('/opt/mood-poller/mood_poller.py')
+    name, home = agent['name'], Path('/home') / agent['name']
+    slug = os.environ.get('MOOD_SLUG', '').strip()
+    people = os.environ.get('MOOD_FULL_TOOLS_FOR', '').strip()
+    harness = agent.get('harness', 'claude-code')
+    model = agent.get('model', '')
+    if not script.exists() or not (home / '.config' / 'magenta' / 'runner_key').exists():
+        logger.warning(f"Agent {name}: no poller script or no runner key; not started")
+        return
+    if (not re.fullmatch(r'[a-z0-9-]+', slug) or not re.fullmatch(r'[a-z0-9_,-]*', people)
+            or harness not in ('claude-code', 'pi') or not re.fullmatch(r'[A-Za-z0-9_./:-]*', model)):
+        logger.error(f"Agent {name}: Mood, people, harness or model not plain words; not started")
+        return
+    args = f"--agent {name} --harness {harness} --moods {slug} --full-tools-for {people or ','}"
+    if model:
+        args += f" --model {model}"
+    letter = agent.get('letter')
+    if letter and re.fullmatch(r'[A-Za-z0-9_./-]+', letter):
+        args += f" --letter {home / letter}"
+    # (Plain words only: run_command wraps this in single quotes for su.)
+    run_command(f"set -a; . ~/.config/magenta/agent.env; set +a; "
+                f"nohup /usr/bin/python3 {script} {args} >> /tmp/mood-poller-{name}.log 2>&1 &", user=name)
+    logger.info(f"✓ Agent {name}'s poller started (log: /tmp/mood-poller-{name}.log)")
+
+
 def start_services():
     """Start required services."""
     logger.info("=== Starting services ===")
@@ -639,6 +763,12 @@ def start_services():
     logger.info("✓ code-server started on port 8080")
 
     start_mood_poller()
+    for agent in agents():
+        try:
+            setup_agent(agent)
+            start_agent_poller(agent)
+        except Exception as e:  # one agent's trouble doesn't stop the container
+            logger.error(f"Agent {agent.get('name')} failed to start: {e}")
 
     # Note: PostgreSQL runs in separate container, not started here
     logger.info("✓ Using shared PostgreSQL container")

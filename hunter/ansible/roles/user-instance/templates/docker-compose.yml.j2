@@ -79,6 +79,18 @@ services:
       # is not exported to shells.
       - MEMORY_LANE_RUNNER_KEY={{ memory_lane_runner_key }}
 {% endif %}
+{% if user.agents is defined %}
+      # Agents besides magent who live in this Mood's container, each its own
+      # unix user (hunter/CONTAINERS.md). Their keys, from the vault, are
+      # written into their own homes at startup, readable only by them.
+      - 'AGENTS={{ user.agents | to_json }}'
+{% for agent in user.agents %}
+{% set prefix = 'AGENT_' ~ (agent.name | upper | replace('-', '_')) %}
+      - {{ prefix }}_RUNNER_KEY={{ lookup('vars', agent.name ~ '_runner_key', default='') }}
+      - {{ prefix }}_PICKIPEDIA_BOT_PASSWORD={{ lookup('vars', agent.name ~ '_pickipedia_bot_password', default='') }}
+      - {{ prefix }}_MODEL_KEY={{ lookup('vars', agent.name ~ '_model_api_key', default='') }}
+{% endfor %}
+{% endif %}
     restart: unless-stopped
 
 networks:

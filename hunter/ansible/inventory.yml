@@ -94,3 +94,32 @@ all:
           id: b44becf4-487a-4e9f-bf3a-a881c7420e01
           project: -home-magent-workspace-maybelle-config--claude-worktrees-preview-and-progress-fixes
           workspace: maybelle-config
+
+      # docs-tests-qa: re's home Mood, and the first container with two
+      # agents in it (hunter/CONTAINERS.md). magent answers here as magent;
+      # re as its own unix user, on Pi, with no GitHub account: it reads the
+      # code from its own clones, checks tests and Jenkins, and writes docs
+      # on PickiPedia as its own bot. Its keys are re_runner_key,
+      # re_pickipedia_bot_password and re_model_api_key in the vault; until
+      # they're there, the container runs with magent alone.
+      - name: docs-tests-qa
+        mood: docs-tests-qa
+        people: [justin, skyler]
+        full_name: "magent-cryptograss"
+        email: "magent@cryptograss.live"
+        github_username: "magent-cryptograss"
+        ssh_port: 2231
+        port_range_start: 14050  # 14050-14059
+        code_server_password: "{{ code_server_password }}"
+        github_token: "{{ magent_github_token }}"
+        mood_poller: true
+        agents:
+          - name: re
+            harness: pi
+            model: "{{ re_model | default('') }}"            # e.g. openrouter/<model>; Justin's choice
+            model_key_env: "{{ re_model_key_env | default('') }}"  # the env var Pi reads that provider's key from
+            wiki_user: "Re@re"                                 # its PickiPedia bot password's login name
+            rules: workspace/red/RULES.md
+            letter: workspace/red/LETTER.md
+            repos: [magent-cryptograss/red, cryptograss/memory-lane, cryptograss/maybelle-config,
+                    cryptograss/pickipedia, cryptograss/arthel]

@@ -839,7 +839,7 @@
           {% if memory_lane_runner_key is defined %}
           # The Mood runner (memory-lane's poller, on hunter) streams the turns
           # it wakes straight into their Moods, proving itself with this key.
-          MOOD_RUNNER_KEYS=magent:{{ memory_lane_runner_key }}
+          MOOD_RUNNER_KEYS=magent:{{ memory_lane_runner_key }}{% if re_runner_key is defined %},re:{{ re_runner_key }}{% endif %}
           {% endif %}
           {% if memory_lane_deploy_key is defined %}
           # The deploy scripts here (scripts/report-deploy.sh) tell the Moods
