@@ -71,6 +71,12 @@
           https://pickipedia.xyz
           =============================================
 
+    - name: Say in magenta who comes in by SSH, and as which account
+      include_role:
+        name: "{{ playbook_dir }}/../../shared/ansible/roles/ssh-announce"
+      vars:
+        ssh_announce_server: pickipedia
+
   roles:
     - mariadb
     - wiki-secrets       # LocalSettings.local.php, before anything connects to the database

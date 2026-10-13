@@ -20,36 +20,6 @@
     dest: /usr/local/bin/route-ssh
     mode: '0755'
 
-- name: Create the script that tells magenta who came in
-  template:
-    src: announce-ssh.sh.j2
-    dest: /usr/local/bin/announce-ssh
-    mode: '0755'
-
-- name: Create /etc/magenta for the router's key
-  file:
-    path: /etc/magenta
-    state: directory
-    mode: '0755'
-
-# magenta's access key (memory-lane MOOD_ACCESS_KEY): it can announce an SSH
-# session and nothing else. Readable by the router only, never by a container.
-- name: Give the router magenta's access key
-  copy:
-    content: "{{ memory_lane_access_key }}"
-    dest: /etc/magenta/access-key
-    owner: sshrouter
-    group: sshrouter
-    mode: '0400'
-  no_log: true
-  when: memory_lane_access_key is defined
-
-- name: No access key in the vault, so no announcing
-  file:
-    path: /etc/magenta/access-key
-    state: absent
-  when: memory_lane_access_key is not defined
-
 - name: Generate authorized_keys for router
   template:
     src: authorized_keys.j2
