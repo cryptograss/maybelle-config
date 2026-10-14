@@ -57,6 +57,13 @@
       include_role:
         name: ssh-router
 
+    - name: Say in magenta who comes in by SSH (the router says more of its own)
+      include_role:
+        name: ssh-announce
+      vars:
+        ssh_announce_server: hunter
+        ssh_announce_key_group: sshrouter
+
     - name: Include services role (watcher posting to maybelle)
       include_role:
         name: services

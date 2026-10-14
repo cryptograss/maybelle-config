@@ -1,0 +1,12 @@
+---
+# Which box this is, as magenta names it (memory-lane services/servers.py):
+# hunter, maybelle, delivery-kid or pickipedia.
+ssh_announce_server: ""
+# Who besides root may read the key: hunter's SSH router, which says more of
+# its own logins (whose container, tmux) than a login hook can.
+ssh_announce_key_group: root
+# The key maybelle's deploys and Jenkins jobs come in with, as root, many
+# times a day: its public half (read where the play runs, from the private
+# key the deploys use) is listed as "@maybelle", and its logins aren't said --
+# a deploy says itself already.
+ssh_announce_machine_key: "~/.ssh/id_ed25519_hunter"

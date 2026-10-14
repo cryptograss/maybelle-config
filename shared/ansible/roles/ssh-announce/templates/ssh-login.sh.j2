@@ -1,0 +1,33 @@
+#!/bin/bash
+# pam_exec, as an SSH session opens: say in magenta who came in, and as which
+# account -- root above all. Who is known by the key they used, matched
+# against the people's keys in hunter's inventory (/etc/magenta/ssh-people);
+# a key nobody's known by is said by its fingerprint. Never stands in a
+# login's way: it answers at once and tells magenta in the background.
+[ "$PAM_TYPE" = open_session ] || exit 0
+[ "$PAM_USER" = sshrouter ] && exit 0   # hunter's route-ssh says more of these
+PEOPLE=/etc/magenta/ssh-people
+
+# The key's fingerprint: from sshd's own word to PAM, or else its log line.
+FP=''
+if [ -n "$SSH_AUTH_INFO_0" ]; then
+  FP=$(printf '%s\n' "$SSH_AUTH_INFO_0" | awk '$1 == "publickey" {print $2, $3; exit}' | ssh-keygen -lf - 2>/dev/null | awk '{print $2}')
+fi
+if [ -z "$FP" ]; then
+  FP=$( { journalctl -o cat --since '-2min' 2>/dev/null; tail -n 200 /var/log/auth.log 2>/dev/null; } \
+    | grep "Accepted publickey for ${PAM_USER} from ${PAM_RHOST} " | tail -n 1 | grep -o 'SHA256:[A-Za-z0-9+/]*')
+fi
+
+WHO=''
+if [ -n "$FP" ] && [ -r "$PEOPLE" ]; then
+  while read -r name type body; do
+    [ -n "$body" ] || continue
+    if [ "$(printf '%s %s\n' "$type" "$body" | ssh-keygen -lf - 2>/dev/null | awk '{print $2}')" = "$FP" ]; then
+      WHO=$name; break
+    fi
+  done < "$PEOPLE"
+fi
+case "$WHO" in @*) exit 0 ;; esac   # a machine's own key (maybelle's deploys): they say themselves
+if [ -n "$WHO" ]; then KEY=''; else WHO=someone; KEY=$FP; fi
+setsid /usr/local/bin/announce-ssh "$WHO" "" "" "$PAM_USER" "$KEY" </dev/null >/dev/null 2>&1 &
+exit 0

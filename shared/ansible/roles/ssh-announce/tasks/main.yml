@@ -1,0 +1,53 @@
+---
+# Say in magenta's #general who comes in to this box by SSH, and as which
+# account (memory-lane /api/access/ssh/). A PAM hook as each SSH session
+# opens; the key it proves itself with (vault memory_lane_access_key) can
+# announce an SSH session and nothing else.
+
+- name: Create /etc/magenta and /usr/local/lib/magenta
+  file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0755'
+  loop: [/etc/magenta, /usr/local/lib/magenta]
+
+- name: Install the script that tells magenta
+  template:
+    src: announce-ssh.sh.j2
+    dest: /usr/local/bin/announce-ssh
+    mode: '0755'
+
+- name: Install the login hook
+  template:
+    src: ssh-login.sh.j2
+    dest: /usr/local/lib/magenta/ssh-login
+    mode: '0755'
+
+- name: Write whose each key is
+  template:
+    src: ssh-people.j2
+    dest: /etc/magenta/ssh-people
+    mode: '0644'
+
+- name: Give it magenta's access key
+  copy:
+    content: "{{ memory_lane_access_key }}"
+    dest: /etc/magenta/access-key
+    owner: root
+    group: "{{ ssh_announce_key_group }}"
+    mode: '0440'
+  no_log: true
+  when: memory_lane_access_key is defined
+
+- name: No access key in the vault, so no announcing
+  file:
+    path: /etc/magenta/access-key
+    state: absent
+  when: memory_lane_access_key is not defined
+
+# optional: whatever the hook does, the login goes on.
+- name: Run the hook as each SSH session opens
+  lineinfile:
+    path: /etc/pam.d/sshd
+    line: 'session optional pam_exec.so quiet /usr/local/lib/magenta/ssh-login'
+    insertafter: EOF

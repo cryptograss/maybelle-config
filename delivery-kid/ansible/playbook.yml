@@ -31,6 +31,12 @@
         dest: /etc/motd
         mode: '0644'
 
+    - name: Say in magenta who comes in by SSH, and as which account
+      include_role:
+        name: "{{ playbook_dir }}/../../shared/ansible/roles/ssh-announce"
+      vars:
+        ssh_announce_server: delivery-kid
+
     # Caddy's Cloudsmith repository answers 402 (out of bandwidth since
     # 2026-10-09): left configured, the apt update below fails. Caddy comes from its
     # GitHub release instead.

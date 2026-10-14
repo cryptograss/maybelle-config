@@ -1,0 +1,13 @@
+#!/bin/bash
+# Tell magenta someone has come in by SSH (memory-lane POST /api/access/ssh/):
+# said in #general, once a visit. Run in the background, cut loose from the
+# login; it never delays or stops one -- no key, no network, no answer, and
+# it just ends.
+#   announce-ssh <who> [<whose container>] [<how>] [<as which account>] [<key fingerprint>]
+KEY_FILE=/etc/magenta/access-key
+[ -r "$KEY_FILE" ] || exit 0
+BODY=$(printf '{"server": "%s", "who": "%s", "into": "%s", "how": "%s", "as": "%s", "key": "%s"}' \
+  "{{ ssh_announce_server }}" "$1" "$2" "$3" "$4" "$5")
+curl -s -m 5 -o /dev/null -X POST \
+  -H "Authorization: Bearer $(cat "$KEY_FILE")" -H 'Content-Type: application/json' \
+  --data "$BODY" https://magenta.cryptograss.live/api/access/ssh/ || true

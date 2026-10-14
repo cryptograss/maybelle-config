@@ -25,6 +25,12 @@
     # Note: maybelle-config repo is managed by the chapter scripts on the persistent volume
     # No need to clone it here - we're already running from it
 
+    - name: Say in magenta who comes in by SSH, and as which account
+      include_role:
+        name: ssh-announce
+      vars:
+        ssh_announce_server: maybelle
+
     - name: Deploy maybelle SSH login banner
       copy:
         src: "{{ playbook_dir }}/../../ascii-art/maybelle-ascii-dark.txt"
@@ -845,6 +851,11 @@
           # The deploy scripts here (scripts/report-deploy.sh) tell the Moods
           # when a server is being redeployed, proving themselves with this key.
           MOOD_DEPLOY_KEY={{ memory_lane_deploy_key }}
+          {% endif %}
+          {% if memory_lane_access_key is defined %}
+          # Hunter's SSH router (hunter route-ssh, announce-ssh) says who has
+          # come in by SSH, proving itself with this key; it can do nothing else.
+          MOOD_ACCESS_KEY={{ memory_lane_access_key }}
           {% endif %}
           {% if pickipedia_oauth_client_id is defined and pickipedia_oauth_client_secret is defined %}
           # "Sign in with PickiPedia": magenta's client at the wiki's OAuth

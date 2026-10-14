@@ -88,6 +88,13 @@ fi
 
 CONTAINER="${TARGET_USER}-arthel"
 
+# Said in magenta's #general: who came in, to whose container, and how -- never
+# the command itself. In the background, cut loose from this session.
+if [ "$JOIN_TMUX" = true ]; then HOW="tmux ${TARGET_SESSION}"
+elif [ -n "$SSH_ORIGINAL_COMMAND" ]; then HOW="a command"
+else HOW="a shell"; fi
+setsid /usr/local/bin/announce-ssh "$USER" "$TARGET_USER" "$HOW" </dev/null >/dev/null 2>&1 &
+
 # Check if container exists and is running
 if ! docker ps --format '{% raw %}{{.Names}}{% endraw %}' | grep -q "^${CONTAINER}$"; then
     echo "Error: Container ${CONTAINER} not found or not running"
