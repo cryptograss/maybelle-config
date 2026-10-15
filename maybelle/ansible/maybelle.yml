@@ -846,9 +846,15 @@
           {% if magent_key %}
           # The Mood runners (memory-lane's poller, on hunter, one per agent)
           # stream the turns they wake straight into their Moods, each proving
-          # itself with its agent's key. magent's is magent_runner_key, once
-          # named memory_lane_runner_key: either works.
-          MOOD_RUNNER_KEYS=magent:{{ magent_key }}{% if re_runner_key is defined %},re:{{ re_runner_key }}{% endif %}
+          # itself with its agent's key: one line per agent, read by
+          # memory-lane (memory_viewer/runner_keys.py). magent's is
+          # magent_runner_key, once named memory_lane_runner_key: either works.
+          MOOD_RUNNER_KEY_MAGENT={{ magent_key }}
+          # The same, in the form memory-lane read before MOOD_RUNNER_KEY_*.
+          MOOD_RUNNER_KEYS=magent:{{ magent_key }}
+          {% endif %}
+          {% if re_runner_key is defined %}
+          MOOD_RUNNER_KEY_RE={{ re_runner_key }}
           {% endif %}
           {% if memory_lane_deploy_key is defined %}
           # The deploy scripts here (scripts/report-deploy.sh) tell the Moods
