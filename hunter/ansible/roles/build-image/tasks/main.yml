@@ -65,10 +65,42 @@
   shell: "getent group docker | cut -d: -f3"
   register: docker_gid
 
-- name: Build magenta-arthel base image
-  command: docker compose -f docker-compose-build.yml build --build-arg DOCKER_GID={{ docker_gid.stdout }}
+# The build's own log, step by step, in /opt/magenta/logs: watch it during a
+# deploy with `tail -f /opt/magenta/logs/image-build.log` on hunter, and the
+# next task says where the time went.
+- name: Create the build log directory
+  file:
+    path: "{{ base_dir }}/logs"
+    state: directory
+    mode: '0755'
+
+- name: Build magenta-arthel base image (step by step in /opt/magenta/logs/image-build.log)
+  shell: >
+    set -o pipefail;
+    [ -f {{ base_dir }}/logs/image-build.log ] && mv -f {{ base_dir }}/logs/image-build.log {{ base_dir }}/logs/image-build.previous.log;
+    docker compose --progress plain -f docker-compose-build.yml build --build-arg DOCKER_GID={{ docker_gid.stdout }}
+    > {{ base_dir }}/logs/image-build.log 2>&1
   args:
     chdir: "{{ base_dir }}/maybelle-config/hunter"
+    executable: /bin/bash
+  register: image_build
+  failed_when: false  # the timing below is shown either way; the deploy stops after it if this failed
+
+- name: Where the image build spent its time
+  command: python3 {{ base_dir }}/maybelle-config/hunter/scripts/build_timing.py {{ base_dir }}/logs/image-build.log
+  register: build_timing
+  changed_when: false
+
+- name: Show the build's timing
+  debug:
+    var: build_timing.stdout_lines
+
+- name: Stop if the image build failed
+  shell: tail -n 40 {{ base_dir }}/logs/image-build.log
+  register: build_tail
+  when: image_build.rc != 0
+  changed_when: false
+  failed_when: true
 
 - name: Verify image was built
   command: docker images magenta-arthel:latest --format "{% raw %}{{.Repository}}:{{.Tag}}{% endraw %}"
@@ -76,7 +108,8 @@
   failed_when: "'magenta-arthel:latest' not in image_check.stdout"
 
 # Cap BuildKit cache so repeated rebuilds (especially the periodic base-image
-# bumps) don't accumulate unbounded. -f prunes dangling cache only —
-# active layers stay reusable; --keep-storage caps total at 3GB.
+# bumps) don't accumulate unbounded. -f only skips the prompt: this removes
+# any cache not in use right now, oldest first, until 3GB is left; cache that
+# a current image still references isn't reclaimable and stays.
 - name: Cap Docker BuildKit cache at 3GB
   command: docker builder prune -f --keep-storage 3GB
