@@ -99,10 +99,10 @@ all:
       # agents in it (hunter/CONTAINERS.md). magent answers here as magent;
       # re as its own unix user, on Pi, with no GitHub account: it reads the
       # code from its own clones, checks tests and Jenkins, and writes docs
-      # on PickiPedia as its own bot. Its keys are re_runner_key,
-      # re_pickipedia_bot_password, and re_<vendor>_api_key for each model
-      # vendor below that it should reach; until its runner key is there, its
-      # poller doesn't start and the container runs with magent alone.
+      # on PickiPedia as its own bot. Its own keys are re_runner_key and
+      # re_pickipedia_bot_password; the model vendors' keys are shared by all
+      # the agents (model_<vendor>_api_key). Until its runner key is there,
+      # its poller doesn't start and the container runs with magent alone.
       - name: docs-tests-qa
         mood: docs-tests-qa
         people: [justin, skyler]
@@ -119,8 +119,9 @@ all:
             harness: pi
             model: "{{ re_model | default('') }}"  # its default, as Pi names it (anthropic/claude-sonnet-5-5); the Mood's menu overrides
             # Vendor: the variable Pi reads its key from. The key itself is
-            # re_<vendor>_api_key in the vault; a vendor without one is
-            # greyed out in the Mood's model menu.
+            # model_<vendor>_api_key in the vault, one for every agent (or
+            # re_<vendor>_api_key, to give re its own); a vendor without one
+            # is greyed out in the Mood's model menu.
             model_keys:
               openrouter: OPENROUTER_API_KEY
               anthropic: ANTHROPIC_API_KEY

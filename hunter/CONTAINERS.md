@@ -39,11 +39,15 @@ one a different agent is not a different machine. It is:
   agent can't read magent's GitHub token, wiki password or runner key, and
   magent can't read theirs.
 - **its own credentials,** written into its own home at startup, readable only
-  by it. They come from the vault as `<agent>_runner_key`,
-  `<agent>_pickipedia_bot_password` and one `<agent>_<vendor>_api_key` per
-  model vendor it may use (container_startup.py `setup_agent`). Its poller
-  tells memory-lane which vendors those reach, never the keys, and the Mood's
-  model menu greys out the rest.
+  by it. They come from the vault as `<agent>_runner_key` and
+  `<agent>_pickipedia_bot_password` (container_startup.py `setup_agent`).
+- **the model vendors' keys, shared:** one `model_<vendor>_api_key` in the
+  vault per vendor, for every agent; an agent is given its own
+  (`<agent>_<vendor>_api_key`) only when it needs a separate limit or bill.
+  Each agent's copy is still in its own home, readable only by it. Its
+  poller tells memory-lane which vendors it can reach, never the keys, and
+  the Mood's model menu greys out the rest. What each agent spends is in the
+  record, turn by turn, so separate keys aren't needed to tell them apart.
 - **its own harness and poller.** magent runs on Claude Code. re runs on Pi
   (memory-lane `poller/pi_harness.py`), which posts memory-lane's own record
   events, so nothing about Claude Code's files is involved. Each agent's poller

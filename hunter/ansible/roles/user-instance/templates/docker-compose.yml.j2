@@ -88,8 +88,9 @@ services:
 {% set prefix = 'AGENT_' ~ (agent.name | upper | replace('-', '_')) %}
       - {{ prefix }}_RUNNER_KEY={{ lookup('vars', agent.name ~ '_runner_key', default='') }}
       - {{ prefix }}_PICKIPEDIA_BOT_PASSWORD={{ lookup('vars', agent.name ~ '_pickipedia_bot_password', default='') }}
+{# A vendor's key is shared by every agent (model_<vendor>_api_key), unless one has its own (<agent>_<vendor>_api_key). #}
 {% for vendor, env_name in (agent.model_keys | default({})).items() %}
-      - {{ prefix }}_KEY_{{ env_name }}={{ lookup('vars', agent.name ~ '_' ~ vendor ~ '_api_key', default='') }}
+      - {{ prefix }}_KEY_{{ env_name }}={{ lookup('vars', agent.name ~ '_' ~ vendor ~ '_api_key', default=lookup('vars', 'model_' ~ vendor ~ '_api_key', default='')) }}
 {% endfor %}
 {% endfor %}
 {% endif %}
