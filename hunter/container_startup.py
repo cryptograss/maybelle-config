@@ -6,6 +6,7 @@ Handles volume initialization, repository cloning, and service configuration.
 
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -672,12 +673,16 @@ def setup_agent(agent):
     runner_key = secret('RUNNER_KEY')
     if runner_key:
         write_private(config / 'magenta' / 'runner_key', runner_key + '\n', name)
-    # What the poller exports into the harness: the model provider's key,
-    # under the name the harness reads it by (e.g. OPENROUTER_API_KEY).
-    env = []
-    if secret('MODEL_KEY') and re.fullmatch(r'[A-Z][A-Z0-9_]*', agent.get('model_key_env', '')):
-        env.append(f"{agent['model_key_env']}={secret('MODEL_KEY')}")
-    write_private(config / 'magenta' / 'agent.env', ''.join(f'{line}\n' for line in env), name)
+    # What the poller exports into the harness: each model vendor's key, under
+    # the name the harness reads it by (the inventory's `model_keys`, e.g.
+    # OPENROUTER_API_KEY). Only the vendors with a key in the vault are here,
+    # and they're the ones the Mood's model menu shows as usable.
+    prefix = f"AGENT_{name.upper().replace('-', '_')}_KEY_"
+    keys = {var[len(prefix):]: value.strip() for var, value in os.environ.items()
+            if var.startswith(prefix) and value.strip() and re.fullmatch(r'[A-Z][A-Z0-9_]*', var[len(prefix):])}
+    write_private(config / 'magenta' / 'agent.env',
+                  ''.join(f'{var}={shlex.quote(value)}\n' for var, value in sorted(keys.items())), name)
+    logger.info(f"Agent {name}: model keys for {', '.join(sorted(keys)) or 'no vendor yet'}")
 
     # Its MCP servers: the memory record, and PickiPedia as its own bot
     # account. Pi reads them from ~/.pi/agent/mcp.json.

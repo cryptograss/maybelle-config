@@ -40,8 +40,10 @@ one a different agent is not a different machine. It is:
   magent can't read theirs.
 - **its own credentials,** written into its own home at startup, readable only
   by it. They come from the vault as `<agent>_runner_key`,
-  `<agent>_pickipedia_bot_password` and `<agent>_model_api_key`
-  (container_startup.py `setup_agent`).
+  `<agent>_pickipedia_bot_password` and one `<agent>_<vendor>_api_key` per
+  model vendor it may use (container_startup.py `setup_agent`). Its poller
+  tells memory-lane which vendors those reach, never the keys, and the Mood's
+  model menu greys out the rest.
 - **its own harness and poller.** magent runs on Claude Code. re runs on Pi
   (memory-lane `poller/pi_harness.py`), which posts memory-lane's own record
   events, so nothing about Claude Code's files is involved. Each agent's poller
@@ -71,5 +73,5 @@ deliberately small in what it can touch:
   read errors there until it is given a read-only account, if we want that.
 - **Files on hunter:** what its own user can read in its own container.
 
-Its first container is `docs-tests-qa`, its home Mood. Until its three keys are
-in the vault, that container runs with magent alone.
+Its first container is `docs-tests-qa`, its home Mood. Until its runner key is in
+the vault, re's poller doesn't start, and that container runs with magent alone.
