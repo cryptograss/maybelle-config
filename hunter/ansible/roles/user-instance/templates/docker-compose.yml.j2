@@ -94,8 +94,12 @@ services:
 {% for vendor, env_name in (agent.model_keys | default({})).items() %}
       - {{ prefix }}_KEY_{{ env_name }}={{ lookup('vars', agent.name ~ '_' ~ vendor ~ '_api_key', default=lookup('vars', 'model_' ~ vendor ~ '_api_key', default='')) }}
 {% endfor %}
-{# Claude Code on the subscription: a token from `claude setup-token`, shared the same way (claude_code_oauth_token, or <agent>_claude_code_oauth_token). #}
-      - {{ prefix }}_KEY_CLAUDE_CODE_OAUTH_TOKEN={{ lookup('vars', agent.name ~ '_claude_code_oauth_token', default=lookup('vars', 'claude_code_oauth_token', default='')) }}
+{# The subscription: a token from `claude setup-token`, shared the same way (claude_code_oauth_token, or
+   <agent>_claude_code_oauth_token). Claude Code reads it as CLAUDE_CODE_OAUTH_TOKEN; Pi, for Anthropic's
+   models, as ANTHROPIC_OAUTH_TOKEN, ahead of any ANTHROPIC_API_KEY. #}
+{% set subscription = lookup('vars', agent.name ~ '_claude_code_oauth_token', default=lookup('vars', 'claude_code_oauth_token', default='')) %}
+      - {{ prefix }}_KEY_CLAUDE_CODE_OAUTH_TOKEN={{ subscription }}
+      - {{ prefix }}_KEY_ANTHROPIC_OAUTH_TOKEN={{ subscription }}
 {% endfor %}
 {% endif %}
     restart: unless-stopped
