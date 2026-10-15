@@ -698,6 +698,19 @@ def setup_agent(agent):
                                  'description': 'PickiPedia, the wiki, as this agent\'s own bot account.'}
     pi_dir = home / '.pi' / 'agent'
     write_private(pi_dir / 'mcp.json', json.dumps({'mcpServers': servers}, indent=2), name)
+    # The same servers for Claude Code (~/.claude.json), keeping whatever Claude
+    # Code itself keeps there; it signs in with CLAUDE_CODE_OAUTH_TOKEN (agent.env).
+    claude_json = home / '.claude.json'
+    try:
+        state = json.loads(claude_json.read_text()) if claude_json.exists() else {}
+    except ValueError:
+        state = {}
+    state['mcpServers'] = {key: ({'type': 'http', 'url': server['url']} if 'url' in server else
+                                 {'type': 'stdio', 'command': server['command'], 'args': server['args'],
+                                  'env': server['env']})
+                           for key, server in servers.items()}
+    state['hasCompletedOnboarding'] = True
+    write_private(claude_json, json.dumps(state, indent=2), name)
 
     # Its own clones of the public repositories: it reads the code, runs the
     # tests and writes docs; it pushes nothing (no GitHub account).
@@ -712,13 +725,15 @@ def setup_agent(agent):
             run_command(f"git clone --quiet https://github.com/{repo}.git {target}", user=name, check=False)
     run_command(f"git config --global user.name {name}", user=name, check=False)
     run_command(f"git config --global user.email {name}@cryptograss.live", user=name, check=False)
-    # Its rules, where Pi looks for standing instructions.
+    # Its rules, where Pi and Claude Code look for standing instructions.
     rules = agent.get('rules')
+    claude_dir = home / '.claude'
+    claude_dir.mkdir(exist_ok=True)
     if rules and (home / rules).exists():
-        link = pi_dir / 'AGENTS.md'
-        link.unlink(missing_ok=True)
-        link.symlink_to(home / rules)
-    for p in (home / '.pi', pi_dir, config, config / 'magenta'):
+        for link in (pi_dir / 'AGENTS.md', claude_dir / 'CLAUDE.md'):
+            link.unlink(missing_ok=True)
+            link.symlink_to(home / rules)
+    for p in (home / '.pi', pi_dir, claude_dir, config, config / 'magenta'):
         if p.exists():
             shutil.chown(p, user=name, group=name)
     logger.info(f"✓ Agent {name} set up as its own user ({agent.get('harness', 'claude-code')})")

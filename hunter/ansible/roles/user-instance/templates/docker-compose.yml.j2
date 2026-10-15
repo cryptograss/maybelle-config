@@ -94,6 +94,8 @@ services:
 {% for vendor, env_name in (agent.model_keys | default({})).items() %}
       - {{ prefix }}_KEY_{{ env_name }}={{ lookup('vars', agent.name ~ '_' ~ vendor ~ '_api_key', default=lookup('vars', 'model_' ~ vendor ~ '_api_key', default='')) }}
 {% endfor %}
+{# Claude Code on the subscription: a token from `claude setup-token`, shared the same way (claude_code_oauth_token, or <agent>_claude_code_oauth_token). #}
+      - {{ prefix }}_KEY_CLAUDE_CODE_OAUTH_TOKEN={{ lookup('vars', agent.name ~ '_claude_code_oauth_token', default=lookup('vars', 'claude_code_oauth_token', default='')) }}
 {% endfor %}
 {% endif %}
     restart: unless-stopped

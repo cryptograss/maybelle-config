@@ -116,6 +116,8 @@ all:
         mood_poller: true
         agents:
           - name: re
+            # pi, or claude-code (on the subscription: claude_code_oauth_token in
+            # the vault, from `claude setup-token`). Both are set up either way.
             harness: pi
             model: "{{ re_model | default('') }}"  # its default, as Pi names it (anthropic/claude-sonnet-5-5); the Mood's menu overrides
             # Vendor: the variable Pi reads its key from. The key itself is
