@@ -1,0 +1,31 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(uptime)",
+      "Bash(df:*)",
+      "Bash(free:*)",
+      "Bash(systemctl status:*)",
+      "Bash(journalctl:*)",
+      "Bash(docker ps:*)",
+      "Bash(docker logs:*)",
+      "Bash(docker images:*)",
+      "Bash(docker system df:*)",
+      "mcp__magenta-memory-v2"
+    ],
+    "deny": [
+      "Bash(docker buildx:*)",
+      "Bash(docker builder:*)",
+      "Bash(docker system prune:*)",
+      "Bash(docker container prune:*)",
+      "Bash(docker image prune:*)",
+      "Bash(docker volume:*)",
+      "Bash(docker network rm:*)",
+      "Bash(docker network prune:*)",
+      "Bash(docker rm:*)",
+      "Bash(docker rmi:*)",
+      "Bash(docker compose down:*)",
+      "Bash(sudo reboot:*)",
+      "Bash(reboot:*)"
+    ]
+  }
+}

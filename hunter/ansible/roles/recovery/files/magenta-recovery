@@ -1,0 +1,31 @@
+#!/bin/bash
+# magenta-recovery: the one thing recovery@hunter does (its authorized_keys
+# force it). `magenta.sh recovery` lands here: Claude Code -- magent -- on
+# hunter's host, in a tmux session that outlives the connection.
+#
+# For when Justin and magent can't reach each other at all: the containers
+# are down, Docker is wedged, the Moods are unreachable. Not for one Mood
+# being quiet. See hunter/ansible/roles/recovery.
+set -euo pipefail
+cd "$HOME"
+
+if [ "${1:-}" = "--claude" ]; then
+    # Inside tmux: the subscription token goes into this process's
+    # environment only, never onto a command line where ps would show it.
+    if [ -r "$HOME/.config/magenta/claude_token" ]; then
+        CLAUDE_CODE_OAUTH_TOKEN="$(cat "$HOME/.config/magenta/claude_token")"
+        export CLAUDE_CODE_OAUTH_TOKEN
+    fi
+    exec "$HOME/.local/bin/claude" --mcp-config "$HOME/.config/magenta/mcp.json"
+fi
+
+# What `magenta.sh recovery [--fresh]` asked for, through ssh.
+case "${SSH_ORIGINAL_COMMAND:-}" in
+    "") ;;
+    fresh) tmux kill-session -t recovery 2>/dev/null || true ;;
+    *)
+        echo "magenta-recovery: this login only opens the recovery session ('fresh' starts it over)." >&2
+        exit 2
+        ;;
+esac
+exec tmux new-session -A -s recovery /usr/local/bin/magenta-recovery --claude

@@ -1,0 +1,5 @@
+# recovery@hunter: magenta.sh recovery. Each key may only open the recovery
+# session (magenta-recovery); `recovery_people` in the inventory says whose.
+{% for person in users if person.name in recovery_people | default([]) and person.ssh_pubkey | default('') | trim is match('ssh-') %}
+command="/usr/local/bin/magenta-recovery",restrict,pty {{ person.ssh_pubkey | trim }}
+{% endfor %}
