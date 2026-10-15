@@ -73,11 +73,13 @@ services:
       - MOOD_FULL_TOOLS_FOR={{ user.people | default([]) | join(',') }}
       - SKIP_ARTHEL=1
 {% endif %}
-{% if user.mood_poller | default(false) and memory_lane_runner_key is defined %}
+{% set magent_key = magent_runner_key | default(memory_lane_runner_key | default('')) %}
+{% if user.mood_poller | default(false) and magent_key %}
       # The poller streams the turns it wakes straight into their Moods with
       # this (memory-lane's MOOD_RUNNER_KEYS). Only the poller reads it, so it
-      # is not exported to shells.
-      - MEMORY_LANE_RUNNER_KEY={{ memory_lane_runner_key }}
+      # is not exported to shells. magent_runner_key, once named
+      # memory_lane_runner_key: either works.
+      - MEMORY_LANE_RUNNER_KEY={{ magent_key }}
 {% endif %}
 {% if user.agents is defined %}
       # Agents besides magent who live in this Mood's container, each its own
