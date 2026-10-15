@@ -44,6 +44,10 @@ RUN echo "# Enable mouse support" > /etc/tmux.conf && \
 # Install Claude tools and Playwright globally (as root)
 RUN npm install -g @anthropic-ai/sdk @anthropic-ai/claude-code playwright
 
+# Pi, the open-source harness other agents run on (memory-lane poller/pi_harness.py).
+# Pinned: the runner's translation was written against this version's output.
+RUN npm install -g @earendil-works/pi-coding-agent@1.1.0
+
 # Install system dependencies for Playwright first (as root)
 RUN npx playwright install-deps
 RUN npx @modelcontextprotocol/server-puppeteer

@@ -842,10 +842,13 @@
           # Tool I/O is kept now that pattern redaction exists (jMyles/memory-lane#26);
           # this caps each stored result.
           TOOL_RESULT_CONTENT_CHARS=20000
-          {% if memory_lane_runner_key is defined %}
-          # The Mood runner (memory-lane's poller, on hunter) streams the turns
-          # it wakes straight into their Moods, proving itself with this key.
-          MOOD_RUNNER_KEYS=magent:{{ memory_lane_runner_key }}
+          {% set magent_key = magent_runner_key | default(memory_lane_runner_key | default('')) %}
+          {% if magent_key %}
+          # The Mood runners (memory-lane's poller, on hunter, one per agent)
+          # stream the turns they wake straight into their Moods, each proving
+          # itself with its agent's key. magent's is magent_runner_key, once
+          # named memory_lane_runner_key: either works.
+          MOOD_RUNNER_KEYS=magent:{{ magent_key }}{% if re_runner_key is defined %},re:{{ re_runner_key }}{% endif %}
           {% endif %}
           {% if memory_lane_deploy_key is defined %}
           # The deploy scripts here (scripts/report-deploy.sh) tell the Moods

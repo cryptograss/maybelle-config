@@ -94,3 +94,46 @@ all:
           id: b44becf4-487a-4e9f-bf3a-a881c7420e01
           project: -home-magent-workspace-maybelle-config--claude-worktrees-preview-and-progress-fixes
           workspace: maybelle-config
+
+      # docs-tests-qa: re's home Mood, and the first container with two
+      # agents in it (hunter/CONTAINERS.md). magent answers here as magent;
+      # re as its own unix user, on Pi, with no GitHub account: it reads the
+      # code from its own clones, checks tests and Jenkins, and writes docs
+      # on PickiPedia as its own bot. Its own keys are re_runner_key and
+      # re_pickipedia_bot_password; the model vendors' keys are shared by all
+      # the agents (model_<vendor>_api_key). Until its runner key is there,
+      # its poller doesn't start and the container runs with magent alone.
+      - name: docs-tests-qa
+        mood: docs-tests-qa
+        people: [justin, skyler]
+        full_name: "magent-cryptograss"
+        email: "magent@cryptograss.live"
+        github_username: "magent-cryptograss"
+        ssh_port: 2231
+        port_range_start: 14050  # 14050-14059
+        code_server_password: "{{ code_server_password }}"
+        github_token: "{{ magent_github_token }}"
+        mood_poller: true
+        agents:
+          - name: re
+            # pi, or claude-code; both are set up either way. Anthropic's models run
+            # on the subscription in both (claude_code_oauth_token in the vault,
+            # from `claude setup-token`); other vendors' on their API keys below.
+            harness: pi
+            model: "{{ re_model | default('') }}"  # its default, as Pi names it (anthropic/claude-sonnet-5-5); the Mood's menu overrides
+            # Vendor: the variable Pi reads its key from. The key itself is
+            # model_<vendor>_api_key in the vault, one for every agent (or
+            # re_<vendor>_api_key, to give re its own); a vendor without one
+            # is greyed out in the Mood's model menu.
+            model_keys:
+              openrouter: OPENROUTER_API_KEY
+              anthropic: ANTHROPIC_API_KEY
+              openai: OPENAI_API_KEY
+              google: GEMINI_API_KEY
+              moonshotai: MOONSHOT_API_KEY
+              deepseek: DEEPSEEK_API_KEY
+            wiki_user: "Re@re"                                 # its PickiPedia bot password's login name
+            rules: workspace/red/RULES.md
+            letter: workspace/red/LETTER.md
+            repos: [magent-cryptograss/red, cryptograss/memory-lane, cryptograss/maybelle-config,
+                    cryptograss/pickipedia, cryptograss/arthel]

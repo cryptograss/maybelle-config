@@ -73,11 +73,34 @@ services:
       - MOOD_FULL_TOOLS_FOR={{ user.people | default([]) | join(',') }}
       - SKIP_ARTHEL=1
 {% endif %}
-{% if user.mood_poller | default(false) and memory_lane_runner_key is defined %}
+{% set magent_key = magent_runner_key | default(memory_lane_runner_key | default('')) %}
+{% if user.mood_poller | default(false) and magent_key %}
       # The poller streams the turns it wakes straight into their Moods with
       # this (memory-lane's MOOD_RUNNER_KEYS). Only the poller reads it, so it
-      # is not exported to shells.
-      - MEMORY_LANE_RUNNER_KEY={{ memory_lane_runner_key }}
+      # is not exported to shells. magent_runner_key, once named
+      # memory_lane_runner_key: either works.
+      - MEMORY_LANE_RUNNER_KEY={{ magent_key }}
+{% endif %}
+{% if user.agents is defined %}
+      # Agents besides magent who live in this Mood's container, each its own
+      # unix user (hunter/CONTAINERS.md). Their keys, from the vault, are
+      # written into their own homes at startup, readable only by them.
+      - 'AGENTS={{ user.agents | to_json }}'
+{% for agent in user.agents %}
+{% set prefix = 'AGENT_' ~ (agent.name | upper | replace('-', '_')) %}
+      - {{ prefix }}_RUNNER_KEY={{ lookup('vars', agent.name ~ '_runner_key', default='') }}
+      - {{ prefix }}_PICKIPEDIA_BOT_PASSWORD={{ lookup('vars', agent.name ~ '_pickipedia_bot_password', default='') }}
+{# A vendor's key is shared by every agent (model_<vendor>_api_key), unless one has its own (<agent>_<vendor>_api_key). #}
+{% for vendor, env_name in (agent.model_keys | default({})).items() %}
+      - {{ prefix }}_KEY_{{ env_name }}={{ lookup('vars', agent.name ~ '_' ~ vendor ~ '_api_key', default=lookup('vars', 'model_' ~ vendor ~ '_api_key', default='')) }}
+{% endfor %}
+{# The subscription: a token from `claude setup-token`, shared the same way (claude_code_oauth_token, or
+   <agent>_claude_code_oauth_token). Claude Code reads it as CLAUDE_CODE_OAUTH_TOKEN; Pi, for Anthropic's
+   models, as ANTHROPIC_OAUTH_TOKEN, ahead of any ANTHROPIC_API_KEY. #}
+{% set subscription = lookup('vars', agent.name ~ '_claude_code_oauth_token', default=lookup('vars', 'claude_code_oauth_token', default='')) %}
+      - {{ prefix }}_KEY_CLAUDE_CODE_OAUTH_TOKEN={{ subscription }}
+      - {{ prefix }}_KEY_ANTHROPIC_OAUTH_TOKEN={{ subscription }}
+{% endfor %}
 {% endif %}
     restart: unless-stopped
 
