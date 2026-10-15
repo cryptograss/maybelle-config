@@ -4,7 +4,8 @@
 
 FROM php:8.2-apache
 
-# Install PHP extensions needed by MediaWiki
+# Install PHP extensions needed by MediaWiki. ghostscript, poppler-utils and
+# librsvg2-bin draw PDF pages and SVGs (pickipedia LocalSettings: PdfHandler, rsvg).
 RUN apt-get update && apt-get install -y \
     libicu-dev \
     libzip-dev \
@@ -12,6 +13,9 @@ RUN apt-get update && apt-get install -y \
     libjpeg-dev \
     libfreetype6-dev \
     imagemagick \
+    ghostscript \
+    poppler-utils \
+    librsvg2-bin \
     ffmpeg \
     lua5.4 \
     liblua5.4-dev \
