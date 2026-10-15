@@ -54,6 +54,17 @@ one a different agent is not a different machine. It is:
   answers mentions of it in every Mood, with its own key; the container's Mood
   is its home, and it speaks up unasked only where it already has a session.
 - **its own clones** of the repositories, in its own `~/workspace`.
+- **its own home on hunter's disk,** `/opt/magenta/<container>/agents/<agent>`,
+  mounted at `/home/<agent>` under the uid the inventory gives it (from 2000,
+  so its files on hunter don't look like a host user's). Recreating the
+  container keeps its harness's sessions, its poller's state and its clones,
+  as magent's home always has been. The first deploy with an agent in the
+  inventory makes the directory, carrying out a home the agent had been
+  living in inside the container (`hunter/scripts/agent_homes.py`).
+- **its clones brought up to date as it starts:** first the repository its
+  rules and letter are in, pulled before its poller starts; the rest after,
+  in the background (`/tmp/clones-<agent>.log`), so a big clone (arthel, 13
+  minutes) never keeps anyone from talking to it.
 
 ## Working in the same code
 
