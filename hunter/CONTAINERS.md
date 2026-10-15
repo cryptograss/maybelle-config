@@ -51,7 +51,8 @@ one a different agent is not a different machine. It is:
 - **its own harness and poller.** magent runs on Claude Code. re runs on Pi
   (memory-lane `poller/pi_harness.py`), which posts memory-lane's own record
   events, so nothing about Claude Code's files is involved. Each agent's poller
-  answers mentions of it in the container's Mood, with its own key.
+  answers mentions of it in every Mood, with its own key; the container's Mood
+  is its home, and it speaks up unasked only where it already has a session.
 - **its own clones** of the repositories, in its own `~/workspace`.
 
 ## Working in the same code

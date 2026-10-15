@@ -755,7 +755,14 @@ def start_agent_poller(agent):
             or harness not in ('claude-code', 'pi') or not re.fullmatch(r'[A-Za-z0-9_./:-]*', model)):
         logger.error(f"Agent {name}: Mood, people, harness or model not plain words; not started")
         return
-    args = f"--agent {name} --harness {harness} --moods {slug} --full-tools-for {people or ','}"
+    # Every Mood, not only this container's: this is the agent's only poller,
+    # and things that bear on its work come up anywhere (Justin, 2026-10-15).
+    # A mention wakes it wherever it is, starting its first session there;
+    # it speaks up unasked only where it already has one, within its budgets.
+    # The container's Mood stays its home (its letter, its clones). With
+    # --moods, the poller had left new sessions to another, and an agent has
+    # no other: re's first mentions were dropped for it.
+    args = f"--agent {name} --harness {harness} --new-sessions yes --full-tools-for {people or ','}"
     if model:
         args += f" --model {model}"
     letter = agent.get('letter')
