@@ -847,8 +847,10 @@
           # The Mood runners (memory-lane's poller, on hunter, one per agent)
           # stream the turns they wake straight into their Moods, each proving
           # itself with its agent's key. magent's is magent_runner_key, once
-          # named memory_lane_runner_key: either works.
-          MOOD_RUNNER_KEYS=magent:{{ magent_key }}{% if re_runner_key is defined %},re:{{ re_runner_key }}{% endif %}
+          # named memory_lane_runner_key: either works. The line ends in an
+          # expression, not an if-block: Ansible trims the newline after a
+          # block tag, which once glued the next comment onto re's key.
+          MOOD_RUNNER_KEYS=magent:{{ magent_key }}{{ (',re:' ~ re_runner_key) if re_runner_key is defined else '' }}
           {% endif %}
           {% if memory_lane_deploy_key is defined %}
           # The deploy scripts here (scripts/report-deploy.sh) tell the Moods
