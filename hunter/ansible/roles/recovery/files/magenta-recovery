@@ -10,13 +10,24 @@ set -euo pipefail
 cd "$HOME"
 
 if [ "${1:-}" = "--claude" ]; then
-    # Inside tmux: the subscription token goes into this process's
-    # environment only, never onto a command line where ps would show it.
-    if [ -r "$HOME/.config/magenta/claude_token" ]; then
-        CLAUDE_CODE_OAUTH_TOKEN="$(cat "$HOME/.config/magenta/claude_token")"
-        export CLAUDE_CODE_OAUTH_TOKEN
+    # Inside tmux. Claude Code, billed through OpenRouter (Anthropic's models,
+    # OpenRouter's Anthropic-compatible API), not the subscription the agents
+    # share: recovery mustn't depend on the thing that may be what broke. The
+    # key goes into this process's environment only, never onto a command line
+    # where ps would show it. Without a key, Claude Code asks for /login.
+    unset CLAUDE_CODE_OAUTH_TOKEN
+    if [ -r "$HOME/.config/magenta/openrouter_key" ]; then
+        ANTHROPIC_AUTH_TOKEN="$(cat "$HOME/.config/magenta/openrouter_key")"
+        export ANTHROPIC_AUTH_TOKEN
+        export ANTHROPIC_BASE_URL=https://openrouter.ai/api
+        export ANTHROPIC_API_KEY=""  # empty, or Claude Code goes to Anthropic itself
+        # OpenRouter's names for them, pinned: what /model's opus, sonnet and
+        # haiku mean here.
+        export ANTHROPIC_DEFAULT_OPUS_MODEL=anthropic/claude-opus-5.5
+        export ANTHROPIC_DEFAULT_SONNET_MODEL=anthropic/claude-sonnet-5.5
+        export ANTHROPIC_DEFAULT_HAIKU_MODEL=anthropic/claude-haiku-5.5
     fi
-    exec "$HOME/.local/bin/claude" --mcp-config "$HOME/.config/magenta/mcp.json"
+    exec "$HOME/.local/bin/claude" --model opus --mcp-config "$HOME/.config/magenta/mcp.json"
 fi
 
 # What `magenta.sh recovery [--fresh]` asked for, through ssh.
