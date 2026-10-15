@@ -29,24 +29,30 @@ if [ -n "$FP" ] && [ -r "$PEOPLE" ]; then
 fi
 case "$WHO" in @*) exit 0 ;; esac   # a machine's own key (maybelle's deploys): they say themselves
 if [ -n "$WHO" ]; then KEY=''; else WHO=someone; KEY=$FP; fi
-# A deploy logs in with a person's own key and runs maybelle-config's scripts
-# (deploy-hunter.sh and the rest), and says itself as a redeploy. PAM can't
-# see a session's command, so the background job looks a moment later at
-# what this session is running -- everything under the sshd process this
-# hook was called from -- and stays quiet if it's one of those scripts.
+# Only someone at a keyboard is said. PAM can't tell: sshd opens the session
+# before it gives it a terminal (PAM_TTY is "ssh" either way, checked). So
+# the background job looks a moment later at what this session is running --
+# everything under the sshd process this hook was called from -- and says it
+# only if something there has a terminal, and isn't one of maybelle-config's
+# deploy scripts (deploy-hunter.sh and the rest, run over ssh -t), which say
+# themselves as a redeploy. A script's ssh host cmd, scp, or mosh starting
+# its server has no terminal, or is gone by then: maybelle's own deploy is
+# six of those in a minute.
 SESSION_PID=$PPID
 setsid bash -c '
   sleep 2
-  pids=" $1 "; ps -eo pid=,ppid= > /tmp/.ssh-login-ps.$$ 2>/dev/null
-  for _ in 1 2 3 4 5 6; do
+  pids=" $1 "; table=$(ps -eo pid=,ppid= 2>/dev/null)   # in memory: a root hook writes no files
+  for _ in 1 2 3 4 5 6; do   # six levels down is plenty: sshd, its child, the shell, the script
     while read -r pid ppid; do
       case "$pids" in *" $ppid "*) case "$pids" in *" $pid "*) ;; *) pids="$pids$pid " ;; esac ;; esac
-    done < /tmp/.ssh-login-ps.$$
+    done <<< "$table"
   done
-  rm -f /tmp/.ssh-login-ps.$$
+  at_keyboard=''
   for pid in $pids; do
     tr "\0" " " < /proc/$pid/cmdline 2>/dev/null | grep -q "maybelle-config/maybelle/scripts/" && exit 0
+    case "$(ps -o tty= -p "$pid" 2>/dev/null)" in *pts/*) at_keyboard=yes ;; esac
   done
+  [ -n "$at_keyboard" ] || exit 0
   shift
   exec /usr/local/bin/announce-ssh "$@"
 ' _ "$SESSION_PID" "$WHO" "" "" "$PAM_USER" "$KEY" </dev/null >/dev/null 2>&1 &
