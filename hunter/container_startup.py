@@ -755,7 +755,11 @@ def start_agent_poller(agent):
             or harness not in ('claude-code', 'pi') or not re.fullmatch(r'[A-Za-z0-9_./:-]*', model)):
         logger.error(f"Agent {name}: Mood, people, harness or model not plain words; not started")
         return
-    args = f"--agent {name} --harness {harness} --moods {slug} --full-tools-for {people or ','}"
+    # --new-sessions yes: this is the agent's only poller, so it starts the
+    # agent's first session in its Mood. (A poller given --moods otherwise
+    # leaves that to another, as magent's Mood-container pollers do: magent's
+    # main poller starts its sessions. re's first mentions were dropped for it.)
+    args = f"--agent {name} --harness {harness} --moods {slug} --new-sessions yes --full-tools-for {people or ','}"
     if model:
         args += f" --model {model}"
     letter = agent.get('letter')
