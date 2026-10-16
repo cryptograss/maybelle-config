@@ -104,25 +104,12 @@ RUN mkdir -p /home/magent/.config/gh \
     && mkdir -p /home/magent/.claude \
     && mkdir -p /home/magent/workspace
 
-# Clone arthel repository from magent's fork
-ARG ARTHEL_REPO_URL=https://github.com/magent-cryptograss/arthel.git
-RUN git clone ${ARTHEL_REPO_URL} /home/magent/workspace/arthel \
-    && cd /home/magent/workspace/arthel \
-    && git remote rename origin magent \
-    && git remote add upstream https://github.com/cryptograss/justinholmes.com.git
-
-# Install dependencies for arthel
-RUN cd /home/magent/workspace/arthel && npm install
-
-# Clone magenta repository (identity, CLAUDE.md)
-ARG MAGENTA_REPO_URL=https://github.com/cryptograss/magenta.git
-ARG MAGENTA_BRANCH=main
-RUN git clone --branch ${MAGENTA_BRANCH} ${MAGENTA_REPO_URL} /home/magent/workspace/magenta
-
-# Clone memory-lane repository (Django app, MCP server)
-ARG MEMORY_LANE_REPO_URL=https://github.com/cryptograss/memory-lane.git
-ARG MEMORY_LANE_BRANCH=main
-RUN git clone --branch ${MEMORY_LANE_BRANCH} ${MEMORY_LANE_REPO_URL} /home/magent/workspace/memory-lane
+# No repositories are cloned into the image. Every container mounts its home
+# over /home/magent, which hid anything cloned here: the clones of arthel,
+# magenta and memory-lane and arthel's npm install cost about 80 seconds a
+# build and a good part of the image's size, for nothing. Each container
+# clones what it needs into its own home at startup (container_startup.py
+# setup_workspace), once, and keeps it.
 
 # Switch to root to install uv and Python dependencies
 USER root
@@ -131,8 +118,11 @@ USER root
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 ENV PATH="/root/.local/bin:$PATH"
 
-# Install Python dependencies for memory-lane using uv
-RUN /root/.local/bin/uv pip install --python /usr/bin/python3 --break-system-packages -r /home/magent/workspace/memory-lane/requirements.txt
+# memory-lane's Python dependencies, for the Mood poller (/usr/bin/python3),
+# from its requirements file alone: rebuilt when the file changes, cached when
+# it doesn't.
+ADD https://raw.githubusercontent.com/cryptograss/memory-lane/main/requirements.txt /tmp/memory-lane-requirements.txt
+RUN /root/.local/bin/uv pip install --python /usr/bin/python3 --break-system-packages -r /tmp/memory-lane-requirements.txt
 
 # Install godogen Python dependencies into a dedicated Python 3.12 venv.
 # Ubuntu 26.04 ships Python 3.14, but the godogen ML pipeline pulls
