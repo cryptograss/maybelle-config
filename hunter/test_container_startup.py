@@ -10,7 +10,8 @@ from unittest import mock
 
 sys.path.insert(0, os.path.dirname(__file__))
 import container_startup  # noqa: E402
-from container_startup import agent_uid, clone_in_background, repos_by_when  # noqa: E402
+from container_startup import (agent_uid, clone_in_background, poller_command, repos_by_when,  # noqa: E402
+                               write_poller_env)
 
 RE = {'name': 're', 'uid': 2001, 'rules': 'workspace/red/RULES.md', 'letter': 'workspace/red/LETTER.md',
       'repos': ['magent-cryptograss/red', 'cryptograss/memory-lane', 'cryptograss/arthel']}
@@ -58,6 +59,38 @@ class AgentStartupTest(unittest.TestCase):
             with self.subTest(uid=uid):
                 with self.assertRaises(ValueError):
                     agent_uid(dict(RE, uid=uid))
+
+
+
+class PollerSignInTest(unittest.TestCase):
+    """magent's poller signs in with the setup-token, and nothing else gets it."""
+
+    def setUp(self):
+        import tempfile
+        self.path = Path(tempfile.mkdtemp()) / '.config' / 'magenta' / 'poller.env'
+        patcher = mock.patch.object(container_startup.shutil, 'chown')
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_the_token_goes_in_a_file_only_magent_reads(self):
+        with mock.patch.dict(os.environ, {'MAGENT_CLAUDE_CODE_OAUTH_TOKEN': ' sk-ant-oat01-abc_DEF-123 \n'}):
+            self.assertTrue(write_poller_env(self.path))
+        self.assertEqual(self.path.read_text(), 'CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-abc_DEF-123\n')
+        self.assertEqual(oct(self.path.stat().st_mode & 0o777), '0o600')
+
+    def test_without_a_token_the_file_goes_and_the_login_is_used(self):
+        self.path.parent.mkdir(parents=True)
+        self.path.write_text('CLAUDE_CODE_OAUTH_TOKEN=old\n')
+        with mock.patch.dict(os.environ, {'MAGENT_CLAUDE_CODE_OAUTH_TOKEN': ''}):
+            self.assertFalse(write_poller_env(self.path))
+        self.assertFalse(self.path.exists())
+
+    def test_only_the_pollers_own_shell_sources_it(self):
+        signed = poller_command('--agent magent', True)
+        self.assertTrue(signed.startswith('set -a; . ~/.config/magenta/poller.env; set +a; nohup '))
+        self.assertTrue(signed.endswith('--agent magent >> /tmp/mood-poller.log 2>&1 &'))
+        self.assertNotIn('poller.env', poller_command('--agent magent', False))
+        self.assertNotIn("'", signed)  # run_command wraps it in single quotes for su
 
 
 if __name__ == '__main__':

@@ -587,6 +587,45 @@ def write_runner_key():
     logger.info(f"✓ Mood runner key written to {path}")
 
 
+POLLER_ENV = Path('/home/magent/.config/magenta/poller.env')
+
+
+def write_poller_env(path=POLLER_ENV):
+    """What magent's poller, and the Claude Code turns it wakes, get in their
+    environment and nothing else does: the subscription's setup-token, as
+    CLAUDE_CODE_OAUTH_TOKEN (MAGENT_CLAUDE_CODE_OAUTH_TOKEN here, from the
+    vault).
+
+    A token from `claude setup-token` is meant for exactly this, a process
+    nobody logs into, and it overrides whatever /login the home holds. Without
+    it the poller leaned on that /login, made by hand in each container, which
+    expires: delivery-kid's did on 2026-10-16 ("OAuth session expired and
+    could not be refreshed"), and docs-tests-qa never had one. People's own
+    terminal sessions keep their own login; `su -` leaves this behind. A file
+    only magent can read, never a command line. True if there's a token.
+    """
+    token = os.environ.get('MAGENT_CLAUDE_CODE_OAUTH_TOKEN', '').strip()
+    if not token:
+        path.unlink(missing_ok=True)
+        return False
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, 'w') as f:
+        f.write(f'CLAUDE_CODE_OAUTH_TOKEN={shlex.quote(token)}\n')
+    os.chmod(path, 0o600)
+    for q in (path.parent.parent, path.parent, path):
+        shutil.chown(q, user='magent', group='magent')
+    logger.info(f"✓ The poller signs in with the subscription's setup-token ({path})")
+    return True
+
+
+def poller_command(args, signed_in):
+    """The shell line that starts magent's poller, as magent. (Plain words
+    only: run_command wraps it in single quotes for su.)"""
+    env = 'set -a; . ~/.config/magenta/poller.env; set +a; ' if signed_in else ''
+    return f"{env}nohup /usr/bin/python3 /opt/mood-poller/mood_poller.py {args} >> /tmp/mood-poller.log 2>&1 &"
+
+
 def start_mood_poller():
     """Start memory-lane's Mood poller, if this container opted in.
 
@@ -603,6 +642,7 @@ def start_mood_poller():
         logger.warning(f"MOOD_POLLER=1 but {script} is missing; poller not started")
         return
     write_runner_key()
+    signed_in = write_poller_env()
     try:
         # /usr/bin/python3 by path: the image's PATH puts the godogen venv
         # first; `su -` resets PATH anyway, but don't depend on that.
@@ -617,8 +657,7 @@ def start_mood_poller():
                 logger.error(f"MOOD_SLUG / MOOD_FULL_TOOLS_FOR not plain words; poller not started")
                 return
             args += f" --moods {slug} --full-tools-for {people or ','}"
-        run_command(f"nohup /usr/bin/python3 {script} {args} >> /tmp/mood-poller.log 2>&1 &",
-                    user='magent')
+        run_command(poller_command(args, signed_in), user='magent')
         logger.info("✓ Mood poller started (log: /tmp/mood-poller.log)")
     except Exception as e:
         logger.error(f"Mood poller failed to start: {e}")
