@@ -125,7 +125,12 @@ all:
             # on the subscription in both (claude_code_oauth_token in the vault,
             # from `claude setup-token`); other vendors' on their API keys below.
             harness: pi
-            model: "{{ re_model | default('') }}"  # its default, as Pi names it (anthropic/claude-sonnet-5-5); the Mood's menu overrides
+            # Its model wherever a Mood's menu doesn't choose one, as Pi names it.
+            # Not the vault's re_model (anthropic/claude-sonnet-5-5): through Pi
+            # that goes to the subscription, which answers 400 ("Third-party apps
+            # now draw from your extra usage"), so re failed in every Mood but
+            # docs-tests-qa, the one whose menu chose this.
+            model: openrouter/deepseek/deepseek-v4-pro
             # Vendor: the variable Pi reads its key from. The key itself is
             # model_<vendor>_api_key in the vault, one for every agent (or
             # re_<vendor>_api_key, to give re its own); a vendor without one
