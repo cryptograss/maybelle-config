@@ -1,0 +1,8 @@
+---
+# Node for Pi (Pi needs 22.19 or later; Ubuntu 24.04 has 18). The sha256 is
+# nodejs.org's own, from https://nodejs.org/dist/<version>/SHASUMS256.txt, for
+# node-<version>-linux-x64.tar.xz. Change both together.
+recovery_node_version: v22.23.3
+recovery_node_sha256: df450af89261115ef9f9e3830c3eeb2cc9213b63c720b1af623cb5dcbe2e02de
+# As in the hunter image.
+recovery_pi_version: 1.1.0
