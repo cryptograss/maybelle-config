@@ -20,6 +20,10 @@ all:
     # jMyles/memory-lane#15). Idempotent. Set back to false afterwards.
     watcher_replay_from_start: false
 
+    # Whose keys open recovery@hunter (magenta.sh recovery: Claude Code on
+    # hunter's host, for when nothing else reaches magent; roles/recovery).
+    recovery_people: [justin]
+
     # User instances configuration
     users:
       - name: justin

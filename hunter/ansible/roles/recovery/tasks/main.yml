@@ -1,0 +1,147 @@
+---
+# recovery@hunter: `magenta.sh recovery` (cryptograss/magenta). Claude Code --
+# magent -- on hunter's host, for when Justin and magent can't reach each other
+# at all: the containers are down, Docker is wedged, no Mood answers. Agreed in
+# the magent-self Mood, 2026-10-15.
+#
+# What it can do: read the journal (systemd-journal), use Docker (the docker
+# group: root on this host, in effect), and restart dockerd (sudo, for that one
+# command), because when dockerd is wedged the docker group can do nothing. Who
+# can open it: only the people in `recovery_people` (inventory), by their keys,
+# and only into the recovery session. Its rules: files/CLAUDE.md.
+
+- name: The recovery user
+  user:
+    name: recovery
+    shell: /bin/bash
+    groups: [docker, systemd-journal]
+    append: yes
+    create_home: yes
+    state: present
+
+- name: Its directories
+  file:
+    path: "/home/recovery/{{ item.path }}"
+    state: directory
+    owner: recovery
+    group: recovery
+    mode: "{{ item.mode }}"
+  loop:
+    - {path: .ssh, mode: '0700'}
+    - {path: .claude, mode: '0700'}
+    - {path: .config, mode: '0700'}
+    - {path: .config/magenta, mode: '0700'}
+    - {path: notes, mode: '0750'}
+
+- name: Whose keys open it, and only into the recovery session
+  template:
+    src: authorized_keys.j2
+    dest: /home/recovery/.ssh/authorized_keys
+    owner: recovery
+    group: recovery
+    mode: '0600'
+
+- name: The recovery session (the login's forced command)
+  copy:
+    src: magenta-recovery
+    dest: /usr/local/bin/magenta-recovery
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Its rules and permissions
+  copy:
+    src: "{{ item.src }}"
+    dest: "/home/recovery/.claude/{{ item.dest }}"
+    owner: recovery
+    group: recovery
+    mode: '0600'
+  loop:
+    - {src: CLAUDE.md, dest: CLAUDE.md}
+    - {src: settings.json, dest: settings.json}
+
+# Claude Code keeps its own state here; seeded once so the first start
+# doesn't walk Justin through onboarding mid-emergency.
+- name: Its Claude Code state, the first time
+  copy:
+    dest: /home/recovery/.claude.json
+    content: '{"hasCompletedOnboarding": true}'
+    owner: recovery
+    group: recovery
+    mode: '0600'
+    force: no
+
+# The record, over the private network: the same server the containers use.
+- name: Its memory (the MCP server on maybelle)
+  copy:
+    dest: /home/recovery/.config/magenta/mcp.json
+    owner: recovery
+    group: recovery
+    mode: '0600'
+    content: |
+      {
+        "mcpServers": {
+          "magenta-memory-v2": {"type": "http", "url": "http://10.0.0.2:8000"}
+        }
+      }
+
+# Two ways to the model, each its own session (files/magenta-recovery), in
+# case part of the trouble is one of them (Justin, 2026-10-16).
+#
+# OpenRouter, the default: recovery_openrouter_api_key in the vault, for a key
+# and a credit limit of its own, or else the agents' model_openrouter_api_key.
+- name: Its OpenRouter key
+  vars:
+    openrouter_key: "{{ recovery_openrouter_api_key | default(model_openrouter_api_key | default('')) }}"
+  when: openrouter_key | length > 0
+  copy:
+    dest: /home/recovery/.config/magenta/openrouter_key
+    content: "{{ openrouter_key }}"
+    owner: recovery
+    group: recovery
+    mode: '0600'
+  no_log: true
+
+# The subscription: recovery_claude_code_oauth_token, or else the agents'
+# claude_code_oauth_token (from `claude setup-token`). Without either, that
+# route's Claude Code asks Justin to /login.
+- name: Its subscription token
+  vars:
+    subscription_token: "{{ recovery_claude_code_oauth_token | default(claude_code_oauth_token | default('')) }}"
+  when: subscription_token | length > 0
+  copy:
+    dest: /home/recovery/.config/magenta/claude_token
+    content: "{{ subscription_token }}"
+    owner: recovery
+    group: recovery
+    mode: '0600'
+  no_log: true
+
+- name: Restarting dockerd, the one thing it does as root
+  copy:
+    dest: /etc/sudoers.d/magenta-recovery
+    content: |
+      # recovery@hunter (hunter/ansible/roles/recovery): when dockerd is wedged
+      recovery ALL=(root) NOPASSWD: /usr/bin/systemctl restart docker, /usr/bin/systemctl start docker
+    owner: root
+    group: root
+    mode: '0440'
+    validate: visudo -cf %s
+
+# Claude Code's own installer, as the user (it checks the binary's checksum
+# against Anthropic's manifest). It keeps itself up to date after that.
+- name: Fetch Claude Code's installer
+  get_url:
+    url: https://claude.ai/install.sh
+    dest: /home/recovery/.config/magenta/claude-install.sh
+    owner: recovery
+    group: recovery
+    mode: '0700'
+
+- name: Install Claude Code for recovery
+  become: yes
+  become_user: recovery
+  command: bash /home/recovery/.config/magenta/claude-install.sh
+  args:
+    chdir: /home/recovery
+    creates: /home/recovery/.local/bin/claude

@@ -57,6 +57,10 @@
       include_role:
         name: ssh-router
 
+    - name: The recovery login (magenta.sh recovery), for when nothing else reaches magent
+      include_role:
+        name: recovery
+
     - name: Say in magenta who comes in by SSH (the router says more of its own)
       include_role:
         name: ssh-announce
