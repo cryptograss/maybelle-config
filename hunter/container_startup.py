@@ -817,7 +817,10 @@ def start_agent_poller(agent):
     # The container's Mood stays its home (its letter, its clones). With
     # --moods, the poller had left new sessions to another, and an agent has
     # no other: re's first mentions were dropped for it.
-    args = f"--agent {name} --harness {harness} --new-sessions yes --full-tools-for {people or ','}"
+    # And it is the agent's only poller: a session of its that isn't on this
+    # disk was lost with its home, not left on another machine, so a mention
+    # starts it over from the record (memory-lane#194) instead of dropping it.
+    args = f"--agent {name} --harness {harness} --new-sessions yes --only-poller yes --full-tools-for {people or ','}"
     if model:
         args += f" --model {model}"
     letter = agent.get('letter')
