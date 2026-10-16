@@ -109,7 +109,13 @@
 
 # Cap BuildKit cache so repeated rebuilds (especially the periodic base-image
 # bumps) don't accumulate unbounded. -f only skips the prompt: this removes
-# any cache not in use right now, oldest first, until 3GB is left; cache that
-# a current image still references isn't reclaimable and stays.
-- name: Cap Docker BuildKit cache at 3GB
-  command: docker builder prune -f --keep-storage 3GB
+# any cache not in use right now, oldest first, until the cap is left.
+#
+# 20GB, not 3GB (2026-10-16): the image's own cache is about 10GB, and since
+# hunter's 2026-10-15 reboot two builds in a row reused nothing at all (0 of
+# 35 steps, then 0 of 33, the base image unchanged), each costing about six
+# minutes a deploy. A 3GB cap can't hold one build's cache, if that cache is
+# reclaimable. The weekly `builder prune -a` (housekeeping) still clears it
+# all on Sundays; the disk had 43GB free.
+- name: Cap Docker BuildKit cache at 20GB
+  command: docker builder prune -f --keep-storage 20GB
