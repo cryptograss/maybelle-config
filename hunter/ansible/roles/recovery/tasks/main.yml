@@ -32,6 +32,8 @@
     - {path: .config, mode: '0700'}
     - {path: .config/magenta, mode: '0700'}
     - {path: notes, mode: '0750'}
+    - {path: .cache, mode: '0700'}
+    - {path: .local, mode: '0755'}
 
 - name: Whose keys open it, and only into the recovery session
   template:
@@ -85,11 +87,14 @@
         }
       }
 
-# Two ways to the model, each its own session (files/magenta-recovery), in
-# case part of the trouble is one of them (Justin, 2026-10-16).
+# Two ways in, each its own session (files/magenta-recovery), that share
+# nothing but hunter and its network, in case part of the trouble is one of
+# them (Justin, 2026-10-16): Pi on OpenRouter, and Claude Code on the
+# subscription. Whichever of Claude Code, Pi, the subscription or OpenRouter
+# breaks, the other route still works.
 #
-# OpenRouter, the default: recovery_openrouter_api_key in the vault, for a key
-# and a credit limit of its own, or else the agents' model_openrouter_api_key.
+# OpenRouter, Pi's: recovery_openrouter_api_key in the vault, for a key and a
+# credit limit of its own, or else the agents' model_openrouter_api_key.
 - name: Its OpenRouter key
   vars:
     openrouter_key: "{{ recovery_openrouter_api_key | default(model_openrouter_api_key | default('')) }}"
@@ -102,9 +107,9 @@
     mode: '0600'
   no_log: true
 
-# The subscription: recovery_claude_code_oauth_token, or else the agents'
-# claude_code_oauth_token (from `claude setup-token`). Without either, that
-# route's Claude Code asks Justin to /login.
+# The subscription, Claude Code's: recovery_claude_code_oauth_token, or else
+# the agents' claude_code_oauth_token (from `claude setup-token`). Without
+# either, that route's Claude Code asks Justin to /login.
 - name: Its subscription token
   vars:
     subscription_token: "{{ recovery_claude_code_oauth_token | default(claude_code_oauth_token | default('')) }}"
@@ -145,3 +150,80 @@
   args:
     chdir: /home/recovery
     creates: /home/recovery/.local/bin/claude
+
+# Pi needs Node 22.19 or later; Ubuntu 24.04 has 18. Node's own build, for
+# recovery alone (nothing system-wide changes), checked against the sha256
+# nodejs.org publishes for it (SHASUMS256.txt), pinned here.
+- name: Fetch Node for Pi
+  get_url:
+    url: "https://nodejs.org/dist/{{ recovery_node_version }}/node-{{ recovery_node_version }}-linux-x64.tar.xz"
+    dest: "/home/recovery/.cache/node-{{ recovery_node_version }}-linux-x64.tar.xz"
+    checksum: "sha256:{{ recovery_node_sha256 }}"
+    owner: recovery
+    group: recovery
+    mode: '0644'
+
+- name: Unpack Node for Pi
+  unarchive:
+    src: "/home/recovery/.cache/node-{{ recovery_node_version }}-linux-x64.tar.xz"
+    dest: /home/recovery/.local
+    remote_src: yes
+    owner: recovery
+    group: recovery
+    creates: "/home/recovery/.local/node-{{ recovery_node_version }}-linux-x64/bin/node"
+
+- name: Its Node, by a name that outlives the version
+  file:
+    src: "/home/recovery/.local/node-{{ recovery_node_version }}-linux-x64"
+    dest: /home/recovery/.local/node
+    state: link
+    owner: recovery
+    group: recovery
+
+# Pinned, as in the hunter image (Dockerfile): the version re runs on.
+- name: Install Pi for recovery
+  become: yes
+  become_user: recovery
+  command: >-
+    /home/recovery/.local/node/bin/npm install --global --no-fund --no-audit
+    --prefix /home/recovery/.local/pi @earendil-works/pi-coding-agent@{{ recovery_pi_version }}
+  environment:
+    PATH: "/home/recovery/.local/node/bin:/usr/bin:/bin"
+  args:
+    chdir: /home/recovery
+    creates: "/home/recovery/.local/pi/lib/node_modules/@earendil-works/pi-coding-agent/package.json"
+
+- name: Pi's directories
+  file:
+    path: "/home/recovery/.pi/agent/{{ item }}"
+    state: directory
+    owner: recovery
+    group: recovery
+    mode: '0700'
+  loop: ['', extensions]
+
+# Pi asks for nothing by default; this asks Justin before anything that may
+# change something, and refuses the never-list outright (files/recovery-gate.ts).
+- name: Pi's rules, memory and gate
+  copy:
+    src: "{{ item.src }}"
+    dest: "/home/recovery/.pi/agent/{{ item.dest }}"
+    owner: recovery
+    group: recovery
+    mode: '0600'
+  loop:
+    - {src: CLAUDE.md, dest: AGENTS.md}
+    - {src: recovery-gate.ts, dest: extensions/recovery-gate.ts}
+
+- name: Pi's memory (the MCP server on maybelle)
+  copy:
+    dest: /home/recovery/.pi/agent/mcp.json
+    owner: recovery
+    group: recovery
+    mode: '0600'
+    content: |
+      {
+        "mcpServers": {
+          "magenta-memory-v2": {"url": "http://10.0.0.2:8000", "description": "The record: what was said in the Moods and sessions."}
+        }
+      }

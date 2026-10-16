@@ -1,27 +1,28 @@
 #!/bin/bash
 # magenta-recovery: the one thing recovery@hunter does (its authorized_keys
-# force it). `magenta.sh recovery` lands here: Claude Code -- magent -- on
-# hunter's host, in a tmux session that outlives the connection.
+# force it). `magenta.sh recovery` lands here: magent, on hunter's host, in a
+# tmux session that outlives the connection.
 #
 # For when Justin and magent can't reach each other at all: the containers
 # are down, Docker is wedged, the Moods are unreachable. Not for one Mood
 # being quiet. See hunter/ansible/roles/recovery.
 #
-# Two ways to reach the model, each its own tmux session, so that if part of
-# the trouble is one of them, the other is a word away (Justin, 2026-10-16):
-#   openrouter    Anthropic's models through OpenRouter's Anthropic-compatible
-#                 API, on its credits (the default, when there's a key)
-#   subscription  the Claude subscription, by the setup-token the agents share
-#                 (or /login, without one)
+# Two ways in, each its own tmux session, sharing nothing but hunter and its
+# network, so that if part of the trouble is one of them, the other is a word
+# away (Justin, 2026-10-16):
+#   openrouter    Pi, on OpenRouter's credits: Anthropic's models by default,
+#                 any vendor's by /model (the default, when there's a key)
+#   subscription  Claude Code, on the Claude subscription, by the setup-token
+#                 the agents share (or /login, without one)
 set -euo pipefail
 cd "$HOME"
 KEYS="$HOME/.config/magenta"
 
-if [ "${1:-}" = "--claude" ]; then
+if [ "${1:-}" = "--session" ]; then
     # Inside tmux. A credential goes into this process's environment only,
     # never onto a command line where ps would show it.
     route="${2:-}"
-    unset CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_AUTH_TOKEN ANTHROPIC_BASE_URL ANTHROPIC_API_KEY
+    unset CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_AUTH_TOKEN ANTHROPIC_BASE_URL ANTHROPIC_API_KEY OPENROUTER_API_KEY
     export MAGENTA_RECOVERY_ROUTE="$route"
     case "$route" in
         openrouter)
@@ -31,15 +32,11 @@ if [ "${1:-}" = "--claude" ]; then
                 sleep 30
                 exit 1
             fi
-            ANTHROPIC_AUTH_TOKEN="$(cat "$KEYS/openrouter_key")"
-            export ANTHROPIC_AUTH_TOKEN
-            export ANTHROPIC_BASE_URL=https://openrouter.ai/api
-            export ANTHROPIC_API_KEY=""  # empty, or Claude Code goes to Anthropic itself
-            # OpenRouter's names for them, pinned: what /model's opus, sonnet
-            # and haiku mean here.
-            export ANTHROPIC_DEFAULT_OPUS_MODEL=anthropic/claude-opus-5.5
-            export ANTHROPIC_DEFAULT_SONNET_MODEL=anthropic/claude-sonnet-5.5
-            export ANTHROPIC_DEFAULT_HAIKU_MODEL=anthropic/claude-haiku-5.5
+            OPENROUTER_API_KEY="$(cat "$KEYS/openrouter_key")"
+            export OPENROUTER_API_KEY
+            # Pi and its own Node; its rules, memory and gate are in ~/.pi/agent.
+            export PATH="$HOME/.local/node/bin:$HOME/.local/pi/bin:$PATH"
+            exec "$HOME/.local/pi/bin/pi" --model openrouter/anthropic/claude-opus-5.5
             ;;
         subscription)
             # Without the token, Claude Code asks for /login: still the subscription.
@@ -47,13 +44,13 @@ if [ "${1:-}" = "--claude" ]; then
                 CLAUDE_CODE_OAUTH_TOKEN="$(cat "$KEYS/claude_token")"
                 export CLAUDE_CODE_OAUTH_TOKEN
             fi
+            exec "$HOME/.local/bin/claude" --model opus --mcp-config "$KEYS/mcp.json"
             ;;
         *)
             echo "magenta-recovery: no such route: '$route'" >&2
             exit 2
             ;;
     esac
-    exec "$HOME/.local/bin/claude" --model opus --mcp-config "$KEYS/mcp.json"
 fi
 
 # What `magenta.sh recovery [--fresh] [--openrouter|--subscription]` asked
@@ -79,4 +76,4 @@ session="recovery-$route"
 if [ "$fresh" = yes ]; then
     tmux kill-session -t "$session" 2>/dev/null || true
 fi
-exec tmux new-session -A -s "$session" /usr/local/bin/magenta-recovery --claude "$route"
+exec tmux new-session -A -s "$session" /usr/local/bin/magenta-recovery --session "$route"
