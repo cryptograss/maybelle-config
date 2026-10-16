@@ -150,6 +150,19 @@
   args:
     executable: /bin/bash
 
+# Each resident agent's home lives on hunter's disk, not in the container,
+# so recreating the container keeps the agent's sessions, its poller's
+# state and its clones (hunter/scripts/agent_homes.py). Made before the
+# container is recreated: the first time, a home the agent already lived in
+# inside the container is carried out of it.
+- name: Keep resident agents' homes on hunter's disk
+  when: user.agents is defined
+  command:
+    argv: [python3, "{{ base_dir }}/maybelle-config/hunter/scripts/agent_homes.py", --base-dir, "{{ base_dir }}",
+           --container, "{{ user.name }}", --agents, "{{ user.agents | to_json }}"]
+  register: agent_homes
+  changed_when: agent_homes.rc == 0 and (agent_homes.stdout | from_json).made | length > 0
+
 - name: Create user-specific docker-compose file
   template:
     src: docker-compose.yml.j2

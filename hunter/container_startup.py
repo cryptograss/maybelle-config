@@ -656,13 +656,31 @@ def write_private(path, text, owner):
     shutil.chown(path, user=owner, group=owner)
 
 
+def agent_uid(agent):
+    """Its uid from the inventory: its home is kept on hunter's disk under
+    that number (hunter/scripts/agent_homes.py), so it can't be left to
+    useradd's choice of the next free one."""
+    uid = agent.get('uid')
+    if not isinstance(uid, int) or isinstance(uid, bool) or not 2000 <= uid < 60000:
+        raise ValueError(f"{agent['name']}: no uid from 2000 in the inventory")
+    return uid
+
+
 def setup_agent(agent):
-    """One resident agent: its user, its keys, its tools, its own clones."""
+    """One resident agent: its user, its keys, its tools, its rules."""
     import json
     name = agent['name']
     home = Path('/home') / name
+    uid = agent_uid(agent)
     if subprocess.run(['id', '-u', name], capture_output=True).returncode != 0:
-        run_command(f"useradd -m -d {home} -s /bin/bash {name}")
+        # The home is already there, mounted from hunter's disk: useradd
+        # warns and leaves it be. Give it the usual dotfiles the first time.
+        run_command(f"useradd -u {uid} -m -d {home} -s /bin/bash {name}")
+        for skel in Path('/etc/skel').iterdir():
+            if not (home / skel.name).exists() and skel.is_file():
+                shutil.copy2(skel, home / skel.name)
+                shutil.chown(home / skel.name, user=name, group=name)
+    shutil.chown(home, user=name, group=name)
     # The others can't read magent's home, where its GitHub token, wiki
     # password and runner key are; nor magent theirs.
     os.chmod('/home/magent', 0o750)
@@ -713,15 +731,17 @@ def setup_agent(agent):
     write_private(claude_json, json.dumps(state, indent=2), name)
 
     # Its own clones of the public repositories: it reads the code, runs the
-    # tests and writes docs; it pushes nothing (no GitHub account).
+    # tests and writes docs; it pushes nothing (no GitHub account). Only the
+    # one its rules and letter are in is brought up to date now, before its
+    # poller starts; the rest after (clone_in_background).
     workspace = home / 'workspace'
     workspace.mkdir(exist_ok=True)
     shutil.chown(workspace, user=name, group=name)
-    for repo in agent.get('repos', []):
-        if not re.fullmatch(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+', repo):
-            continue
-        target = workspace / repo.split('/')[1]
-        if not target.exists():
+    first, _ = repos_by_when(agent)
+    for repo, target in first:
+        if target.exists():
+            run_command(f"git -C {target} pull --ff-only --quiet", user=name, check=False)
+        else:
             run_command(f"git clone --quiet https://github.com/{repo}.git {target}", user=name, check=False)
     run_command(f"git config --global user.name {name}", user=name, check=False)
     run_command(f"git config --global user.email {name}@cryptograss.live", user=name, check=False)
@@ -737,6 +757,41 @@ def setup_agent(agent):
         if p.exists():
             shutil.chown(p, user=name, group=name)
     logger.info(f"✓ Agent {name} set up as its own user ({agent.get('harness', 'claude-code')})")
+
+
+REPO = re.compile(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+')
+
+
+def repos_by_when(agent):
+    """(before its poller starts, after): each as (owner/name, clone path).
+    Before: the repositories its rules or letter are in, which its first wake
+    reads. After: the rest -- arthel alone took 13 minutes to clone, and
+    nobody should wait for that to talk to it."""
+    home = Path('/home') / agent['name']
+    needed = [home / p for p in (agent.get('rules'), agent.get('letter')) if p]
+    first, later = [], []
+    for repo in agent.get('repos', []):
+        if not isinstance(repo, str) or not REPO.fullmatch(repo):
+            continue
+        target = home / 'workspace' / repo.split('/')[1]
+        (first if any(target in p.parents for p in needed) else later).append((repo, target))
+    return first, later
+
+
+def clone_in_background(agent):
+    """The agent's other clones, after its poller has started: a missing one
+    is cloned, one already on its disk is fetched (its branches are its own
+    business). Logged to /tmp/clones-<agent>.log."""
+    name = agent['name']
+    _, later = repos_by_when(agent)
+    steps = [f"git -C {target} fetch --quiet" if target.exists()
+             else f"git clone --quiet https://github.com/{repo}.git {target}" for repo, target in later]
+    if not steps:
+        return
+    # (Plain words only: run_command wraps this in single quotes for su.)
+    script = '; '.join(f"{step} || echo failed: {step}" for step in steps)
+    run_command(f"nohup sh -c \"{script}; echo done\" >> /tmp/clones-{name}.log 2>&1 &", user=name, check=False)
+    logger.info(f"Agent {name}: {len(steps)} clone(s) brought up to date in the background (/tmp/clones-{name}.log)")
 
 
 def start_agent_poller(agent):
@@ -794,6 +849,7 @@ def start_services():
         try:
             setup_agent(agent)
             start_agent_poller(agent)
+            clone_in_background(agent)
         except Exception as e:  # one agent's trouble doesn't stop the container
             logger.error(f"Agent {agent.get('name')} failed to start: {e}")
 

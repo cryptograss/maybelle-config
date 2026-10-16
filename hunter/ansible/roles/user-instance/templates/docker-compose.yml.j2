@@ -31,6 +31,10 @@ services:
       # Mood poller: the deployed memory-lane main (build-image role keeps it
       # current), not a workspace checkout that could be on any branch
       - {{ base_dir }}/memory-lane-source/poller:/opt/mood-poller:ro
+{% for agent in user.agents | default([]) %}
+      # {{ agent.name }}'s home, kept across recreation (hunter/scripts/agent_homes.py)
+      - {{ base_dir }}/{{ user.name }}/agents/{{ agent.name }}:/home/{{ agent.name }}
+{% endfor %}
     networks:
       - magenta-net
     environment:

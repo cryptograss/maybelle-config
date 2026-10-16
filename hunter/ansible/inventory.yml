@@ -116,6 +116,7 @@ all:
         mood_poller: true
         agents:
           - name: re
+            uid: 2001  # its unix user, in the container and on hunter's disk (its home is kept there)
             # pi, or claude-code; both are set up either way. Anthropic's models run
             # on the subscription in both (claude_code_oauth_token in the vault,
             # from `claude setup-token`); other vendors' on their API keys below.
