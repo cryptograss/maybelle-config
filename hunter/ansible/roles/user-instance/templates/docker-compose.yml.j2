@@ -77,6 +77,14 @@ services:
       - MOOD_FULL_TOOLS_FOR={{ user.people | default([]) | join(',') }}
       - SKIP_ARTHEL=1
 {% endif %}
+{% if user.mood_poller | default(false) %}
+      # magent's poller signs in with the subscription's setup-token (from
+      # `claude setup-token`; long-lived, for processes nobody logs into), not
+      # a /login made by hand in each container, which expires. The agents'
+      # claude_code_oauth_token, unless magent has its own. Only the poller
+      # and the turns it wakes get it (container_startup.py write_poller_env).
+      - MAGENT_CLAUDE_CODE_OAUTH_TOKEN={{ magent_claude_code_oauth_token | default(claude_code_oauth_token | default('')) }}
+{% endif %}
 {% set magent_key = magent_runner_key | default(memory_lane_runner_key | default('')) %}
 {% if user.mood_poller | default(false) and magent_key %}
       # The poller streams the turns it wakes straight into their Moods with
