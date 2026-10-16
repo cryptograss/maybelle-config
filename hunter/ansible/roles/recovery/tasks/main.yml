@@ -85,10 +85,11 @@
         }
       }
 
-# Billed through OpenRouter, not the subscription the agents share (Justin,
-# 2026-10-15): recovery_openrouter_api_key in the vault, to give it a key and
-# a limit of its own, or else the agents' model_openrouter_api_key. Without
-# either, Claude Code asks Justin to log in (/login).
+# Two ways to the model, each its own session (files/magenta-recovery), in
+# case part of the trouble is one of them (Justin, 2026-10-16).
+#
+# OpenRouter, the default: recovery_openrouter_api_key in the vault, for a key
+# and a credit limit of its own, or else the agents' model_openrouter_api_key.
 - name: Its OpenRouter key
   vars:
     openrouter_key: "{{ recovery_openrouter_api_key | default(model_openrouter_api_key | default('')) }}"
@@ -96,6 +97,21 @@
   copy:
     dest: /home/recovery/.config/magenta/openrouter_key
     content: "{{ openrouter_key }}"
+    owner: recovery
+    group: recovery
+    mode: '0600'
+  no_log: true
+
+# The subscription: recovery_claude_code_oauth_token, or else the agents'
+# claude_code_oauth_token (from `claude setup-token`). Without either, that
+# route's Claude Code asks Justin to /login.
+- name: Its subscription token
+  vars:
+    subscription_token: "{{ recovery_claude_code_oauth_token | default(claude_code_oauth_token | default('')) }}"
+  when: subscription_token | length > 0
+  copy:
+    dest: /home/recovery/.config/magenta/claude_token
+    content: "{{ subscription_token }}"
     owner: recovery
     group: recovery
     mode: '0600'
