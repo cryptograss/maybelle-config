@@ -72,6 +72,10 @@
       include_role:
         name: services
 
+    - name: faces, whose faces are in a picture (memory-lane faces/), for Moods and PickiPedia
+      include_role:
+        name: faces
+
     - name: Include housekeeping role (backup retention, cache prune, disk warning)
       include_role:
         name: housekeeping
