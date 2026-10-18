@@ -52,7 +52,7 @@ services:
   # Memory Lane UI
   memory-lane:
     build:
-      context: ../../memory-lane
+      context: ../../magenta/memory-lane
       dockerfile: Dockerfile.services
     container_name: memory-lane-local
     extra_hosts:

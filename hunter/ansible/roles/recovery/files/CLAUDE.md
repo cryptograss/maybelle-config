@@ -35,7 +35,7 @@ Justin can open the other with `magenta.sh recovery --subscription` or
   `get_recent_work`, `search_messages`, `read_mood`. If it doesn't answer,
   maybelle or the server is down; Memory Lane on maybelle answers apart from
   it: `curl -s 'http://10.0.0.2:3000/api/recent_messages/?limit=200'`.
-- **Your rules:** `/opt/magenta/magenta-source/CLAUDE.md` and
+- **Your rules:** `/opt/magenta/magenta-source/agents/magent.md` and
   `/opt/magenta/magenta-source/notes/REAWAKEN_MAGENT.md` (hunter's copy of the
   magenta repo; it can be days behind GitHub).
 - **Your own notes:** in your home in Justin's container, on this disk:

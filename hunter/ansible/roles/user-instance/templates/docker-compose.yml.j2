@@ -28,9 +28,9 @@ services:
 {% endif %}
       # PickiPedia backups (synced from maybelle daily)
       - /opt/magenta/pickipedia-backups:/opt/magenta/pickipedia-backups:ro
-      # Mood poller: the deployed memory-lane main (build-image role keeps it
-      # current), not a workspace checkout that could be on any branch
-      - {{ base_dir }}/memory-lane-source/poller:/opt/mood-poller:ro
+      # Mood poller: memory-lane as deployed, in hunter's clone of magenta main
+      # (build-image keeps it current), not a workspace checkout on any branch
+      - {{ memory_lane_dir }}/poller:/opt/mood-poller:ro
 {% for agent in user.agents | default([]) %}
       # {{ agent.name }}'s home, kept across recreation (hunter/scripts/agent_homes.py)
       - {{ base_dir }}/{{ user.name }}/agents/{{ agent.name }}:/home/{{ agent.name }}

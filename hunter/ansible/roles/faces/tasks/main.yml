@@ -20,14 +20,14 @@
 
 - name: The faces key, for its container only
   copy:
-    dest: "{{ base_dir }}/memory-lane-source/faces/.env"
+    dest: "{{ memory_lane_dir }}/faces/.env"
     content: |
       FACES_KEY={{ faces_api_key }}
     mode: '0600'
 
 - name: The faces compose file
   copy:
-    dest: "{{ base_dir }}/memory-lane-source/docker-compose.faces.yml"
+    dest: "{{ memory_lane_dir }}/docker-compose.faces.yml"
     content: |
       services:
         faces:
@@ -49,10 +49,12 @@
           restart: unless-stopped
     mode: '0644'
 
+# -p: the project's name from when it ran in memory-lane-source, so the faces
+# container it already has is the one recreated, not a second one beside it.
 - name: Start faces (built from memory-lane, its tests run as it's built)
-  command: docker compose -f docker-compose.faces.yml up -d --build --force-recreate
+  command: docker compose -p memory-lane-source -f docker-compose.faces.yml up -d --build --force-recreate
   args:
-    chdir: "{{ base_dir }}/memory-lane-source"
+    chdir: "{{ memory_lane_dir }}"
 
 - name: faces answers
   uri:
