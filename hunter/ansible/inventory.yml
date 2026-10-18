@@ -11,6 +11,8 @@ all:
 
     # Base directory for all instances
     base_dir: /opt/magenta
+    # memory-lane: part of magenta since 18 Oct 2026, in hunter's clone of it (build-image)
+    memory_lane_dir: /opt/magenta/magenta-source/memory-lane
 
     # Domain for subdomains
     base_domain: hunter.cryptograss.live
@@ -145,5 +147,5 @@ all:
             wiki_user: "Re@re"                                 # its PickiPedia bot password's login name
             rules: workspace/red/RULES.md
             letter: workspace/red/LETTER.md
-            repos: [magent-cryptograss/red, cryptograss/memory-lane, cryptograss/maybelle-config,
+            repos: [magent-cryptograss/red, cryptograss/magenta, cryptograss/maybelle-config,
                     cryptograss/pickipedia, cryptograss/arthel]

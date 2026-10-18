@@ -11,7 +11,7 @@ from unittest import mock
 sys.path.insert(0, os.path.dirname(__file__))
 import container_startup  # noqa: E402
 from container_startup import (agent_uid, clone_in_background, poller_command, repos_by_when,  # noqa: E402
-                               write_poller_env)
+                               retire_home_claude_md, write_poller_env)
 
 RE = {'name': 're', 'uid': 2001, 'rules': 'workspace/red/RULES.md', 'letter': 'workspace/red/LETTER.md',
       'repos': ['magent-cryptograss/red', 'cryptograss/memory-lane', 'cryptograss/arthel']}
@@ -60,6 +60,31 @@ class AgentStartupTest(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     agent_uid(dict(RE, uid=uid))
 
+
+
+class HomeClaudeMdTest(unittest.TestCase):
+    """magent's instructions moved to magenta's agents/magent.md (18 Oct 2026); ~/.claude/CLAUDE.md,
+    copied there on deploy, is the one copy, and the old ~/CLAUDE.md link into the workspace goes."""
+
+    def setUp(self):
+        import tempfile
+        self.home = Path(tempfile.mkdtemp())
+
+    def test_the_old_link_into_the_workspace_goes(self):
+        link = self.home / 'CLAUDE.md'
+        link.symlink_to('/home/magent/workspace/magenta/CLAUDE.md')
+        self.assertTrue(retire_home_claude_md(link))
+        self.assertFalse(link.is_symlink() or link.exists())
+
+    def test_a_file_or_another_link_is_left_alone(self):
+        mine = self.home / 'CLAUDE.md'
+        mine.write_text('my own notes')
+        self.assertFalse(retire_home_claude_md(mine))
+        self.assertEqual(mine.read_text(), 'my own notes')
+        other = self.home / 'OTHER.md'
+        other.symlink_to('/somewhere/else.md')
+        self.assertFalse(retire_home_claude_md(other))
+        self.assertTrue(other.is_symlink())
 
 
 class PollerSignInTest(unittest.TestCase):

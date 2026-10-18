@@ -804,10 +804,13 @@
     # is baked into the image, so new code only reaches the running services if
     # the containers are recreated. See the recreate: line on the compose task
     # below, which keys off this.
-    - name: Clone or update memory-lane repository
+    # memory-lane is part of magenta since 18 Oct 2026 (magenta/memory-lane/); its
+    # services are built from there. /mnt/persist/magenta/source, the old clone of
+    # its own repository, is no longer updated or used.
+    - name: Clone or update magenta repository (memory-lane is in it)
       git:
-        repo: https://github.com/cryptograss/memory-lane.git
-        dest: /mnt/persist/magenta/source
+        repo: https://github.com/cryptograss/magenta.git
+        dest: /mnt/persist/magenta/magenta-source
         version: main
         force: yes
         update: yes
@@ -821,7 +824,7 @@
     # the deploy rather than inventing one.
     - name: Create Memory Lane .env file
       copy:
-        dest: /mnt/persist/magenta/source/.env
+        dest: /mnt/persist/magenta/magenta-source/memory-lane/.env
         content: |
           POSTGRES_HOST=magenta-postgres
           POSTGRES_PORT=5432
@@ -986,7 +989,7 @@
 
     - name: Create Memory Lane docker-compose file
       copy:
-        dest: /mnt/persist/magenta/source/docker-compose.maybelle.yml
+        dest: /mnt/persist/magenta/magenta-source/memory-lane/docker-compose.maybelle.yml
         content: |
           services:
             memory-lane:
@@ -1065,9 +1068,13 @@
     # Those two are bind-mounted as single files, and Ansible's copy
     # replaces a file by rename, so a running container would keep reading the
     # old inode; it has to be recreated to see a changed roster.
+    # project_name: the name compose gave it when it ran from /mnt/persist/magenta/source.
+    # Kept, so the same containers are recreated (not a second set beside them) and the
+    # scrubber keeps its volume, source_scrubber-secrets.
     - name: Start Memory Lane services
       community.docker.docker_compose_v2:
-        project_src: /mnt/persist/magenta/source
+        project_src: /mnt/persist/magenta/magenta-source/memory-lane
+        project_name: source
         files:
           - docker-compose.maybelle.yml
         build: always

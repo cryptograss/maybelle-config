@@ -88,6 +88,16 @@ def setup_symlink(source, target, description):
     return True
 
 
+def retire_home_claude_md(link):
+    """Remove ~/CLAUDE.md if it's the old link into the workspace's magenta: never a file
+    someone wrote there themselves."""
+    if link.is_symlink() and str(link.readlink()).startswith('/home/magent/workspace/magenta/'):
+        link.unlink()
+        logger.info(f"✓ Removed {link}: magent's instructions are ~/.claude/CLAUDE.md alone")
+        return True
+    return False
+
+
 def setup_workspace():
     """Initialize workspace with required repositories."""
     logger.info("=== Setting up workspace ===")
@@ -118,13 +128,8 @@ def setup_workspace():
         run_install=False
     )
 
-    # Clone memory-lane (Django memory system)
-    ensure_repo_cloned(
-        "https://github.com/cryptograss/memory-lane.git",
-        workspace / "memory-lane",
-        user='magent',
-        run_install=False
-    )
+    # memory-lane is in magenta now (magenta/memory-lane/); an old clone of its own
+    # repository, where a container has one, is left as it is.
 
     # Clone maybelle-config (infrastructure and deployment configs)
     ensure_repo_cloned(
@@ -270,17 +275,16 @@ def setup_claude_config():
     claude_dir = Path("/home/magent/.claude")
     claude_dir.mkdir(parents=True, exist_ok=True)
 
-    # Symlink CLAUDE.md to home directory (where Claude Code launches)
-    setup_symlink(
-        "/home/magent/workspace/magenta/CLAUDE.md",
-        "/home/magent/CLAUDE.md",
-        "CLAUDE.md in home directory"
-    )
+    # magent's instructions reach it once, as ~/.claude/CLAUDE.md (the user-instance
+    # role copies magenta's agents/magent.md there). ~/CLAUDE.md used to link the
+    # workspace's magenta/CLAUDE.md as well, so every session read them twice; that
+    # file has moved, and the link goes.
+    retire_home_claude_md(Path("/home/magent/CLAUDE.md"))
 
     # Symlink .env for Django dev server database access
     setup_symlink(
-        "/opt/magenta/memory-lane-source/.env",
-        "/home/magent/workspace/memory-lane/.env",
+        "/opt/magenta/magenta-source/memory-lane/.env",
+        "/home/magent/workspace/magenta/memory-lane/.env",
         ".env file for memory-lane database access"
     )
 

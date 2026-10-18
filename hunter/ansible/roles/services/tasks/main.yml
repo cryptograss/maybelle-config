@@ -2,7 +2,7 @@
 # Hunter services: only watcher (postgres, MCP, Memory Lane are on maybelle)
 - name: Create .env file for watcher
   copy:
-    dest: "{{ base_dir }}/memory-lane-source/.env"
+    dest: "{{ memory_lane_dir }}/.env"
     content: |
       WATCHER_REMOTE_ENDPOINT=https://memory-lane.maybelle.cryptograss.live/api/ingest/
       INGEST_API_KEY={{ ingest_api_key }}
@@ -10,7 +10,7 @@
 
 - name: Create watcher-only docker-compose file
   copy:
-    dest: "{{ base_dir }}/memory-lane-source/docker-compose.watcher.yml"
+    dest: "{{ memory_lane_dir }}/docker-compose.watcher.yml"
     content: |
       services:
         watcher:
@@ -54,10 +54,11 @@
   command: docker rm -f watcher
   ignore_errors: yes
 
+# -p: the project's name from when it ran in memory-lane-source (as faces).
 - name: Start watcher service
-  command: docker compose -f docker-compose.watcher.yml up -d --build --force-recreate
+  command: docker compose -p memory-lane-source -f docker-compose.watcher.yml up -d --build --force-recreate
   args:
-    chdir: "{{ base_dir }}/memory-lane-source"
+    chdir: "{{ memory_lane_dir }}"
 
 - name: Verify watcher is running
   command: docker ps --filter "name=watcher" --format "{% raw %}{{.Names}}{% endraw %}"

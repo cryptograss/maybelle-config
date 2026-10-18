@@ -121,7 +121,7 @@ ENV PATH="/root/.local/bin:$PATH"
 # memory-lane's Python dependencies, for the Mood poller (/usr/bin/python3),
 # from its requirements file alone: rebuilt when the file changes, cached when
 # it doesn't.
-ADD https://raw.githubusercontent.com/cryptograss/memory-lane/main/requirements.txt /tmp/memory-lane-requirements.txt
+ADD https://raw.githubusercontent.com/cryptograss/magenta/main/memory-lane/requirements.txt /tmp/memory-lane-requirements.txt
 RUN /root/.local/bin/uv pip install --python /usr/bin/python3 --break-system-packages -r /tmp/memory-lane-requirements.txt
 
 # Install godogen Python dependencies into a dedicated Python 3.12 venv.

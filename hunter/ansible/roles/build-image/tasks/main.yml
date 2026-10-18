@@ -35,20 +35,10 @@
       args:
         chdir: "{{ base_dir }}/maybelle-config"
 
-    - name: Clone or update memory-lane repository (for watcher)
-      git:
-        repo: https://github.com/cryptograss/memory-lane.git
-        dest: "{{ base_dir }}/memory-lane-source"
-        version: main
-        force: yes
-        update: yes
-
-    - name: Force fetch latest memory-lane changes from main branch
-      shell: git fetch origin main && git reset --hard origin/main
-      args:
-        chdir: "{{ base_dir }}/memory-lane-source"
-
-    - name: Clone or update magenta repository (for shared CLAUDE.md)
+    # magenta: agents' instructions (agents/), and memory-lane (memory-lane/: the
+    # watcher, faces, the Mood poller), which was a repository of its own until
+    # 18 Oct 2026. {{ base_dir }}/memory-lane-source, its old clone, is no longer updated.
+    - name: Clone or update magenta repository (agents' instructions; memory-lane)
       git:
         repo: https://github.com/cryptograss/magenta.git
         dest: "{{ base_dir }}/magenta-source"
