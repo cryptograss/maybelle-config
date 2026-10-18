@@ -199,6 +199,66 @@ pipelineJob('cron-health') {
                             }
                         }
 
+                        // The day's copy (the 03:00 dump, kept 7 days) and its offsite mirror.
+                        // Unwatched after backup-memory-lane was folded in here, daily/ sat empty
+                        // from December 2025 and the offsite copy with it (found 18 Oct 2026).
+                        stage('memory-lane daily backup') {
+                            steps {
+                                catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
+                                    sh """
+                                        DAILY_DIR="/mnt/persist/magenta/backups/daily"
+                                        STALE_HOURS=26
+
+                                        echo "=== memory-lane daily backup ==="
+                                        LATEST=\\$(ls -t "\\$DAILY_DIR"/*.dump 2>/dev/null | head -1)
+                                        if [ -z "\\$LATEST" ]; then
+                                            echo "FAIL: no daily backup in \\$DAILY_DIR (the 03:00 dump is kept there)"
+                                            exit 1
+                                        fi
+                                        AGE=\\$(( (\\$(date +%s) - \\$(stat -c%Y "\\$LATEST")) / 3600 ))
+                                        COUNT=\\$(ls "\\$DAILY_DIR"/*.dump | wc -l)
+                                        echo "Newest daily: \\$(basename \\$LATEST), \\$AGE hours old, \\$COUNT kept"
+                                        if [ "\\$AGE" -gt "\\$STALE_HOURS" ]; then
+                                            echo "FAIL: stale (>\\$STALE_HOURS hours)"
+                                            exit 1
+                                        fi
+                                        echo "OK"
+                                    """
+                                }
+                            }
+                        }
+
+                        stage('memory-lane offsite backup') {
+                            steps {
+                                catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
+                                    sh """
+                                        LOG="/var/log/nfs-backup.log"
+                                        STALE_HOURS=26
+
+                                        echo "=== memory-lane offsite backup ==="
+                                        LAST=\\$(grep "Offsite backup sync successful" "\\$LOG" 2>/dev/null | tail -1)
+                                        if [ -z "\\$LAST" ]; then
+                                            echo "FAIL: no successful offsite sync in \\$LOG"
+                                            exit 1
+                                        fi
+                                        WHEN=\\$(echo "\\$LAST" | sed 's/: Offsite backup sync successful//')
+                                        AGE=\\$(( (\\$(date +%s) - \\$(date -d "\\$WHEN" +%s 2>/dev/null || echo 0)) / 3600 ))
+                                        SIZE=\\$(grep "total size is" "\\$LOG" | tail -1 | awk '{print \\$4}' | tr -d ',')
+                                        echo "Last offsite sync: \\$WHEN (\\$AGE hours ago), \\$SIZE bytes"
+                                        if [ "\\$AGE" -gt "\\$STALE_HOURS" ]; then
+                                            echo "FAIL: stale (>\\$STALE_HOURS hours)"
+                                            exit 1
+                                        fi
+                                        if [ -z "\\$SIZE" ] || [ "\\$SIZE" = "0" ]; then
+                                            echo "FAIL: the offsite copy is empty: daily/ had nothing to send"
+                                            exit 1
+                                        fi
+                                        echo "OK"
+                                    """
+                                }
+                            }
+                        }
+
                         stage('delivery-kid audit') {
                             steps {
                                 catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
