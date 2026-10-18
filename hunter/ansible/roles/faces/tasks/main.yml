@@ -1,0 +1,63 @@
+---
+# faces: whose faces are in a picture, from reference photos on PickiPedia
+# (memory-lane faces/). One container, for any Mood (magenta, on maybelle) and for
+# PickiPedia, at https://faces.hunter.cryptograss.live; everything but /health
+# needs faces_api_key. Its fingerprints live in {{ base_dir }}/faces-data, and can
+# always be made again from the photos on the wiki.
+
+- name: The faces key is in the vault (never made up here)
+  assert:
+    that:
+      - faces_api_key is defined
+      - faces_api_key | length >= 16
+    fail_msg: "faces_api_key is missing from the vault: `openssl rand -hex 32`, vaulted as faces_api_key"
+
+- name: Where faces keeps its fingerprints
+  file:
+    path: "{{ base_dir }}/faces-data"
+    state: directory
+    mode: '0700'
+
+- name: The faces key, for its container only
+  copy:
+    dest: "{{ base_dir }}/memory-lane-source/faces/.env"
+    content: |
+      FACES_KEY={{ faces_api_key }}
+    mode: '0600'
+
+- name: The faces compose file
+  copy:
+    dest: "{{ base_dir }}/memory-lane-source/docker-compose.faces.yml"
+    content: |
+      services:
+        faces:
+          build:
+            context: .
+            dockerfile: faces/Dockerfile
+          container_name: faces
+          env_file: faces/.env
+          environment:
+            - FACES_DB=/data/faces.sqlite3
+          volumes:
+            - {{ base_dir }}/faces-data:/data
+          # Only Caddy reaches it from outside, over HTTPS.
+          ports:
+            - "127.0.0.1:8090:8090"
+          # A picture's faces take a second or so of one CPU: never more than two of hunter's four.
+          cpus: 2
+          mem_limit: 1g
+          restart: unless-stopped
+    mode: '0644'
+
+- name: Start faces (built from memory-lane, its tests run as it's built)
+  command: docker compose -f docker-compose.faces.yml up -d --build --force-recreate
+  args:
+    chdir: "{{ base_dir }}/memory-lane-source"
+
+- name: faces answers
+  uri:
+    url: http://127.0.0.1:8090/health
+  register: faces_health
+  retries: 10
+  delay: 3
+  until: faces_health.status == 200

@@ -24,3 +24,8 @@ arthel.{{ user.name }}.{{ base_domain }} {
 }
 
 {% endfor %}
+
+# faces: whose faces are in a picture (memory-lane faces/), for Moods and PickiPedia
+faces.{{ base_domain }} {
+    reverse_proxy localhost:8090
+}
