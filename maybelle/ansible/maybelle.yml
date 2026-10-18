@@ -1314,10 +1314,12 @@
           find "$BACKUP_DIR" -maxdepth 1 -name "magenta_memory_*.dump" -mtime +0 -delete
           find "$BACKUP_DIR" -maxdepth 1 -name "magenta_memory_*.sql.gz" -mtime +0 -delete
 
+    # Odd hours: the script keeps the 03:00 dump as the day's, and */2 (0, 2, 4...)
+    # never ran at 03, so daily/ -- and the 04:00 offsite copy of it -- had nothing.
     - name: Schedule bi-hourly postgres backup
       ansible.builtin.cron:
         name: "postgres bi-hourly backup"
-        hour: "*/2"
+        hour: "1-23/2"
         minute: "0"
         job: "/mnt/persist/magenta/backup-postgres.sh"
 
