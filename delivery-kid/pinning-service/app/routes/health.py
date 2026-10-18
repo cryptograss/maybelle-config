@@ -24,10 +24,18 @@ async def health_check():
     except Exception:
         ipfs_ok = False
 
+    uptime = None
+    try:
+        with open("/proc/uptime") as f:
+            uptime = round(float(f.read().split()[0]))
+    except (OSError, ValueError, IndexError):
+        pass
+
     return {
         "status": "ok" if ipfs_ok else "degraded",
         "node": settings.node_name,
-        "ipfs": "connected" if ipfs_ok else "disconnected"
+        "ipfs": "connected" if ipfs_ok else "disconnected",
+        "uptime_seconds": uptime,
     }
 
 
