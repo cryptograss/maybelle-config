@@ -62,7 +62,7 @@ Copies vault password to persistent volume, connects via mosh/tmux, creates syml
 ## Database Backup & Restore
 
 ### Automatic Backups
-Daily cron at 3am creates `/mnt/persist/magenta/backups/magenta_memory_YYYYMMDD_HHMMSS.sql.gz`. 7-day retention.
+Every two hours, at odd hours, `backup-postgres.sh` writes `/mnt/persist/magenta/backups/magenta_memory_<block height>.dump` (`pg_dump -Fc`), kept 24 hours. The 03:00 dump is copied to `backups/daily/`, kept 7 days, and at 04:00 `backup-to-nfs.sh` mirrors `daily/` to NearlyFreeSpeech (`rsync --delete`, so the offsite copy is those 7 days too).
 
 ### Restore on Fresh Deploy
 Chapter 1 automatically restores from the latest backup in `/mnt/persist/magenta/backups/` if the database is empty.

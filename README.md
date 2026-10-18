@@ -88,28 +88,27 @@ This separation means a compromised Jenkins cannot directly push to production -
 Memory Lane database backups run automatically:
 
 ### Local Backups
-- **Bi-hourly**: Every 2 hours at :00, named by Ethereum block height
+- **Every two hours**, at odd hours (01:00, 03:00 … 23:00), named by Ethereum block height: `magenta_memory_<height>.dump` (`pg_dump -Fc`)
 - **Location**: `/mnt/persist/magenta/backups/`
-- **Retention**: 2 days
+- **Retention**: 24 hours
 - **Script**: `/mnt/persist/magenta/backup-postgres.sh`
 
 ### Daily Backups
-- **Schedule**: 3am daily (copied from bi-hourly)
+- **Schedule**: the 03:00 dump is copied
 - **Location**: `/mnt/persist/magenta/backups/daily/`
-- **Retention**: 30 days
+- **Retention**: 7 days
 
 ### Offsite Backups
-- **Schedule**: 4am daily (after daily backup created)
+- **Schedule**: 04:00 daily
 - **Destination**: NearlyFreeSpeech `/home/private/backups/`
-- **Retention**: Mirrors daily folder (~30 days)
+- **Retention**: a mirror of `daily/` (`rsync --delete`), so the same 7 days
 - **Script**: `/usr/local/bin/backup-to-nfs.sh`
 - **Log**: `/var/log/nfs-backup.log`
 
+The live database and every local copy are on the same volume (`/mnt/persist`), so the offsite copy is the only one that survives losing it.
+
 ### Monitoring
-The `backup-memory-lane` Jenkins job runs every 2 hours at :30 and checks:
-- Latest backup exists and is <3 hours old
-- Daily backup count and age
-- Offsite sync log for recent successful syncs
+The `cron-health` Jenkins job (every 5 minutes) checks that the newest dump is under 3 hours old, the newest daily copy under 26 hours, and that the last offsite sync is under 26 hours old and sent something (an empty `daily/` mirrors as "total size is 0").
 
 ### Manual Backup
 ```bash
