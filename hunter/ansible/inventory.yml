@@ -124,9 +124,15 @@ all:
           - name: re
             uid: 2001  # its unix user, in the container and on hunter's disk (its home is kept there)
             # pi, or claude-code; both are set up either way. Anthropic's models run
-            # on the subscription in both (claude_code_oauth_token in the vault,
-            # from `claude setup-token`); other vendors' on their API keys below.
+            # on the subscription (claude_code_oauth_token in the vault, from
+            # `claude setup-token`), which Anthropic accepts only from Claude Code:
+            # through Pi it answers 400 ("Third-party apps now draw from your extra
+            # usage"). Other vendors' run on their API keys below.
             harness: pi
+            # A second harness, chosen per Mood by its model (magenta#71): an
+            # Anthropic model runs on Claude Code, another vendor's on Pi, so the
+            # Mood's model menu moves re between them, and back.
+            also_harness: claude-code
             # Its model wherever a Mood's menu doesn't choose one, as Pi names it.
             # Not the vault's re_model (anthropic/claude-sonnet-5-5): through Pi
             # that goes to the subscription, which answers 400 ("Third-party apps

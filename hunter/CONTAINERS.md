@@ -50,7 +50,11 @@ one a different agent is not a different machine. It is:
   record, turn by turn, so separate keys aren't needed to tell them apart.
 - **its own harness and poller.** magent runs on Claude Code. re runs on Pi
   (memory-lane `poller/pi_harness.py`), which posts memory-lane's own record
-  events, so nothing about Claude Code's files is involved. Each agent's poller
+  events, so nothing about Claude Code's files is involved. With an
+  `also_harness`, a Mood's model chooses between the two (magenta#71):
+  Anthropic's models run on Claude Code, on the subscription, which Anthropic
+  refuses to Pi; other vendors' on Pi. re has `also_harness: claude-code`, so
+  its Claude Code turns are filed as re's, by its key. Each agent's poller
   answers mentions of it in every Mood, with its own key; the container's Mood
   is its home, and it speaks up unasked only where it already has a session.
 - **its own clones** of the repositories, in its own `~/workspace`.
