@@ -68,9 +68,19 @@ pipelineJob('cron-health') {
 
                                         echo "=== pickipedia rsync (VPS deploy) ==="
 
+                                        # A pause is healthy for a while, not for ever: one left from the
+                                        # database-password change (Oct 2026) kept the wiki at 25bce4d for a
+                                        # week while every build staged and none shipped.
+                                        PAUSE_HOURS=6
                                         if [ -f "\\$PAUSE_FILE" ]; then
-                                            echo "PAUSED: \\$(cat \\$PAUSE_FILE)"
-                                            echo "(treating as healthy — deploys are intentionally stopped)"
+                                            PAUSED_H=\\$(( (\\$(date +%s) - \\$(stat -c %Y "\\$PAUSE_FILE")) / 3600 ))
+                                            echo "PAUSED \\$PAUSED_H h ago: \\$(cat \\$PAUSE_FILE)"
+                                            if [ "\\$PAUSED_H" -ge "\\$PAUSE_HOURS" ]; then
+                                                echo "FAIL: paused for \\$PAUSE_HOURS hours or more. Nothing staged reaches the wiki until"
+                                                echo "      /var/jenkins_home/.pickipedia-deploy-paused is removed (or touched, to keep holding)"
+                                                exit 1
+                                            fi
+                                            echo "(healthy for now — deploys are intentionally stopped)"
                                             exit 0
                                         fi
 
