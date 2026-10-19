@@ -837,6 +837,8 @@
           SCRUBBER_URL=http://scrubber:8001
           DJANGO_SECRET_KEY={{ memory_lane_django_secret_key }}
           MOOD_ALLOWED_SIGNERS=/etc/magenta/allowed_signers
+          MAGENTA_COMMIT={{ (memory_lane_source.after | default(''))[:12] }}
+          MAGENTA_BACKUP_DIR=/mnt/persist/magenta/backups
           # Each person's PickiPedia name, shown in magenta (memory-lane wiki_auth.py).
           MOOD_WIKI_NAMES=/etc/magenta/wiki_names
           # Who may kick, ban, scram (magenta.sh AZ5) and lift, with their SSH
@@ -1006,6 +1008,7 @@
               volumes:
                 - /mnt/persist/magenta/allowed_signers:/etc/magenta/allowed_signers:ro
                 - /mnt/persist/magenta/wiki_names:/etc/magenta/wiki_names:ro
+                - /mnt/persist/magenta/backups:/mnt/persist/magenta/backups:ro
               networks:
                 - memory-lane-net
               restart: unless-stopped
