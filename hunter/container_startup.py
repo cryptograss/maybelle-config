@@ -845,12 +845,14 @@ def start_agent_poller(agent):
     slug = os.environ.get('MOOD_SLUG', '').strip()
     people = os.environ.get('MOOD_FULL_TOOLS_FOR', '').strip()
     harness = agent.get('harness', 'claude-code')
+    also = agent.get('also_harness', '')  # chosen per Mood by its model (magenta#71)
     model = agent.get('model', '')
     if not script.exists() or not (home / '.config' / 'magenta' / 'runner_key').exists():
         logger.warning(f"Agent {name}: no poller script or no runner key; not started")
         return
     if (not re.fullmatch(r'[a-z0-9-]+', slug) or not re.fullmatch(r'[a-z0-9_,-]*', people)
-            or harness not in ('claude-code', 'pi') or not re.fullmatch(r'[A-Za-z0-9_./:-]*', model)):
+            or harness not in ('claude-code', 'pi') or also not in ('', 'claude-code', 'pi')
+            or not re.fullmatch(r'[A-Za-z0-9_./:-]*', model)):
         logger.error(f"Agent {name}: Mood, people, harness or model not plain words; not started")
         return
     # Every Mood, not only this container's: this is the agent's only poller,
@@ -866,6 +868,8 @@ def start_agent_poller(agent):
     args = f"--agent {name} --harness {harness} --new-sessions yes --only-poller yes --full-tools-for {people or ','}"
     if model:
         args += f" --model {model}"
+    if also and also != harness:
+        args += f" --also-harness {also}"
     letter = agent.get('letter')
     if letter and re.fullmatch(r'[A-Za-z0-9_./-]+', letter):
         args += f" --letter {home / letter}"
