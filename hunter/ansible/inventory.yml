@@ -155,3 +155,27 @@ all:
             letter: workspace/red/LETTER.md
             repos: [magent-cryptograss/red, cryptograss/magenta, cryptograss/maybelle-config,
                     cryptograss/pickipedia, cryptograss/arthel]
+          - name: blu
+            uid: 2002  # never reused: its home is kept on hunter's disk under this number
+            # The blue agent, for the connectome (Justin, magent-self, 2026-10-19).
+            # Set up like re: Pi for other vendors' models, Claude Code for
+            # Anthropic's (magenta#71).
+            harness: pi
+            also_harness: claude-code
+            model: openrouter/deepseek/deepseek-v4-pro
+            model_keys:
+              openrouter: OPENROUTER_API_KEY
+              anthropic: ANTHROPIC_API_KEY
+              openai: OPENAI_API_KEY
+              google: GEMINI_API_KEY
+              moonshotai: MOONSHOT_API_KEY
+              deepseek: DEEPSEEK_API_KEY
+            wiki_user: "Blu@blu"                               # its PickiPedia bot password's login name
+            # No rules: or letter: file. blu's rules live only on PickiPedia
+            # (Cryptograss:Agents/GeneralOrders and Cryptograss:Agents/Blu/Rules)
+            # and reach it through the poller's rules bundle (magenta
+            # memory-lane/poller/rules_bundle.py). Its poller starts only once
+            # blu_runner_key is in the vault (start_agent_poller), so put the key
+            # there only after the poller passes that bundle as system prompt:
+            # before then, blu would wake with no rules at all.
+            repos: [cryptograss/pickipedia, cryptograss/rabbithole, cryptograss/magenta]
