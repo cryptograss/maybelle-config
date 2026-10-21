@@ -877,6 +877,14 @@ def start_agent_poller(agent):
     # --rules-bundle): for an agent whose rules live only there, as blu's do.
     if agent.get('rules_bundle') is True:
         args += " --rules-bundle"
+    # And its rules must be able to reach it at all: a rules file in its home, or the bundle.
+    # Without either it wakes with none. blu did, at 06:56Z on 21 Oct, woken by an "@blu"
+    # quoted in passing, while the runner key was the only gate (magent-self).
+    rules = agent.get('rules')
+    if agent.get('rules_bundle') is not True and not (rules and (home / rules).is_file()):
+        logger.error(f"Agent {name}: no rules can reach it (no rules: file in its home, no rules_bundle); "
+                     f"poller not started")
+        return
     # (Plain words only: run_command wraps this in single quotes for su.)
     run_command(f"set -a; . ~/.config/magenta/agent.env; set +a; "
                 f"nohup /usr/bin/python3 {script} {args} >> /tmp/mood-poller-{name}.log 2>&1 &", user=name)
