@@ -636,10 +636,15 @@ def magent_also_harness():
 def setup_magent_pi(home=Path('/home/magent')):
     """What Pi needs to be magent: the same rules and the same MCP servers as its Claude Code.
 
+    TEMPORARY, for the Pi trial (magent-self, 2026-10-21): once magent lives in agency, setup_agent
+    does all of this, and this function, magent_also_harness and the inventory's
+    magent_also_harness go (Cryptograss:Moods/magent-self/todo).
+
     Its rules: ~/.pi/agent/AGENTS.md, linked to ~/.claude/CLAUDE.md (agents/magent.md, which the
     user-instance role copies there), so both harnesses read one file. Its MCP servers: the memory
-    record and PickiPedia as Magent, as configure_mcp_server gives Claude Code. Playwright stays
-    Claude Code's: it runs through docker, and Pi's MCP adapter is for the others."""
+    record, and PickiPedia as Magent exactly as Claude Code runs it (~/.claude.json, written by
+    configure_mcp_server before the poller starts), so Pi gets whichever server that is.
+    Playwright stays Claude Code's: it runs through docker."""
     import json
     pi_dir = home / '.pi' / 'agent'
     pi_dir.mkdir(parents=True, exist_ok=True)
@@ -648,10 +653,13 @@ def setup_magent_pi(home=Path('/home/magent')):
     rules.symlink_to(home / '.claude' / 'CLAUDE.md')
     servers = {'magenta-memory-v2': {'url': os.environ.get('MCP_MEMORY_URL', 'https://mcp.maybelle.cryptograss.live'),
                                      'description': 'The record: what was said in the Moods and sessions.'}}
-    wiki = home / '.config' / 'mediawiki-mcp' / 'config.json'
-    if wiki.exists():
-        servers['pickipedia'] = {'command': 'npx', 'args': ['-y', '@professional-wiki/mediawiki-mcp-server@latest'],
-                                 'env': {'CONFIG': str(wiki)}, 'description': 'PickiPedia, as Magent.'}
+    try:
+        wiki = json.loads((home / '.claude.json').read_text()).get('mcpServers', {}).get('pickipedia') or {}
+    except (OSError, ValueError):
+        wiki = {}
+    if wiki.get('command'):
+        servers['pickipedia'] = {'command': wiki['command'], 'args': wiki.get('args', []), 'env': wiki.get('env', {}),
+                                 'description': 'PickiPedia, as Magent.'}
     mcp = pi_dir / 'mcp.json'
     mcp.write_text(json.dumps({'mcpServers': servers}, indent=2))
     os.chmod(mcp, 0o600)
