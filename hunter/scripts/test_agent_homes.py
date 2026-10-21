@@ -58,7 +58,7 @@ class AgentHomesTest(unittest.TestCase):
         docker = FakeDocker({'docs-tests-qa-arthel': {'/home/re': {
             '.local/state/magenta/pi-sessions/s1.jsonl': '{}', 'workspace/red/LETTER.md': 'Dear re'}}})
         got = keep(self.base, 'docs-tests-qa', [{'name': 're', 'uid': 2001}], run=docker)
-        self.assertEqual(got, {'made': ['re'], 'carried': ['re']})
+        self.assertEqual(got, {'made': ['re'], 'carried': ['re'], 'moved': []})
         self.assertEqual((self.home() / 'workspace/red/LETTER.md').read_text(), 'Dear re')
         self.assertTrue((self.home() / '.local/state/magenta/pi-sessions/s1.jsonl').exists())
         self.assertEqual(oct(self.home().stat().st_mode & 0o777), '0o750')
@@ -73,7 +73,7 @@ class AgentHomesTest(unittest.TestCase):
         docker.homes['docs-tests-qa-arthel']['/home/re'] = {'a': 'the container is now mounting it'}
         with mock.patch.object(Path, 'stat', return_value=os.stat_result((0o40750, 0, 0, 0, 2001, 2001, 0, 0, 0, 0))):
             got = keep(self.base, 'docs-tests-qa', [{'name': 're', 'uid': 2001}], run=docker)
-        self.assertEqual(got, {'made': [], 'carried': []})
+        self.assertEqual(got, {'made': [], 'carried': [], 'moved': []})
         self.assertEqual(len(docker.calls), 1)
         self.assertEqual((self.home() / 'a').read_text(), '1')
 
@@ -83,7 +83,7 @@ class AgentHomesTest(unittest.TestCase):
                 if self.home().exists():
                     self.home().rmdir()
                 got = keep(self.base, 'docs-tests-qa', [{'name': 're', 'uid': 2001}], run=FakeDocker(homes))
-                self.assertEqual(got, {'made': ['re'], 'carried': []})
+                self.assertEqual(got, {'made': ['re'], 'carried': [], 'moved': []})
                 self.assertEqual(list(self.home().iterdir()), [])
                 self.assertEqual(self.owners[str(self.home())], 2001)
 
@@ -101,7 +101,45 @@ class AgentHomesTest(unittest.TestCase):
             with self.subTest(agents=agents):
                 with self.assertRaises(Invalid):
                     checked(agents)
-        self.assertEqual(checked([{'name': 're', 'uid': 2001, 'harness': 'pi'}]), [{'name': 're', 'uid': 2001}])
+        self.assertEqual(checked([{'name': 're', 'uid': 2001, 'harness': 'pi'}]),
+                         [{'name': 're', 'uid': 2001, 'home_from': None}])
+        with self.assertRaises(Invalid):
+            checked([{'name': 're', 'uid': 2001, 'home_from': '../etc'}])
+
+    # --- moving to another container (re: docs-tests-qa -> agency) -------------
+
+    def old_home(self, mounted):
+        old = self.home()  # docs-tests-qa/agents/re
+        (old / '.local/state/magenta/pi-sessions').mkdir(parents=True)
+        (old / '.local/state/magenta/pi-sessions/s1.jsonl').write_text('{"cwd": "/home/re/workspace"}')
+        compose = self.base / 'docs-tests-qa' / 'docker-compose.yml'
+        compose.write_text(f'      - {old}:/home/re\n' if mounted else '      - /opt/magenta/docs-tests-qa/home:/home/magent\n')
+        return old
+
+    def test_a_home_moves_whole_once_its_old_container_has_let_it_go(self):
+        old = self.old_home(mounted=False)
+        re = [{'name': 're', 'uid': 2001, 'home_from': 'docs-tests-qa'}]
+        got = keep(self.base, 'agency', re, run=FakeDocker())
+        self.assertEqual(got, {'made': ['re'], 'carried': [], 'moved': ['re']})
+        new = self.base / 'agency' / 'agents' / 're'
+        self.assertEqual((new / '.local/state/magenta/pi-sessions/s1.jsonl').read_text(), '{"cwd": "/home/re/workspace"}')
+        self.assertFalse(old.exists())
+        # The next deploy finds it in place and moves nothing.
+        self.assertEqual(keep(self.base, 'agency', re, run=FakeDocker()), {'made': [], 'carried': [], 'moved': []})
+
+    def test_a_home_still_mounted_by_its_old_container_is_not_moved(self):
+        old = self.old_home(mounted=True)
+        with self.assertRaises(agent_homes.StillMounted):
+            keep(self.base, 'agency', [{'name': 're', 'uid': 2001, 'home_from': 'docs-tests-qa'}], run=FakeDocker())
+        self.assertTrue((old / '.local/state/magenta/pi-sessions/s1.jsonl').exists())
+        self.assertFalse((self.base / 'agency' / 'agents' / 're').exists())
+        self.assertEqual(agent_homes.main(['--base-dir', str(self.base), '--container', 'agency', '--agents',
+                                           '[{"name": "re", "uid": 2001, "home_from": "docs-tests-qa"}]']), 2)
+
+    def test_with_nothing_to_move_a_new_agent_gets_an_empty_home(self):
+        got = keep(self.base, 'agency', [{'name': 'blu', 'uid': 2002, 'home_from': 'docs-tests-qa'}], run=FakeDocker())
+        self.assertEqual(got, {'made': ['blu'], 'carried': [], 'moved': []})
+        self.assertTrue((self.base / 'agency' / 'agents' / 'blu').is_dir())
 
     def test_main_refuses_a_strange_container_name(self):
         with self.assertRaises(SystemExit):

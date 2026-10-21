@@ -13,7 +13,16 @@ has a home for the agent (it lived inside the container until now), that
 home is copied out first, so the agent keeps its sessions through the
 change.
 
-Prints one JSON line: {"made": [...], "carried": [...]} (empty lists: no change).
+An agent moving to another container (re, from docs-tests-qa to agency) names
+the one it leaves as `home_from`. Its home there is moved over whole, the
+first time, so it keeps its sessions, its poller's state and its clones; the
+paths inside are /home/<agent> in either container, so nothing in it needs
+changing. Only once the old container no longer mounts it: that container is
+recreated without the agent first (it comes earlier in the inventory), and
+until it is, the move is refused rather than made under a running poller.
+
+Prints one JSON line: {"made": [...], "carried": [...], "moved": [...]}
+(empty lists: no change).
 
     agent_homes.py --base-dir /opt/magenta --container docs-tests-qa \
         --agents '[{"name": "re", "uid": 2001}]'
@@ -48,7 +57,10 @@ def checked(agents):
             raise Invalid(f'not an agent name: {name!r}')
         if not isinstance(uid, int) or isinstance(uid, bool) or not MIN_UID <= uid < 60000:
             raise Invalid(f'{name}: uid must be a number from {MIN_UID} (got {uid!r})')
-        out.append({'name': name, 'uid': uid})
+        source = agent.get('home_from')
+        if source is not None and not (isinstance(source, str) and CONTAINER.fullmatch(source)):
+            raise Invalid(f'{name}: home_from must be a container name (got {source!r})')
+        out.append({'name': name, 'uid': uid, 'home_from': source})
     uids = [a['uid'] for a in out]
     if len(set(uids)) != len(uids):
         raise Invalid('two agents with one uid')
@@ -89,13 +101,32 @@ def chown_tree(path, uid):
     os.lchown(path, uid, uid)
 
 
+class StillMounted(RuntimeError):
+    pass
+
+
+def move_from(base_dir, source, name, home):
+    """Move `name`'s home from container `source` to `home`: True if moved, False if there's none
+    there. Refused while `source`'s compose file still mounts it: its poller may be writing to it."""
+    old = Path(base_dir) / source / 'agents' / name
+    if not old.is_dir():
+        return False
+    compose = Path(base_dir) / source / 'docker-compose.yml'
+    if compose.exists() and f'{old}:' in compose.read_text():  # the mount, as the compose template writes it
+        raise StillMounted(f'{name}: {source} still mounts {old}; recreate {source} without {name} first')
+    os.rename(old, home)  # one filesystem: the home arrives whole or not at all
+    return True
+
+
 def keep(base_dir, container, agents, run=docker):
-    made, carried = [], []
+    made, carried, moved = [], [], []
     for agent in checked(agents):
         home = Path(base_dir) / container / 'agents' / agent['name']
         if not home.exists():
             home.parent.mkdir(parents=True, exist_ok=True)
-            if carry_out(f'{container}-arthel', f'/home/{agent["name"]}', home, run):
+            if agent['home_from'] and move_from(base_dir, agent['home_from'], agent['name'], home):
+                moved.append(agent['name'])
+            elif carry_out(f'{container}-arthel', f'/home/{agent["name"]}', home, run):
                 carried.append(agent['name'])
             else:
                 home.mkdir(mode=0o750)
@@ -105,7 +136,7 @@ def keep(base_dir, container, agents, run=docker):
         if home.stat().st_uid != agent['uid'] or agent['name'] in carried:
             chown_tree(home, agent['uid'])
         os.chmod(home, 0o750)
-    return {'made': made, 'carried': carried}
+    return {'made': made, 'carried': carried, 'moved': moved}
 
 
 def main(argv=None):
@@ -118,7 +149,7 @@ def main(argv=None):
         parser.error(f'not a container name: {args.container!r}')
     try:
         result = keep(args.base_dir, args.container, json.loads(args.agents))
-    except (Invalid, ValueError) as e:
+    except (Invalid, ValueError, StillMounted) as e:
         print(f'agent_homes: {e}', file=sys.stderr)
         return 2
     print(json.dumps(result))

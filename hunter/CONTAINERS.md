@@ -64,7 +64,9 @@ one a different agent is not a different machine. It is:
   container keeps its harness's sessions, its poller's state and its clones,
   as magent's home always has been. The first deploy with an agent in the
   inventory makes the directory, carrying out a home the agent had been
-  living in inside the container (`hunter/scripts/agent_homes.py`).
+  living in inside the container (`hunter/scripts/agent_homes.py`). An agent
+  moving to another container names the one it leaves as `home_from`, and its
+  home is moved over whole, once that container no longer mounts it.
 - **its clones brought up to date as it starts:** first the repository its
   rules and letter are in, pulled before its poller starts; the rest after,
   in the background (`/tmp/clones-<agent>.log`), so a big clone (arthel, 13
@@ -93,5 +95,18 @@ deliberately small in what it can touch:
   read errors there until it is given a read-only account, if we want that.
 - **Files on hunter:** what its own user can read in its own container.
 
-Its first container is `docs-tests-qa`, its home Mood. Until its runner key is in
-the vault, re's poller doesn't start, and that container runs with magent alone.
+Its first container was `docs-tests-qa`, its home Mood. It moves to `agency`
+(below), its home with it.
+
+## agency: the agents' own container
+
+Agents answer in every Mood, so where their processes run shouldn't be named
+after one of them (Justin, magent-self, 2026-10-21). `agency` holds the agents
+and nothing else: re, and blu, the blue agent, for the connectome. It's a
+Mood-kind entry (`mood: agency`) for what that brings, no docker.sock and full
+tools only for its `people`, but no Mood called agency need exist, and
+magent's own poller isn't started in it (`mood_poller: false`). Each agent's
+home is `/opt/magenta/agency/agents/<name>`. An agent's poller starts only
+once its runner key is in the vault; blu's is held back until the poller
+passes its rules bundle as system prompt, since blu's rules live only on
+PickiPedia.

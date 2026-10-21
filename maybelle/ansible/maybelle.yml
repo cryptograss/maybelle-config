@@ -861,6 +861,9 @@
           {% if re_runner_key is defined %}
           MOOD_RUNNER_KEY_RE={{ re_runner_key }}
           {% endif %}
+          {% if blu_runner_key is defined %}
+          MOOD_RUNNER_KEY_BLU={{ blu_runner_key }}
+          {% endif %}
           {% if memory_lane_deploy_key is defined %}
           # The deploy scripts here (scripts/report-deploy.sh) tell the Moods
           # when a server is being redeployed, proving themselves with this key.
