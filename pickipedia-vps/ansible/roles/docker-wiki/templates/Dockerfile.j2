@@ -2,7 +2,9 @@
 # Thin image — MediaWiki code is bind-mounted from /var/www/pickipedia
 # MariaDB socket is mounted from host
 
-FROM php:8.2-apache
+# Pinned to the release that fixes CVE-2026-109618/-109619 (21 Oct 2026):
+# the moving 8.2-apache tag lagged the release by hours.
+FROM php:8.2.35-apache
 
 # Install PHP extensions needed by MediaWiki. ghostscript, poppler-utils and
 # librsvg2-bin draw PDF pages and SVGs (pickipedia LocalSettings: PdfHandler, rsvg).
