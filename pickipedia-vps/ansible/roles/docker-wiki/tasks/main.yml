@@ -60,10 +60,12 @@
     mode: '0644'
   register: compose_changed
 
-# Build image while nginx is still serving traffic
+# Build image while nginx is still serving traffic. --pull fetches the
+# current php:8.2-apache, so a PHP security release lands on the next
+# deploy instead of waiting behind a cached base image.
 - name: Build wiki Docker image (nginx still running)
   command:
-    cmd: docker compose build
+    cmd: docker compose build --pull
     chdir: /opt/pickipedia-docker
 
 # Cap BuildKit cache so repeated deploys don't accumulate unbounded.
