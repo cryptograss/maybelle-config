@@ -110,6 +110,18 @@
               respond "Chunked requests to PickiPedia are paused for a few hours, until PHP's security release is installed." 411
           }
 
+          # And a body with no declared size at all: HTTP/2 and HTTP/3 have no
+          # chunked encoding, so such a request passes @php_chunked, and Caddy
+          # streams it on to Apache, which reads all of it. Browsers always
+          # declare the size of a form or API post.
+          @php_sizeless {
+              method POST PUT PATCH
+              not header Content-Length *
+          }
+          handle @php_sizeless {
+              respond "Requests without a declared size are paused for a few hours, until PHP's security release is installed." 411
+          }
+
           @php_multipart header_regexp Content-Type (?i)multipart
           handle @php_multipart {
               respond "Uploads to PickiPedia are paused for a few hours, until PHP's security release is installed." 503
