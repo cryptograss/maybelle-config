@@ -68,6 +68,10 @@ RUN { \
     echo 'max_input_vars = 5000'; \
     echo 'file_uploads = On'; \
     echo ''; \
+    echo '; Off: MediaWiki never reads upload progress, and it is the path'; \
+    echo '; of the Oct 2026 session.upload_progress use-after-free (CVE-2026-109618).'; \
+    echo 'session.upload_progress.enabled = Off'; \
+    echo ''; \
     echo '; OPcache'; \
     echo 'opcache.enable = 1'; \
     echo 'opcache.memory_consumption = 256'; \
