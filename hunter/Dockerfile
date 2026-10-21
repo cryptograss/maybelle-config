@@ -48,6 +48,18 @@ RUN npm install -g @anthropic-ai/sdk @anthropic-ai/claude-code playwright
 # Pinned: the runner's translation was written against this version's output.
 RUN npm install -g @earendil-works/pi-coding-agent@1.1.0
 
+# PickiPedia's MCP server, as every agent and magent run it: our fork of
+# upstream's (cryptograss/pickipedia-mcp), which marks a bot's article edits
+# as proposed, so the wiki's verification gate takes them. Upstream's doesn't,
+# and the gate refuses its edits. Pinned: merging the fork changes nothing
+# that runs until this line does. Outside /home, so no mount hides it.
+ARG PICKIPEDIA_MCP_COMMIT=ef685da9b2c351692460f14f85d4e907c19ea73e
+RUN git clone --quiet https://github.com/cryptograss/pickipedia-mcp.git /opt/pickipedia-mcp \
+    && cd /opt/pickipedia-mcp && git checkout --quiet "$PICKIPEDIA_MCP_COMMIT" \
+    && npm ci --ignore-scripts --no-audit --no-fund && npm run build \
+    && npm prune --omit=dev --no-audit --no-fund \
+    && test -f dist/index.js
+
 # Install system dependencies for Playwright first (as root)
 RUN npx playwright install-deps
 RUN npx @modelcontextprotocol/server-puppeteer
