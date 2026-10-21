@@ -90,6 +90,17 @@
               file_server
           }
 
+          # STOPGAP, 21 Oct 2026: no multipart request reaches PHP until the
+          # wiki runs PHP 8.2.35. PHP parses a multipart body before MediaWiki
+          # starts (CVE-2026-109618/-109619, attacks seen in the wild), so no
+          # wiki setting can stop it; only refusing the request here does.
+          # Uploads pause meanwhile. Remove once X-Powered-By says 8.2.35.
+          # (?i): PHP reads the content type without regard to case.
+          @php_multipart header_regexp Content-Type (?i)multipart
+          handle @php_multipart {
+              respond "Uploads to PickiPedia are paused for a few hours, until PHP's security release is installed." 503
+          }
+
           handle {
               reverse_proxy 127.0.0.1:8080
           }
