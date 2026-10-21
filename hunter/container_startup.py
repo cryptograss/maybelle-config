@@ -379,9 +379,12 @@ def configure_mcp_server():
         run_command(f"chown magent:magent {mw_config_file}")
         run_command(f"chmod 600 {mw_config_file}")  # Protect credentials
 
-        # Add the MCP server
+        # Add the MCP server: our fork (PICKIPEDIA_MCP). Removed first, since `claude mcp add`
+        # leaves an existing entry as it is, and homes kept from before still name upstream's.
+        run_command("claude mcp remove --scope user pickipedia", user='magent', check=False)
         run_command(
-            f"claude mcp add --scope user --transport stdio pickipedia --env CONFIG={mw_config_file} -- npx -y @professional-wiki/mediawiki-mcp-server@latest",
+            f"claude mcp add --scope user --transport stdio pickipedia --env CONFIG={mw_config_file} -- "
+            f"{' '.join(PICKIPEDIA_MCP)}",
             user='magent',
             check=False
         )
@@ -674,7 +677,9 @@ def start_mood_poller():
 # and network, none of magent's keys, and its own memory in memory-lane.
 
 AGENT_NAME = re.compile(r'[a-z][a-z0-9-]{0,30}')
-MEDIAWIKI_MCP = '@professional-wiki/mediawiki-mcp-server@latest'
+# PickiPedia's MCP server: our fork, built into the image (hunter/Dockerfile), which marks a bot's
+# article edits as proposed so the wiki's verification gate takes them. Upstream's doesn't.
+PICKIPEDIA_MCP = ['node', '/opt/pickipedia-mcp/dist/index.js']
 
 
 def agents():
@@ -755,7 +760,7 @@ def setup_agent(agent):
         write_private(wiki_config, json.dumps({'defaultWiki': 'pickipedia.xyz', 'wikis': {'pickipedia.xyz': {
             'sitename': 'PickiPedia', 'server': 'https://pickipedia.xyz', 'articlepath': '/wiki', 'scriptpath': '',
             'username': agent['wiki_user'], 'password': wiki_password, 'private': False}}}, indent=2), name)
-        servers['pickipedia'] = {'command': 'npx', 'args': ['-y', MEDIAWIKI_MCP], 'env': {'CONFIG': str(wiki_config)},
+        servers['pickipedia'] = {'command': PICKIPEDIA_MCP[0], 'args': PICKIPEDIA_MCP[1:], 'env': {'CONFIG': str(wiki_config)},
                                  'description': 'PickiPedia, the wiki, as this agent\'s own bot account.'}
     pi_dir = home / '.pi' / 'agent'
     write_private(pi_dir / 'mcp.json', json.dumps({'mcpServers': servers}, indent=2), name)
