@@ -195,8 +195,9 @@ all:
             # No rules: or letter: file. blu's rules live only on PickiPedia
             # (Cryptograss:Agents/GeneralOrders and Cryptograss:Agents/Blu/Rules)
             # and reach it through the poller's rules bundle (magenta
-            # memory-lane/poller/rules_bundle.py). Its poller starts only once
-            # blu_runner_key is in the vault (start_agent_poller), so put the key
-            # there only after the poller passes that bundle as system prompt:
-            # before then, blu would wake with no rules at all.
+            # memory-lane/poller/rules_bundle.py): rules_bundle gives its poller
+            # --rules-bundle, so each turn is given them as system prompt. Only a
+            # revision by a trusted editor (JMyles, SkymanJenkins) counts; until
+            # each page has one, the recovery rules stand in and blu says so.
+            rules_bundle: true
             repos: [cryptograss/pickipedia, cryptograss/rabbithole, cryptograss/magenta]

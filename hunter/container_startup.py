@@ -873,6 +873,10 @@ def start_agent_poller(agent):
     letter = agent.get('letter')
     if letter and re.fullmatch(r'[A-Za-z0-9_./-]+', letter):
         args += f" --letter {home / letter}"
+    # Its rules from PickiPedia, given to each turn as system prompt (magenta poller/rules_bundle.py,
+    # --rules-bundle): for an agent whose rules live only there, as blu's do.
+    if agent.get('rules_bundle') is True:
+        args += " --rules-bundle"
     # (Plain words only: run_command wraps this in single quotes for su.)
     run_command(f"set -a; . ~/.config/magenta/agent.env; set +a; "
                 f"nohup /usr/bin/python3 {script} {args} >> /tmp/mood-poller-{name}.log 2>&1 &", user=name)
