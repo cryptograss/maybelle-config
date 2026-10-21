@@ -96,6 +96,20 @@
           # wiki setting can stop it; only refusing the request here does.
           # Uploads pause meanwhile. Remove once X-Powered-By says 8.2.35.
           # (?i): PHP reads the content type without regard to case.
+          # Same stopgap, for CVE-2026-109618: PHP running out of memory while
+          # it reads a request body, any kind of body. Refused by what the body
+          # declares, before any of it is read: 10 MB and up (eight or more
+          # digits), or chunked (no declared size). With uploads paused, nothing
+          # legitimate here sends that much.
+          @php_big_body header_regexp Content-Length ^[0-9]{8,}$
+          handle @php_big_body {
+              respond "Large requests to PickiPedia are paused for a few hours, until PHP's security release is installed." 413
+          }
+          @php_chunked header Transfer-Encoding *
+          handle @php_chunked {
+              respond "Chunked requests to PickiPedia are paused for a few hours, until PHP's security release is installed." 411
+          }
+
           @php_multipart header_regexp Content-Type (?i)multipart
           handle @php_multipart {
               respond "Uploads to PickiPedia are paused for a few hours, until PHP's security release is installed." 503
