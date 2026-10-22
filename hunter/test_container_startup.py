@@ -10,8 +10,8 @@ from unittest import mock
 
 sys.path.insert(0, os.path.dirname(__file__))
 import container_startup  # noqa: E402
-from container_startup import (agent_uid, clone_in_background, poller_command, repos_by_when,  # noqa: E402
-                               retire_home_claude_md, write_poller_env)
+from container_startup import (agent_uid, clone_in_background, memory_server, poller_command,  # noqa: E402
+                               repos_by_when, retire_home_claude_md, write_claude_mcp, write_poller_env)
 
 RE = {'name': 're', 'uid': 2001, 'rules': 'workspace/red/RULES.md', 'letter': 'workspace/red/LETTER.md',
       'repos': ['magent-cryptograss/red', 'cryptograss/memory-lane', 'cryptograss/arthel']}
@@ -120,3 +120,43 @@ class PollerSignInTest(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class MemoryKeyTest(unittest.TestCase):
+    """Each agent's memory server entry carries its runner key, so the server knows who is calling."""
+
+    def setUp(self):
+        import tempfile
+        self.claude_json = Path(tempfile.mkdtemp()) / '.claude.json'
+        patcher = mock.patch.object(container_startup.shutil, 'chown')
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_the_key_goes_in_a_header(self):
+        with mock.patch.dict(os.environ, {'MCP_MEMORY_URL': 'http://10.0.0.2:8000'}):
+            self.assertEqual(memory_server('k3y')['headers'], {'Authorization': 'Bearer k3y'})
+            self.assertNotIn('headers', memory_server(''))  # no key: magent's memory, as before keys
+
+    def test_claude_code_gets_the_header_and_keeps_what_else_it_had(self):
+        import json
+        self.claude_json.write_text(json.dumps({'mcpServers': {'playwright': {'type': 'stdio', 'command': 'docker',
+                                                                               'args': [], 'env': {}}},
+                                                'numStartups': 7}))
+        with mock.patch.dict(os.environ, {'MCP_MEMORY_URL': 'http://10.0.0.2:8000'}):
+            write_claude_mcp(self.claude_json, {'magenta-memory-v2': memory_server('k3y')}, 'magent')
+        state = json.loads(self.claude_json.read_text())
+        self.assertEqual(state['mcpServers']['magenta-memory-v2'], {
+            'type': 'http', 'url': 'http://10.0.0.2:8000', 'headers': {'Authorization': 'Bearer k3y'}})
+        self.assertIn('playwright', state['mcpServers'])
+        self.assertEqual(state['numStartups'], 7)
+        self.assertEqual(oct(self.claude_json.stat().st_mode & 0o777), '0o600')
+
+    def test_an_agent_has_only_the_servers_it_is_given(self):
+        import json
+        self.claude_json.write_text(json.dumps({'mcpServers': {'pickipedia': {'type': 'stdio', 'command': 'node',
+                                                                              'args': [], 'env': {}}}}))
+        write_claude_mcp(self.claude_json, {'magenta-memory-v2': memory_server('k3y')}, 're', only=True,
+                         hasCompletedOnboarding=True)
+        state = json.loads(self.claude_json.read_text())
+        self.assertEqual(list(state['mcpServers']), ['magenta-memory-v2'])
+        self.assertTrue(state['hasCompletedOnboarding'])

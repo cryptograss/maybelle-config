@@ -323,19 +323,54 @@ echo "password=$(gh auth token)"
     logger.info("✓ GitHub CLI authenticated")
 
 
+def memory_server(key=''):
+    """The memory record's MCP server, as an mcpServers entry. It runs on
+    maybelle: the public URL for local dev, the private network on hunter.
+
+    With the agent's runner key the server knows who is calling (memory-lane
+    conversations/mcp/server.caller), so remember, bootstrap_memory and the
+    rest are that agent's own memory; with none, magent's, as before keys.
+    """
+    server = {'url': os.environ.get('MCP_MEMORY_URL', 'https://mcp.maybelle.cryptograss.live'),
+              'description': 'The record: what was said in the Moods and sessions.'}
+    if key:
+        server['headers'] = {'Authorization': f'Bearer {key}'}
+    return server
+
+
+def for_claude_code(server):
+    """An mcpServers entry as Claude Code's ~/.claude.json takes it."""
+    if 'url' in server:
+        return {'type': 'http', 'url': server['url'], **({'headers': server['headers']} if server.get('headers') else {})}
+    return {'type': 'stdio', 'command': server['command'], 'args': server['args'], 'env': server['env']}
+
+
+def write_claude_mcp(claude_json, servers, owner, only=False, **more):
+    """Set these servers in a ~/.claude.json, keeping whatever else Claude Code keeps there, and its
+    other servers unless `only`; `more`: other top-level settings. A file only `owner` can read: a
+    key in a header never goes on a command line."""
+    import json
+    try:
+        state = json.loads(claude_json.read_text()) if claude_json.exists() else {}
+    except ValueError:
+        state = {}
+    given = {key: for_claude_code(server) for key, server in servers.items()}
+    state['mcpServers'] = given if only else {**state.get('mcpServers', {}), **given}
+    state.update(more)
+    write_private(claude_json, json.dumps(state, indent=2), owner)
+    return state
+
+
 def configure_mcp_server():
     """Configure MCP servers for Claude Code."""
     logger.info("=== Configuring MCP servers ===")
 
-    # The MCP memory server runs on maybelle
-    # Use public URL for local dev, private network for hunter deployment
-    mcp_url = os.environ.get('MCP_MEMORY_URL', 'https://mcp.maybelle.cryptograss.live')
-    run_command(
-        f"claude mcp add --scope user --transport http magenta-memory-v2 {mcp_url}",
-        user='magent',
-        check=False  # Don't fail if already configured
-    )
-    logger.info(f"✓ MCP memory server configured: {mcp_url}")
+    # magent's memory, with its runner key where the poller has one: the
+    # memory server then knows it's magent calling.
+    key = os.environ.get('MEMORY_LANE_RUNNER_KEY', '').strip()
+    server = memory_server(key)
+    write_claude_mcp(Path('/home/magent/.claude.json'), {'magenta-memory-v2': server}, 'magent')
+    logger.info(f"✓ MCP memory server configured: {server['url']}" + (" (as magent, by its key)" if key else ''))
 
     # Add Playwright MCP server for browser automation via Docker
     run_command(
@@ -752,8 +787,7 @@ def setup_agent(agent):
 
     # Its MCP servers: the memory record, and PickiPedia as its own bot
     # account. Pi reads them from ~/.pi/agent/mcp.json.
-    servers = {'magenta-memory-v2': {'url': os.environ.get('MCP_MEMORY_URL', 'https://mcp.maybelle.cryptograss.live'),
-                                     'description': 'The record: what was said in the Moods and sessions.'}}
+    servers = {'magenta-memory-v2': memory_server(runner_key)}
     wiki_password = secret('PICKIPEDIA_BOT_PASSWORD')
     if wiki_password and agent.get('wiki_user'):
         wiki_config = config / 'mediawiki-mcp' / 'config.json'
@@ -766,17 +800,7 @@ def setup_agent(agent):
     write_private(pi_dir / 'mcp.json', json.dumps({'mcpServers': servers}, indent=2), name)
     # The same servers for Claude Code (~/.claude.json), keeping whatever Claude
     # Code itself keeps there; it signs in with CLAUDE_CODE_OAUTH_TOKEN (agent.env).
-    claude_json = home / '.claude.json'
-    try:
-        state = json.loads(claude_json.read_text()) if claude_json.exists() else {}
-    except ValueError:
-        state = {}
-    state['mcpServers'] = {key: ({'type': 'http', 'url': server['url']} if 'url' in server else
-                                 {'type': 'stdio', 'command': server['command'], 'args': server['args'],
-                                  'env': server['env']})
-                           for key, server in servers.items()}
-    state['hasCompletedOnboarding'] = True
-    write_private(claude_json, json.dumps(state, indent=2), name)
+    write_claude_mcp(home / '.claude.json', servers, name, only=True, hasCompletedOnboarding=True)
 
     # Its own clones of the public repositories: it reads the code, runs the
     # tests and writes docs; it pushes nothing (no GitHub account). Only the
