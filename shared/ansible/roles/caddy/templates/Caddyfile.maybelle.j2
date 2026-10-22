@@ -22,10 +22,9 @@ memory-lane.{{ domain_name }} {
     reverse_proxy localhost:3000
 }
 
-# Magenta: the same memory-lane, under its own name. The bare address opens
-# the #general Mood until there's a landing page.
+# Magenta: the same memory-lane, under its own name. The bare address is
+# magenta's own front page (magenta#114).
 magenta.cryptograss.live {
-    redir / /moods/general/ 302
     reverse_proxy localhost:3000
 }
 
