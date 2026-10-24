@@ -13,11 +13,17 @@ name: tests
 on:
   push:
     paths:
+      - '**/ansible/**'
+      - 'shared/**'
+      - 'scripts/**'
       - 'delivery-kid/pinning-service/**'
       - 'maybelle/scripts/**'
       - '.github/workflows/tests.yml'
   pull_request:
     paths:
+      - '**/ansible/**'
+      - 'shared/**'
+      - 'scripts/**'
       - 'delivery-kid/pinning-service/**'
       - 'maybelle/scripts/**'
       - '.github/workflows/tests.yml'
@@ -75,3 +81,33 @@ jobs:
 
       - name: Run tests
         run: pytest -v maybelle/scripts/tests
+
+  # What a change to the deploy logic renders differently from production,
+  # in the run's summary (scripts/render_diff.py): every template and every
+  # Jinja string the servers' playbooks reach, found by walking them, with
+  # no vault and nothing executed. Red only when something that rendered
+  # before fails to render now; an intended change is for the PR to explain,
+  # so a diff alone never fails it.
+  render-diff:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: python -m pip install --upgrade pip pytest PyYAML ansible-core
+
+      - name: Its own tests
+        run: pytest -v scripts/tests
+
+      - name: Render against the base branch
+        if: github.event_name == 'pull_request'
+        run: |
+          set -o pipefail
+          { echo '```diff'; status=0; python scripts/render_diff.py --base "origin/${{ github.base_ref }}" || status=$?; echo '```'; exit $status; } | tee -a "$GITHUB_STEP_SUMMARY"

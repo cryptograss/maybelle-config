@@ -93,8 +93,12 @@
       Email: {{ user.email }}
       GitHub: {{ user.github_username }}
 
+      {% if user.port_range_start is defined %}
       Port range: {{ user.port_range_start }}-{{ user.port_range_start + 9 }}
       Subdomains: {{ user.name }}1.{{ base_domain }} through {{ user.name }}10.{{ base_domain }}
+      {% else %}
+      No ports: an agent's own container (agency-<name>).
+      {% endif %}
 
 # A Mood's container lets in the people in it, by their keys.
 - name: Write user SSH public key to authorized_keys
@@ -102,7 +106,7 @@
     dest: "{{ base_dir }}/{{ user.name }}/.ssh/authorized_keys"
     content: |
       {% if user.mood is defined %}
-      {% for person in users if person.name in (user.people | default([])) and person.ssh_pubkey is defined %}
+      {% for person in people if person.name in (user.people | default([])) and person.ssh_pubkey is defined %}
       {{ person.ssh_pubkey }}
       {% endfor %}
       {% else %}

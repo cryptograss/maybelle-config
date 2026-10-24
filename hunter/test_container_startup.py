@@ -160,3 +160,25 @@ class MemoryKeyTest(unittest.TestCase):
         state = json.loads(self.claude_json.read_text())
         self.assertEqual(list(state['mcpServers']), ['magenta-memory-v2'])
         self.assertTrue(state['hasCompletedOnboarding'])
+
+
+class AgentContainerTest(unittest.TestCase):
+    """An agent's own container (agency-<name>) starts its agents and nothing for people."""
+
+    def test_only_container_kind_agent_is_one(self):
+        with mock.patch.dict(os.environ, {'CONTAINER_KIND': 'agent'}):
+            self.assertTrue(container_startup.agent_container())
+        for kind in ('', 'mood', 'Agent'):
+            with mock.patch.dict(os.environ, {'CONTAINER_KIND': kind}):
+                self.assertFalse(container_startup.agent_container())
+
+    def test_it_starts_no_code_server_and_no_preview(self):
+        ran = []
+        with mock.patch.dict(os.environ, {'CONTAINER_KIND': 'agent'}), \
+                mock.patch.object(container_startup, 'run_command', side_effect=lambda cmd, **kw: ran.append(cmd)), \
+                mock.patch.object(container_startup, 'start_mood_poller'), \
+                mock.patch.object(container_startup, 'agents', return_value=[]), \
+                mock.patch.object(container_startup, 'start_pickipedia_preview') as preview:
+            container_startup.start_services()
+        self.assertFalse([c for c in ran if 'code-server' in c])
+        preview.assert_not_called()

@@ -908,6 +908,13 @@ def start_agent_poller(agent):
     logger.info(f"✓ Agent {name}'s poller started (log: /tmp/mood-poller-{name}.log)")
 
 
+def agent_container():
+    """Whether this is an agent's own container (agency-<name>, CONTAINER_KIND=agent): it runs its
+    agents' pollers and nothing for people -- no code-server, no Godot workspace, no previews,
+    and no ports to reach them by."""
+    return os.environ.get('CONTAINER_KIND', '') == 'agent'
+
+
 def start_services():
     """Start required services."""
     logger.info("=== Starting services ===")
@@ -918,10 +925,13 @@ def start_services():
     logger.info("✓ SSH started")
 
     # Start code-server (PASSWORD env var required for auth)
-    password = os.environ.get('CODE_SERVER_PASSWORD', 'changeme')
-    logger.info("Starting code-server...")
-    run_command(f"PASSWORD='{password}' nohup code-server --bind-addr 0.0.0.0:8080 --auth password /home/magent/workspace > /tmp/code-server.log 2>&1 &", user='magent')
-    logger.info("✓ code-server started on port 8080")
+    if agent_container():
+        logger.info("An agent's own container: no code-server")
+    else:
+        password = os.environ.get('CODE_SERVER_PASSWORD', 'changeme')
+        logger.info("Starting code-server...")
+        run_command(f"PASSWORD='{password}' nohup code-server --bind-addr 0.0.0.0:8080 --auth password /home/magent/workspace > /tmp/code-server.log 2>&1 &", user='magent')
+        logger.info("✓ code-server started on port 8080")
 
     start_mood_poller()
     for agent in agents():
@@ -936,7 +946,8 @@ def start_services():
     logger.info("✓ Using shared PostgreSQL container")
 
     # Start PickiPedia preview environment
-    start_pickipedia_preview()
+    if not agent_container():
+        start_pickipedia_preview()
 
 
 def main():
@@ -953,7 +964,8 @@ def main():
         configure_github_cli()
         configure_mcp_server()
         configure_claude_settings()
-        setup_godot()
+        if not agent_container():
+            setup_godot()
         start_services()
 
         logger.info("=" * 60)
