@@ -379,9 +379,12 @@ def configure_mcp_server():
         run_command(f"chown magent:magent {mw_config_file}")
         run_command(f"chmod 600 {mw_config_file}")  # Protect credentials
 
-        # Add the MCP server
+        # Add the MCP server: our fork (PICKIPEDIA_MCP). Removed first, since `claude mcp add`
+        # leaves an existing entry as it is, and homes kept from before still name upstream's.
+        run_command("claude mcp remove --scope user pickipedia", user='magent', check=False)
         run_command(
-            f"claude mcp add --scope user --transport stdio pickipedia --env CONFIG={mw_config_file} -- npx -y @professional-wiki/mediawiki-mcp-server@latest",
+            f"claude mcp add --scope user --transport stdio pickipedia --env CONFIG={mw_config_file} -- "
+            f"{' '.join(PICKIPEDIA_MCP)}",
             user='magent',
             check=False
         )
@@ -723,7 +726,9 @@ def start_mood_poller():
 # and network, none of magent's keys, and its own memory in memory-lane.
 
 AGENT_NAME = re.compile(r'[a-z][a-z0-9-]{0,30}')
-MEDIAWIKI_MCP = '@professional-wiki/mediawiki-mcp-server@latest'
+# PickiPedia's MCP server: our fork, built into the image (hunter/Dockerfile), which marks a bot's
+# article edits as proposed so the wiki's verification gate takes them. Upstream's doesn't.
+PICKIPEDIA_MCP = ['node', '/opt/pickipedia-mcp/dist/index.js']
 
 
 def agents():
@@ -804,7 +809,7 @@ def setup_agent(agent):
         write_private(wiki_config, json.dumps({'defaultWiki': 'pickipedia.xyz', 'wikis': {'pickipedia.xyz': {
             'sitename': 'PickiPedia', 'server': 'https://pickipedia.xyz', 'articlepath': '/wiki', 'scriptpath': '',
             'username': agent['wiki_user'], 'password': wiki_password, 'private': False}}}, indent=2), name)
-        servers['pickipedia'] = {'command': 'npx', 'args': ['-y', MEDIAWIKI_MCP], 'env': {'CONFIG': str(wiki_config)},
+        servers['pickipedia'] = {'command': PICKIPEDIA_MCP[0], 'args': PICKIPEDIA_MCP[1:], 'env': {'CONFIG': str(wiki_config)},
                                  'description': 'PickiPedia, the wiki, as this agent\'s own bot account.'}
     pi_dir = home / '.pi' / 'agent'
     write_private(pi_dir / 'mcp.json', json.dumps({'mcpServers': servers}, indent=2), name)
@@ -928,6 +933,13 @@ def start_agent_poller(agent):
     logger.info(f"✓ Agent {name}'s poller started (log: /tmp/mood-poller-{name}.log)")
 
 
+def agent_container():
+    """Whether this is an agent's own container (agency-<name>, CONTAINER_KIND=agent): it runs its
+    agents' pollers and nothing for people -- no code-server, no Godot workspace, no previews,
+    and no ports to reach them by."""
+    return os.environ.get('CONTAINER_KIND', '') == 'agent'
+
+
 def start_services():
     """Start required services."""
     logger.info("=== Starting services ===")
@@ -938,10 +950,13 @@ def start_services():
     logger.info("✓ SSH started")
 
     # Start code-server (PASSWORD env var required for auth)
-    password = os.environ.get('CODE_SERVER_PASSWORD', 'changeme')
-    logger.info("Starting code-server...")
-    run_command(f"PASSWORD='{password}' nohup code-server --bind-addr 0.0.0.0:8080 --auth password /home/magent/workspace > /tmp/code-server.log 2>&1 &", user='magent')
-    logger.info("✓ code-server started on port 8080")
+    if agent_container():
+        logger.info("An agent's own container: no code-server")
+    else:
+        password = os.environ.get('CODE_SERVER_PASSWORD', 'changeme')
+        logger.info("Starting code-server...")
+        run_command(f"PASSWORD='{password}' nohup code-server --bind-addr 0.0.0.0:8080 --auth password /home/magent/workspace > /tmp/code-server.log 2>&1 &", user='magent')
+        logger.info("✓ code-server started on port 8080")
 
     start_mood_poller()
     for agent in agents():
@@ -956,7 +971,8 @@ def start_services():
     logger.info("✓ Using shared PostgreSQL container")
 
     # Start PickiPedia preview environment
-    start_pickipedia_preview()
+    if not agent_container():
+        start_pickipedia_preview()
 
 
 def main():
@@ -973,7 +989,8 @@ def main():
         configure_github_cli()
         configure_mcp_server()
         configure_claude_settings()
-        setup_godot()
+        if not agent_container():
+            setup_godot()
         start_services()
 
         logger.info("=" * 60)

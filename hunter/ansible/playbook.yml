@@ -86,12 +86,28 @@
       failed_when: network_create.rc != 0 and 'already exists' not in network_create.stderr
       changed_when: network_create.rc == 0
 
-    - name: Include user-instance role for each user
+    # Taken out of the inventory (`retired`): stopped and removed, before the
+    # containers that replace it are made, so an agent's home it mounted can
+    # move (agent_homes.py refuses while a compose file still mounts it). Its
+    # compose file is kept, renamed, and everything else under its directory
+    # stays on hunter's disk. Done once: nothing to do once it's renamed.
+    - name: Retire containers taken out of the inventory
+      shell: docker compose down && mv docker-compose.yml docker-compose.retired.yml
+      args:
+        chdir: "{{ base_dir }}/{{ item }}"
+        removes: "{{ base_dir }}/{{ item }}/docker-compose.yml"
+      loop: "{{ retired | default([]) }}"
+
+    # A person's own container takes its git identity and key from that
+    # person's entry (inventory `people`); a Mood's has its own.
+    - name: Include user-instance role for each container
       include_role:
         name: user-instance
       loop: "{{ users }}"
       loop_control:
-        loop_var: user
+        loop_var: entry
+      vars:
+        user: "{{ (people | selectattr('name', 'equalto', entry.name) | first | default({})) | combine(entry) }}"
 
     - name: Display deployment summary
       debug:
@@ -106,7 +122,9 @@
 
           User instances deployed:
           {% for user in users %}
-          {% if user.mood is defined %}
+          {% if user.kind | default('') == 'agent' %}
+          - {{ user.name }} ({{ user.agents | map(attribute='name') | join(', ') }}'s own container): no ports; docker exec from recovery
+          {% elif user.mood is defined %}
           - {{ user.name }} (a Mood's container, for {{ user.people | join(', ') }}): ssh -p {{ user.ssh_port }} magent@hunter.cryptograss.live
           {% else %}
           - {{ user.name }}: ssh {{ user.name }}@hunter.cryptograss.live (port {{ user.ssh_port }})

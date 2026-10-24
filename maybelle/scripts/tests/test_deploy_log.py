@@ -271,7 +271,7 @@ def test_a_plain_word_in_the_vault_is_left_as_written_and_what_was_taken_is_name
 
 def test_who_deployed_is_their_pickipedia_page(tmp_path):
     inventory = tmp_path / 'inventory.yml'
-    inventory.write_text('all:\n  vars:\n    users:\n      - name: justin\n        pickipedia: "JMyles"\n'
+    inventory.write_text('all:\n  vars:\n    people:\n      - name: justin\n        pickipedia: "JMyles"\n'
                          '      - name: rj\n        pickipedia: ""\n')
     assert poster.wiki_user('justin', inventory) == '[[User:JMyles|JMyles]]'
     assert poster.wiki_user('jmyles', inventory) == '[[User:JMyles|JMyles]]'  # their PickiPedia name, any case

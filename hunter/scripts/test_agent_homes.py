@@ -136,6 +136,17 @@ class AgentHomesTest(unittest.TestCase):
         self.assertEqual(agent_homes.main(['--base-dir', str(self.base), '--container', 'agency', '--agents',
                                            '[{"name": "re", "uid": 2001, "home_from": "docs-tests-qa"}]']), 2)
 
+    def test_a_retired_containers_homes_move_once_its_compose_file_is_put_aside(self):
+        # The shared agency, retired (playbook.yml): `docker compose down`, and its compose file
+        # renamed docker-compose.retired.yml. That file still names the mount; it no longer counts.
+        old = self.old_home(mounted=True)
+        compose = self.base / 'docs-tests-qa' / 'docker-compose.yml'
+        compose.rename(compose.with_name('docker-compose.retired.yml'))
+        got = keep(self.base, 'agency-re', [{'name': 're', 'uid': 2001, 'home_from': 'docs-tests-qa'}], run=FakeDocker())
+        self.assertEqual(got['moved'], ['re'])
+        self.assertTrue((self.base / 'agency-re' / 'agents' / 're' / '.local/state/magenta/pi-sessions/s1.jsonl').exists())
+        self.assertFalse(old.exists())
+
     def test_with_nothing_to_move_a_new_agent_gets_an_empty_home(self):
         got = keep(self.base, 'agency', [{'name': 'blu', 'uid': 2002, 'home_from': 'docs-tests-qa'}], run=FakeDocker())
         self.assertEqual(got, {'made': ['blu'], 'carried': [], 'moved': []})

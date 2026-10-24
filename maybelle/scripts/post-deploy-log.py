@@ -199,7 +199,7 @@ def wiki_user(by, inventory=INVENTORY):
     as the script said it."""
     try:
         import yaml
-        users = (yaml.safe_load(Path(inventory).read_text()) or {})['all']['vars']['users']
+        users = (yaml.safe_load(Path(inventory).read_text()) or {})['all']['vars']['people']
     except Exception:
         users = []
     lower = (by or '').strip().lower()

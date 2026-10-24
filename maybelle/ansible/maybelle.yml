@@ -975,7 +975,7 @@
         dest: /mnt/persist/magenta/allowed_signers
         mode: '0644'
         content: |
-          {% for user in (lookup('file', playbook_dir ~ '/../../hunter/ansible/inventory.yml') | from_yaml).all.vars.users if (user.ssh_pubkey | default('') | trim) is match('ssh-') %}
+          {% for user in (lookup('file', playbook_dir ~ '/../../hunter/ansible/inventory.yml') | from_yaml).all.vars.people if (user.ssh_pubkey | default('') | trim) is match('ssh-') %}
           {{ user.name }} namespaces="magenta-moods" {{ user.ssh_pubkey | trim }}
           {% endfor %}
       register: mood_allowed_signers
@@ -987,7 +987,7 @@
         dest: /mnt/persist/magenta/wiki_names
         mode: '0644'
         content: |
-          {% for user in (lookup('file', playbook_dir ~ '/../../hunter/ansible/inventory.yml') | from_yaml).all.vars.users if user.pickipedia | default('') | trim %}
+          {% for user in (lookup('file', playbook_dir ~ '/../../hunter/ansible/inventory.yml') | from_yaml).all.vars.people if user.pickipedia | default('') | trim %}
           {{ user.name }} {{ user.pickipedia | trim }}
           {% endfor %}
       register: mood_wiki_names
@@ -1348,6 +1348,29 @@
         name: "memory-lane stamp blockheights"
         minute: "*/5"
         job: "flock -n /tmp/stamp-blockheights.lock timeout 35m docker exec memory-lane timeout 30m python manage.py stamp_blockheights >> /var/log/memory-lane-blockheights.log 2>&1"
+
+    # Agents' tasks (memory-lane services/tasks.py): each minute, start any
+    # whose schedule on its PickiPedia page has come round. Once a slot; a
+    # slot missed by more than an hour is let go. Timeouts as above.
+    - name: Schedule agents' due tasks
+      ansible.builtin.cron:
+        name: "memory-lane run due tasks"
+        minute: "*"
+        job: "flock -n /tmp/run-due-tasks.lock timeout 5m docker exec memory-lane timeout 4m python manage.py run_due_tasks >> /var/log/memory-lane-tasks.log 2>&1"
+
+    - name: Rotate the agents' tasks log
+      copy:
+        dest: /etc/logrotate.d/memory-lane-tasks
+        mode: '0644'
+        content: |
+          /var/log/memory-lane-tasks.log {
+              weekly
+              rotate 4
+              compress
+              missingok
+              notifempty
+              copytruncate
+          }
 
     - name: Rotate the block height stamping log
       copy:
