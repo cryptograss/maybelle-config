@@ -102,7 +102,7 @@
     dest: "{{ base_dir }}/{{ user.name }}/.ssh/authorized_keys"
     content: |
       {% if user.mood is defined %}
-      {% for person in users if person.name in (user.people | default([])) and person.ssh_pubkey is defined %}
+      {% for person in people if person.name in (user.people | default([])) and person.ssh_pubkey is defined %}
       {{ person.ssh_pubkey }}
       {% endfor %}
       {% else %}

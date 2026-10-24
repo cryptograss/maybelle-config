@@ -86,12 +86,16 @@
       failed_when: network_create.rc != 0 and 'already exists' not in network_create.stderr
       changed_when: network_create.rc == 0
 
-    - name: Include user-instance role for each user
+    # A person's own container takes its git identity and key from that
+    # person's entry (inventory `people`); a Mood's has its own.
+    - name: Include user-instance role for each container
       include_role:
         name: user-instance
       loop: "{{ users }}"
       loop_control:
-        loop_var: user
+        loop_var: entry
+      vars:
+        user: "{{ (people | selectattr('name', 'equalto', entry.name) | first | default({})) | combine(entry) }}"
 
     - name: Display deployment summary
       debug:

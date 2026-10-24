@@ -7,7 +7,7 @@
 # What it can do: read the journal (systemd-journal), use Docker (the docker
 # group: root on this host, in effect), and restart dockerd (sudo, for that one
 # command), because when dockerd is wedged the docker group can do nothing. Who
-# can open it: only the people in `recovery_people` (inventory), by their keys,
+# can open it: only the people in the inventory's `people`, by their keys,
 # and only into the recovery session. Its rules: files/CLAUDE.md.
 
 - name: The recovery user

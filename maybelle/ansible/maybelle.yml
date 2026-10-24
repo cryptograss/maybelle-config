@@ -975,7 +975,7 @@
         dest: /mnt/persist/magenta/allowed_signers
         mode: '0644'
         content: |
-          {% for user in (lookup('file', playbook_dir ~ '/../../hunter/ansible/inventory.yml') | from_yaml).all.vars.users if (user.ssh_pubkey | default('') | trim) is match('ssh-') %}
+          {% for user in (lookup('file', playbook_dir ~ '/../../hunter/ansible/inventory.yml') | from_yaml).all.vars.people if (user.ssh_pubkey | default('') | trim) is match('ssh-') %}
           {{ user.name }} namespaces="magenta-moods" {{ user.ssh_pubkey | trim }}
           {% endfor %}
       register: mood_allowed_signers
@@ -987,7 +987,7 @@
         dest: /mnt/persist/magenta/wiki_names
         mode: '0644'
         content: |
-          {% for user in (lookup('file', playbook_dir ~ '/../../hunter/ansible/inventory.yml') | from_yaml).all.vars.users if user.pickipedia | default('') | trim %}
+          {% for user in (lookup('file', playbook_dir ~ '/../../hunter/ansible/inventory.yml') | from_yaml).all.vars.people if user.pickipedia | default('') | trim %}
           {{ user.name }} {{ user.pickipedia | trim }}
           {% endfor %}
       register: mood_wiki_names
