@@ -150,11 +150,13 @@ def setup_workspace():
     # Create/update pickipedia config for local preview
     # Always regenerate .env to ensure correct port assignment
     pickipedia_dir = workspace / "pickipedia"
-    if pickipedia_dir.exists():
+    # An agent's own container has no SSH port and runs no preview (agent_container).
+    if pickipedia_dir.exists() and not agent_container():
         pickipedia_env = pickipedia_dir / ".env"
         dev_name = os.environ.get('DEVELOPER_NAME', 'dev')
-        # Calculate port based on SSH port offset (justin=4005, rj=4006, skyler=4007)
-        ssh_port = int(os.environ.get('SSH_PORT', '2222'))
+        # Calculate port based on SSH port offset (justin=4005, rj=4006, skyler=4007).
+        # Set but empty counts as unset: int('') would stop the container's startup.
+        ssh_port = int(os.environ.get('SSH_PORT') or '2222')
         wiki_port = 4005 + (ssh_port - 2222)
         # Always write .env to ensure port is correct (may have been created with wrong port)
         pickipedia_env.write_text(f"""# PickiPedia local preview settings for {dev_name}

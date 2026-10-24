@@ -182,3 +182,20 @@ class AgentContainerTest(unittest.TestCase):
             container_startup.start_services()
         self.assertFalse([c for c in ran if 'code-server' in c])
         preview.assert_not_called()
+
+
+class AgentWorkspaceTest(unittest.TestCase):
+    """An agent's own container gets SSH_PORT= (empty): its startup must not stop there
+    (agency-re and agency-blu restarted in a loop on int(''), 2026-10-24)."""
+
+    def test_setup_workspace_runs_with_an_empty_ssh_port(self):
+        import tempfile
+        home = Path(tempfile.mkdtemp())
+        (home / 'workspace' / 'pickipedia').mkdir(parents=True)
+        for kind in ('agent', ''):
+            with self.subTest(kind=kind), \
+                    mock.patch.dict(os.environ, {'SSH_PORT': '', 'CONTAINER_KIND': kind, 'SKIP_ARTHEL': '1'}), \
+                    mock.patch.object(container_startup, 'ensure_repo_cloned'), \
+                    mock.patch.object(container_startup, 'run_command'), \
+                    mock.patch.object(container_startup, 'Path', side_effect=lambda p, *a: Path(str(p).replace('/home/magent', str(home)), *a)):
+                container_startup.setup_workspace()
