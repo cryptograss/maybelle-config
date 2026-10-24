@@ -64,14 +64,14 @@ def test_identical_trees_are_identical(tmp_path):
 
 def test_a_role_in_a_loop_renders_once_an_item_with_the_calls_vars(tmp_path):
     out = rd.renders(tree(tmp_path / 'a'))
-    whos = {k: v for k, v in out.items() if k.endswith('/Who:copy/content')}
+    whos = {k: v for k, v in out.items() if k.endswith('[Who]/copy/content')}
     assert sorted(whos.values()) == ['Justin Holmes on 2222 under /opt/magenta', 'magent on 2231 under /opt/magenta']
     assert any('[justin]' in k for k in whos) and any('[docs]' in k for k in whos)
 
 
 def test_nothing_runs_and_no_secret_is_needed(tmp_path):
     out = rd.renders(tree(tmp_path / 'a'))
-    banner = next(v for k, v in out.items() if k.endswith('/Banner:copy/content'))
+    banner = next(v for k, v in out.items() if k.endswith('[Banner]/copy/content'))
     assert banner == '‹lookup:pipe› and ‹?vault_value›'
 
 

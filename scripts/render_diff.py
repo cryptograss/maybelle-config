@@ -147,15 +147,16 @@ def strings(node, path=''):
         if any(j in node for j in JINJA):
             yield path, node
     elif isinstance(node, dict):
-        label = node.get('name') if isinstance(node.get('name'), str) else None
         role_call = any(k in node for k in ('include_role', 'import_role', 'ansible.builtin.include_role'))
         for key, value in node.items():
             if role_call and key in ('vars', 'loop', 'with_items'):
                 continue  # rendered once per item, with the role (renders)
-            yield from strings(value, f'{path}/{label}:{key}' if label and key != 'name' else f'{path}/{key}')
+            yield from strings(value, f'{path}/{key}')
     elif isinstance(node, list):
         for i, value in enumerate(node):
-            yield from strings(value, f'{path}[{i}]')
+            # A named task by its name, so a task added before it doesn't move its key.
+            named = isinstance(value, dict) and isinstance(value.get('name'), str)
+            yield from strings(value, f'{path}[{value["name"]}]' if named else f'{path}[{i}]')
 
 
 def role_dirs(tree, server_dir, name):
