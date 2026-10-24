@@ -22,23 +22,20 @@ all:
     # jMyles/memory-lane#15). Idempotent. Set back to false afterwards.
     watcher_replay_from_start: false
 
-    # Whose keys open recovery@hunter (magenta.sh recovery: Claude Code on
-    # hunter's host, for when nothing else reaches magent; roles/recovery).
-    recovery_people: [justin]
-
-    # User instances configuration
-    users:
+    # The people: who each is, and the SSH key hunter knows them by. Apart
+    # from containers, so that retiring a container never takes its owner's
+    # key with it. Read by: magenta's allowed_signers and wiki names
+    # (maybelle.yml), recovery@hunter (every person with a key may open it:
+    # Justin, magent-self, 2026-10-23), the router (to a person's own
+    # container, while there are any), and the Mood containers (`people:` in
+    # an entry below names who may come in).
+    people:
       - name: justin
         full_name: "Justin Holmes"
         email: "justin@justinholmes.com"
         github_username: "jMyles"
         pickipedia: "JMyles"  # the name shown in magenta, linked to their wiki user page
         ssh_pubkey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINKHaQ2Nt6I/ADwE+ybNAyBUDG4APLTgu0oQ0V5Jsa0E jmyles@lukowala"  # Replace with: cat ~/.ssh/id_ed25519.pub
-        ssh_port: 2222
-        port_range_start: 14000  # 14000-14009
-        code_server_password: "{{ code_server_password }}"
-        github_token: "{{ magent_github_token }}"
-        mood_poller: true  # wake a turn on web-posted @magent mentions
 
       - name: rj
         full_name: "R.J. Partington III"
@@ -46,10 +43,6 @@ all:
         github_username: "rjpartingtoniii"
         pickipedia: "RJPARTINGTONIII"
         ssh_pubkey: "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC3PKuhIuPkCMX7RQu6xNK3V40gQtdbhIVrknmhskzYX4aOhAyA4sB5YpcDhCwusiNmoXTllEga6vwcAJSKpn8XafddfZXyZkfg4tWT/sBDMiwInICqah5bcImBwLfBaA2/oFo9/26Qg3s/Z4DU6EiE+VyqnoMPYdOU0KCuXCumy/xira7QKa0aRXTC7M81uXRFvFAPaYav0FYPsj4JLYD1Eg6IXapxV6mQ1KXK1Y7gbD+6OuyAvP232SyTNsQNqf5dDdAIW+CtWuSIDv90u0+nkg000wm9xC8lQUPoGzZQDy249q++jrHRlubgmONKcxZBJeZtbA5m8myNzTyfmtRx rjpartingtoniii@Richards-MacBook-Pro-2.local"
-        ssh_port: 2223
-        port_range_start: 14010
-        code_server_password: "{{ code_server_password }}"
-        github_token: "{{ magent_github_token }}"
 
       - name: skyler
         full_name: "Skyler Golden"
@@ -57,10 +50,6 @@ all:
         github_username: "AudioSkyWalker"
         pickipedia: "SkymanJenkins"
         ssh_pubkey: "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQDJqDJ+beUtVNZhW9qm61bXkZaL9J2Z700iaYnCSlbi6RH35lzrgFqHl1jFUZ6548dDdQcfIIwKx8bIR6iA23aBNwsX0Z9wEg+FLz+b4W1R+8Y602dy6e1rNOVtXozntKJSBFkfvsId6HpLtv7Cl/zRj+8GnZ+b3WUzur2ZrXklb00BGDAza8KkMhdzi2pyJudQAnQOIhV5ZzAREfcGr9I1+hfQdwHI/2u3W4anA0T18+A/uLWkon5NxW8gGk/xfAQ+UaPfOu020B42dVOD6E6WMVByM2MlZg/q/kuj14jwoRtRV7NGqQ8+6Vd5OprSyJ2Cj9RJ1tM0GCBZSYygj9H2YIRXkNE11U/9jRk9rlcW8HMpsx9C/+EGpwJXM8z5x+so9gm4Pb7zaussCUsAPlvFucRW539PO97ttOtHk9xstVOui40buwFzvkUZ1y5x83mbv8cmWjQS0cVcEuT2NqPWAPuspCHh8QAx3cLvByMDcRQgJjELqjboYmvtgDgvg5M= skylergoldenmusic@Skylers-MBP.home"
-        ssh_port: 2224
-        port_range_start: 14020
-        code_server_password: "{{ code_server_password }}"
-        github_token: "{{ magent_github_token }}"
 
       - name: fibonacci
         full_name: "Fibonacci Emery Holmes"
@@ -68,6 +57,36 @@ all:
         github_username: "fibonacci-frames"
         pickipedia: "Fibonacci"
         ssh_pubkey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILtUlbeGAoMsK5/ZhM+L2U77dVSwa8Ip2koo2/lbk5xU fibonacci@fibonacci-Zenbook-15-UM3504DA-UM3504DA"
+
+    # Containers taken out of the inventory: stopped and removed before the
+    # others are made (playbook.yml), their files kept on hunter's disk. The
+    # shared agency went when each agent got its own container: re's and
+    # blu's homes move from it to theirs (home_from).
+    retired: [agency]
+
+    # Containers (the user-instance role, one each). A person's own container
+    # takes its git identity and key from that person's entry above.
+    users:
+      - name: justin  # justin's own container, the older shape (people, above)
+        ssh_port: 2222
+        port_range_start: 14000  # 14000-14009
+        code_server_password: "{{ code_server_password }}"
+        github_token: "{{ magent_github_token }}"
+        mood_poller: true  # wake a turn on web-posted @magent mentions
+
+      - name: rj  # rj's own container, the older shape (people, above)
+        ssh_port: 2223
+        port_range_start: 14010
+        code_server_password: "{{ code_server_password }}"
+        github_token: "{{ magent_github_token }}"
+
+      - name: skyler  # skyler's own container, the older shape (people, above)
+        ssh_port: 2224
+        port_range_start: 14020
+        code_server_password: "{{ code_server_password }}"
+        github_token: "{{ magent_github_token }}"
+
+      - name: fibonacci  # fibonacci's own container, the older shape (people, above)
         ssh_port: 2225
         port_range_start: 14030
         code_server_password: "{{ code_server_password }}"
@@ -115,34 +134,36 @@ all:
         github_token: "{{ magent_github_token }}"
         mood_poller: true
 
-      # agency: the agents' own container (Justin, magent-self, 2026-10-21).
-      # Agents answer in every Mood, so where their processes run shouldn't be
-      # named after one of them. Each runs as its own unix user, its home kept
-      # on hunter's disk at /opt/magenta/agency/agents/<name> (hunter/CONTAINERS.md).
-      # A Mood-kind entry (`mood:`) for what that brings: no docker.sock, and
-      # full tools only for `people`. No Mood called agency need exist, and
-      # magent's own poller isn't started here (mood_poller: false): only the
-      # agents' pollers run. Their own keys are <agent>_runner_key and
-      # <agent>_pickipedia_bot_password; the model vendors' keys are shared by
-      # all of them (model_<vendor>_api_key). An agent's poller doesn't start
-      # until its runner key is there.
-      - name: agency
+      # agency-<name>: each agent's own container (magent-self, 23-24 Oct 2026:
+      # Justin, re, magent). It holds the agent's home, its poller and its
+      # rules bundle, and nothing else: kind: agent, so no published ports, no
+      # code-server, no previews; its own memory and CPU limit, so one agent
+      # can't starve another and a bad start takes down one agent, not all.
+      # A Mood-kind entry (`mood: agency`) for what that brings: no
+      # docker.sock, full tools only for `people`. No Mood called agency need
+      # exist. The agent's home is kept on hunter's disk at
+      # /opt/magenta/agency-<name>/agents/<name> (hunter/CONTAINERS.md). Its
+      # keys are <agent>_runner_key and <agent>_pickipedia_bot_password; the
+      # model vendors' are shared by all of them (model_<vendor>_api_key). Its
+      # poller doesn't start until its runner key is there.
+      - name: agency-re
         mood: agency
+        kind: agent
         people: [justin, skyler]
         full_name: "magent-cryptograss"
         email: "magent@cryptograss.live"
         github_username: "magent-cryptograss"
-        ssh_port: 2232
-        port_range_start: 14060  # 14060-14069
         code_server_password: "{{ code_server_password }}"
         github_token: "{{ magent_github_token }}"
         mood_poller: false
+        memory_limit: 3g
+        cpus: 1.5
         agents:
           - name: re
-            # Its home moves here from docs-tests-qa the first time (agent_homes.py):
+            # Its home moves here from the shared agency the first time (agent_homes.py):
             # its sessions, its poller's state and its clones come with it. Harmless
             # once moved; it can go after that deploy.
-            home_from: docs-tests-qa
+            home_from: agency
             uid: 2001  # its unix user, in the container and on hunter's disk (its home is kept there)
             # pi, or claude-code; both are set up either way. Anthropic's models run
             # on the subscription (claude_code_oauth_token in the vault, from
@@ -176,7 +197,21 @@ all:
             letter: workspace/red/LETTER.md
             repos: [magent-cryptograss/red, cryptograss/magenta, cryptograss/maybelle-config,
                     cryptograss/pickipedia, cryptograss/arthel]
+      - name: agency-blu
+        mood: agency
+        kind: agent
+        people: [justin, skyler]
+        full_name: "magent-cryptograss"
+        email: "magent@cryptograss.live"
+        github_username: "magent-cryptograss"
+        code_server_password: "{{ code_server_password }}"
+        github_token: "{{ magent_github_token }}"
+        mood_poller: false
+        memory_limit: 3g
+        cpus: 1.5
+        agents:
           - name: blu
+            home_from: agency  # as re's: moved over whole the first time
             uid: 2002  # never reused: its home is kept on hunter's disk under this number
             # The blue agent, for the connectome (Justin, magent-self, 2026-10-19).
             # Set up like re: Pi for other vendors' models, Claude Code for

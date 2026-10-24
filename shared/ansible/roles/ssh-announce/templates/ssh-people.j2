@@ -1,6 +1,6 @@
 # Who each SSH key belongs to: name, key type, key. People from hunter's
 # inventory; "@" names are machines, whose logins aren't said.
-{% for user in (lookup('file', role_path ~ '/../../../../hunter/ansible/inventory.yml') | from_yaml).all.vars.users if (user.ssh_pubkey | default('') | trim) is match('ssh-') %}
+{% for user in (lookup('file', role_path ~ '/../../../../hunter/ansible/inventory.yml') | from_yaml).all.vars.people if (user.ssh_pubkey | default('') | trim) is match('ssh-') %}
 {{ user.name }} {{ (user.ssh_pubkey | trim).split()[0] }} {{ (user.ssh_pubkey | trim).split()[1] }}
 {% endfor %}
 {% set machine = lookup('pipe', 'ssh-keygen -y -f ' ~ ssh_announce_machine_key ~ ' 2>/dev/null || true') | trim %}

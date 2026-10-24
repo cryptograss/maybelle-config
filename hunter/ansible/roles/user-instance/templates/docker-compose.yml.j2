@@ -5,6 +5,15 @@ services:
     image: magenta-arthel:latest  # Uses pre-built image, no build step
     container_name: {{ user.name }}-arthel
     hostname: {{ user.name }}@hunter
+{% if user.memory_limit is defined %}
+    # Its own ceiling: a runaway here can't starve the rest of hunter, or
+    # another agent (agency-<name>).
+    mem_limit: {{ user.memory_limit }}
+{% endif %}
+{% if user.cpus is defined %}
+    cpus: {{ user.cpus }}
+{% endif %}
+{% if user.kind | default('') != 'agent' %}
     ports:
       - "{{ user.ssh_port }}:22"
       # code-server web IDE (18080 for justin, 18081 for rj, etc.)
@@ -16,6 +25,7 @@ services:
       - "{{ user.mosh_port_start | default(60000 + (user.ssh_port - 2222) * 100) }}-{{ user.mosh_port_start | default(60000 + (user.ssh_port - 2222) * 100) + 99 }}:60000-60099/udp"
       # NOTE: PickiPedia runs as sibling container (not inside arthel), so no port mapping here.
       # Pickipedia containers bind directly to host ports 4005-4007.
+{% endif %}
     volumes:
       # Mount entire home directory to persist workspace, .claude, bash history, etc
       - {{ base_dir }}/{{ user.name }}/home:/home/magent
@@ -56,7 +66,10 @@ services:
       - CODE_SERVER_PASSWORD={{ user.code_server_password }}
       - GH_TOKEN={{ user.github_token | default('') }}
       - DJANGO_SECRET_KEY={{ user.django_secret_key | default('') }}
-      - SSH_PORT={{ user.ssh_port }}
+      - SSH_PORT={{ user.ssh_port | default('') }}
+      # agent: an agent's own container (agency-<name>), which starts only
+      # what its agents need (container_startup.py)
+      - CONTAINER_KIND={{ user.kind | default('') }}
       # Use private network for MCP on hunter (10.0.0.2 is maybelle)
       - MCP_MEMORY_URL=http://10.0.0.2:8000
       # PickiPedia bot credentials for MediaWiki MCP server
