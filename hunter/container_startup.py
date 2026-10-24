@@ -871,18 +871,28 @@ def setup_agent(agent):
             run_command(f"git clone --quiet https://github.com/{repo}.git {target}", user=name, check=False)
     run_command(f"git config --global user.name {name}", user=name, check=False)
     run_command(f"git config --global user.email {name}@cryptograss.live", user=name, check=False)
-    # Its rules, where Pi and Claude Code look for standing instructions.
-    rules = agent.get('rules')
     claude_dir = home / '.claude'
     claude_dir.mkdir(exist_ok=True)
-    if rules and (home / rules).exists():
-        for link in (pi_dir / 'AGENTS.md', claude_dir / 'CLAUDE.md'):
-            link.unlink(missing_ok=True)
-            link.symlink_to(home / rules)
+    link_rules(home, agent.get('rules'), (pi_dir / 'AGENTS.md', claude_dir / 'CLAUDE.md'))
     for p in (home / '.pi', pi_dir, claude_dir, config, config / 'magenta'):
         if p.exists():
             shutil.chown(p, user=name, group=name)
     logger.info(f"✓ Agent {name} set up as its own user ({agent.get('harness', 'claude-code')})")
+
+
+def link_rules(home, rules, links):
+    """Its rules file, where Pi and Claude Code look for standing instructions (AGENTS.md, CLAUDE.md).
+    With none, what it is told is its instructions alone (--instructions): a link left from when it
+    had one would go on giving it the old file beside them, so it goes. A real file there is
+    someone's, and stays."""
+    if rules and (home / rules).exists():
+        for link in links:
+            link.unlink(missing_ok=True)
+            link.symlink_to(home / rules)
+    elif not rules:
+        for link in links:
+            if link.is_symlink():
+                link.unlink()
 
 
 REPO = re.compile(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+')

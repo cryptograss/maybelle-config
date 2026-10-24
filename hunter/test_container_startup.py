@@ -4,6 +4,7 @@ The parts of container startup that decide things, without a container."""
 
 import os
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -239,3 +240,25 @@ class AgentInstructionsTest(unittest.TestCase):
     def test_with_nothing_to_reach_it_it_is_not_started(self):
         self.assertEqual(self.started({}), '')
         self.assertEqual(self.started({'rules_bundle': True}), '')  # the old key no longer counts
+
+
+class LinkRulesTest(unittest.TestCase):
+    """An agent's rules file is linked where its harnesses look; without one, old links go, real files stay."""
+
+    def test_links_made_then_taken_away(self):
+        with tempfile.TemporaryDirectory() as d:
+            home = Path(d)
+            (home / 'workspace/red').mkdir(parents=True)
+            (home / 'workspace/red/RULES.md').write_text('old rules')
+            links = (home / 'AGENTS.md', home / 'CLAUDE.md')
+            container_startup.link_rules(home, 'workspace/red/RULES.md', links)
+            self.assertEqual(links[1].read_text(), 'old rules')
+            container_startup.link_rules(home, None, links)
+            self.assertFalse(any(link.exists() or link.is_symlink() for link in links))
+
+    def test_a_real_file_is_left_alone(self):
+        with tempfile.TemporaryDirectory() as d:
+            home = Path(d)
+            (home / 'CLAUDE.md').write_text("someone's own")
+            container_startup.link_rules(home, None, (home / 'CLAUDE.md',))
+            self.assertEqual((home / 'CLAUDE.md').read_text(), "someone's own")

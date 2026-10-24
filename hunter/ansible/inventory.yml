@@ -203,12 +203,11 @@ all:
               moonshotai: MOONSHOT_API_KEY
               deepseek: DEEPSEEK_API_KEY
             wiki_user: "Re@re"                                 # its PickiPedia bot password's login name
-            rules: workspace/red/RULES.md
             letter: workspace/red/LETTER.md
-            # Its instructions from PickiPedia too, each turn (--instructions): its
-            # greeting line, General Orders, Cryptograss:Agents/Re/Instructions, the
-            # Mood's. RULES.md stays until those have been seen working, then goes, so
-            # what re is told lives in one place.
+            # What re is told lives in one place: its instructions from PickiPedia,
+            # each turn (--instructions): its greeting line, General Orders,
+            # Cryptograss:Agents/Re/Instructions, the Mood's. Its old rules file
+            # (red/RULES.md, a rules: entry here) is gone, and the links to it with it.
             instructions: true
             repos: [magent-cryptograss/red, cryptograss/magenta, cryptograss/maybelle-config,
                     cryptograss/pickipedia, cryptograss/arthel]
