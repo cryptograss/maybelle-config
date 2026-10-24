@@ -201,8 +201,8 @@ class AgentWorkspaceTest(unittest.TestCase):
                 container_startup.setup_workspace()
 
 
-class MagentRulesBundleTest(unittest.TestCase):
-    """magent's poller takes --rules-bundle when its container says so, as the agents' do."""
+class MagentInstructionsTest(unittest.TestCase):
+    """magent's poller takes --instructions when its container says so, as the agents' do."""
 
     def started(self, env):
         ran = []
@@ -215,6 +215,27 @@ class MagentRulesBundleTest(unittest.TestCase):
             container_startup.start_mood_poller()
         return ' '.join(c for c in ran if 'mood_poller' in c)
 
-    def test_only_with_magent_rules_bundle(self):
-        self.assertIn('--agent magent --rules-bundle', self.started({'MAGENT_RULES_BUNDLE': '1'}))
-        self.assertNotIn('--rules-bundle', self.started({'MAGENT_RULES_BUNDLE': ''}))
+    def test_only_with_magent_instructions(self):
+        self.assertIn('--agent magent --instructions', self.started({'MAGENT_INSTRUCTIONS': '1'}))
+        self.assertNotIn('--instructions', self.started({'MAGENT_INSTRUCTIONS': ''}))
+
+
+class AgentInstructionsTest(unittest.TestCase):
+    """An agent with instructions: true gets --instructions; one with neither them nor a rules file isn't started."""
+
+    def started(self, agent):
+        ran = []
+        with mock.patch.dict(os.environ, {'MOOD_SLUG': 'connectome', 'MOOD_FULL_TOOLS_FOR': 'justin'}, clear=False), \
+                mock.patch.object(container_startup, 'run_command', side_effect=lambda cmd, **kw: ran.append(cmd)), \
+                mock.patch.object(container_startup.Path, 'exists', return_value=True), \
+                mock.patch.object(container_startup.Path, 'is_file', return_value=False):
+            container_startup.start_agent_poller({'name': 'blu', 'harness': 'pi', **agent})
+        return ' '.join(ran)
+
+    def test_instructions_true_gives_the_flag(self):
+        self.assertIn('--agent blu --harness pi', self.started({'instructions': True}))
+        self.assertIn(' --instructions', self.started({'instructions': True}))
+
+    def test_with_nothing_to_reach_it_it_is_not_started(self):
+        self.assertEqual(self.started({}), '')
+        self.assertEqual(self.started({'rules_bundle': True}), '')  # the old key no longer counts

@@ -743,9 +743,9 @@ def start_mood_poller():
         if magent_also_harness() == 'pi':
             setup_magent_pi()
             args += ' --also-harness pi'
-        # Its rules from PickiPedia, given to each turn as system prompt, as the agents' are.
-        if os.environ.get('MAGENT_RULES_BUNDLE') == '1':
-            args += ' --rules-bundle'
+        # Its instructions from PickiPedia, given to each turn as system prompt, as the agents' are.
+        if os.environ.get('MAGENT_INSTRUCTIONS') == '1':
+            args += ' --instructions'
         slug = os.environ.get('MOOD_SLUG', '').strip()
         if slug:
             people = os.environ.get('MOOD_FULL_TOOLS_FOR', '').strip()
@@ -956,16 +956,16 @@ def start_agent_poller(agent):
     letter = agent.get('letter')
     if letter and re.fullmatch(r'[A-Za-z0-9_./-]+', letter):
         args += f" --letter {home / letter}"
-    # Its rules from PickiPedia, given to each turn as system prompt (magenta poller/rules_bundle.py,
-    # --rules-bundle): for an agent whose rules live only there, as blu's do.
-    if agent.get('rules_bundle') is True:
-        args += " --rules-bundle"
-    # And its rules must be able to reach it at all: a rules file in its home, or the bundle.
+    # Its instructions from PickiPedia, given to each turn as system prompt (magenta
+    # poller/instructions.py, --instructions): for an agent whose instructions live there, as blu's do.
+    if agent.get('instructions') is True:
+        args += " --instructions"
+    # And something must be able to reach it at all: a rules file in its home, or its instructions.
     # Without either it wakes with none. blu did, at 06:56Z on 21 Oct, woken by an "@blu"
     # quoted in passing, while the runner key was the only gate (magent-self).
     rules = agent.get('rules')
-    if agent.get('rules_bundle') is not True and not (rules and (home / rules).is_file()):
-        logger.error(f"Agent {name}: no rules can reach it (no rules: file in its home, no rules_bundle); "
+    if agent.get('instructions') is not True and not (rules and (home / rules).is_file()):
+        logger.error(f"Agent {name}: nothing can reach it (no rules: file in its home, no instructions); "
                      f"poller not started")
         return
     # (Plain words only: run_command wraps this in single quotes for su.)
