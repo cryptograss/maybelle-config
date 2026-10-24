@@ -4,6 +4,7 @@ The parts of container startup that decide things, without a container."""
 
 import os
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -199,3 +200,65 @@ class AgentWorkspaceTest(unittest.TestCase):
                     mock.patch.object(container_startup, 'run_command'), \
                     mock.patch.object(container_startup, 'Path', side_effect=lambda p, *a: Path(str(p).replace('/home/magent', str(home)), *a)):
                 container_startup.setup_workspace()
+
+
+class MagentInstructionsTest(unittest.TestCase):
+    """magent's poller takes --instructions when its container says so, as the agents' do."""
+
+    def started(self, env):
+        ran = []
+        with mock.patch.dict(os.environ, {'MOOD_POLLER': '1', **env}, clear=False), \
+                mock.patch.object(container_startup, 'run_command', side_effect=lambda cmd, **kw: ran.append(cmd)), \
+                mock.patch.object(container_startup, 'magent_also_harness', return_value=None), \
+                mock.patch.object(container_startup, 'write_runner_key'), \
+                mock.patch.object(container_startup, 'write_poller_env', return_value=True), \
+                mock.patch.object(container_startup.Path, 'exists', return_value=True):
+            container_startup.start_mood_poller()
+        return ' '.join(c for c in ran if 'mood_poller' in c)
+
+    def test_only_with_magent_instructions(self):
+        self.assertIn('--agent magent --instructions', self.started({'MAGENT_INSTRUCTIONS': '1'}))
+        self.assertNotIn('--instructions', self.started({'MAGENT_INSTRUCTIONS': ''}))
+
+
+class AgentInstructionsTest(unittest.TestCase):
+    """An agent with instructions: true gets --instructions; one with neither them nor a rules file isn't started."""
+
+    def started(self, agent):
+        ran = []
+        with mock.patch.dict(os.environ, {'MOOD_SLUG': 'connectome', 'MOOD_FULL_TOOLS_FOR': 'justin'}, clear=False), \
+                mock.patch.object(container_startup, 'run_command', side_effect=lambda cmd, **kw: ran.append(cmd)), \
+                mock.patch.object(container_startup.Path, 'exists', return_value=True), \
+                mock.patch.object(container_startup.Path, 'is_file', return_value=False):
+            container_startup.start_agent_poller({'name': 'blu', 'harness': 'pi', **agent})
+        return ' '.join(ran)
+
+    def test_instructions_true_gives_the_flag(self):
+        self.assertIn('--agent blu --harness pi', self.started({'instructions': True}))
+        self.assertIn(' --instructions', self.started({'instructions': True}))
+
+    def test_with_nothing_to_reach_it_it_is_not_started(self):
+        self.assertEqual(self.started({}), '')
+        self.assertEqual(self.started({'rules_bundle': True}), '')  # the old key no longer counts
+
+
+class LinkRulesTest(unittest.TestCase):
+    """An agent's rules file is linked where its harnesses look; without one, old links go, real files stay."""
+
+    def test_links_made_then_taken_away(self):
+        with tempfile.TemporaryDirectory() as d:
+            home = Path(d)
+            (home / 'workspace/red').mkdir(parents=True)
+            (home / 'workspace/red/RULES.md').write_text('old rules')
+            links = (home / 'AGENTS.md', home / 'CLAUDE.md')
+            container_startup.link_rules(home, 'workspace/red/RULES.md', links)
+            self.assertEqual(links[1].read_text(), 'old rules')
+            container_startup.link_rules(home, None, links)
+            self.assertFalse(any(link.exists() or link.is_symlink() for link in links))
+
+    def test_a_real_file_is_left_alone(self):
+        with tempfile.TemporaryDirectory() as d:
+            home = Path(d)
+            (home / 'CLAUDE.md').write_text("someone's own")
+            container_startup.link_rules(home, None, (home / 'CLAUDE.md',))
+            self.assertEqual((home / 'CLAUDE.md').read_text(), "someone's own")

@@ -73,6 +73,9 @@ all:
         code_server_password: "{{ code_server_password }}"
         github_token: "{{ magent_github_token }}"
         mood_poller: true  # wake a turn on web-posted @magent mentions
+        # magent's instructions from PickiPedia as each turn's system prompt (--instructions):
+        # its greeting line, General Orders, Cryptograss:Agents/Magent/Instructions, the Mood's.
+        magent_instructions: true
         # magent's second harness here: a Mood whose model is another vendor's
         # (openrouter/...) runs magent on Pi; Anthropic's stay on Claude Code
         # (magenta#71). The Pi trial (magent-self, 2026-10-21) is in a Mood
@@ -116,6 +119,7 @@ all:
         code_server_password: "{{ code_server_password }}"
         github_token: "{{ magent_github_token }}"
         mood_poller: true
+        magent_instructions: true
         # Brought over once, before the container first starts: Sky's
         # delivery-kid session and the checkout it works in, at the same
         # paths, so a wake here can resume it. Skipped once it's here.
@@ -138,6 +142,7 @@ all:
         code_server_password: "{{ code_server_password }}"
         github_token: "{{ magent_github_token }}"
         mood_poller: true
+        magent_instructions: true
 
       # agency-<name>: each agent's own container (magent-self, 23-24 Oct 2026:
       # Justin, re, magent). It holds the agent's home, its poller and its
@@ -198,8 +203,12 @@ all:
               moonshotai: MOONSHOT_API_KEY
               deepseek: DEEPSEEK_API_KEY
             wiki_user: "Re@re"                                 # its PickiPedia bot password's login name
-            rules: workspace/red/RULES.md
             letter: workspace/red/LETTER.md
+            # What re is told lives in one place: its instructions from PickiPedia,
+            # each turn (--instructions): its greeting line, General Orders,
+            # Cryptograss:Agents/Re/Instructions, the Mood's. Its old rules file
+            # (red/RULES.md, a rules: entry here) is gone, and the links to it with it.
+            instructions: true
             repos: [magent-cryptograss/red, cryptograss/magenta, cryptograss/maybelle-config,
                     cryptograss/pickipedia, cryptograss/arthel]
       - name: agency-blu
@@ -232,12 +241,12 @@ all:
               moonshotai: MOONSHOT_API_KEY
               deepseek: DEEPSEEK_API_KEY
             wiki_user: "Blu@blu"                               # its PickiPedia bot password's login name
-            # No rules: or letter: file. blu's rules live only on PickiPedia
-            # (Cryptograss:Agents/GeneralOrders and Cryptograss:Agents/Blu/Rules)
-            # and reach it through the poller's rules bundle (magenta
-            # memory-lane/poller/rules_bundle.py): rules_bundle gives its poller
-            # --rules-bundle, so each turn is given them as system prompt. Only a
-            # revision by a trusted editor (JMyles, SkymanJenkins) counts; until
-            # each page has one, the recovery rules stand in and blu says so.
-            rules_bundle: true
+            # No rules: or letter: file. blu's instructions live only on PickiPedia
+            # (Cryptograss:Agents/GeneralOrders and Cryptograss:Agents/Blu/Instructions)
+            # and reach it through its poller (magenta memory-lane/poller/instructions.py):
+            # instructions gives its poller --instructions, so each turn is given them
+            # as system prompt. Only a revision by a trusted editor (JMyles,
+            # SkymanJenkins) counts; until each page has one, the recovery
+            # instructions stand in and blu says so.
+            instructions: true
             repos: [cryptograss/pickipedia, cryptograss/rabbithole, cryptograss/magenta]
