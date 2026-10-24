@@ -97,6 +97,12 @@ services:
       # claude_code_oauth_token, unless magent has its own. Only the poller
       # and the turns it wakes get it (container_startup.py write_poller_env).
       - MAGENT_CLAUDE_CODE_OAUTH_TOKEN={{ magent_claude_code_oauth_token | default(claude_code_oauth_token | default('')) }}
+{% if user.magent_also_harness | default('') == 'pi' %}
+      # magent on Pi too, for other vendors' models (container_startup.py setup_magent_pi):
+      # OpenRouter's key, shared with the agents (model_openrouter_api_key), only in its poller's env.
+      - MAGENT_ALSO_HARNESS=pi
+      - MAGENT_OPENROUTER_API_KEY={{ magent_openrouter_api_key | default(model_openrouter_api_key | default('')) }}
+{% endif %}
 {% endif %}
 {% set magent_key = magent_runner_key | default(memory_lane_runner_key | default('')) %}
 {% if user.mood_poller | default(false) and magent_key %}

@@ -73,6 +73,11 @@ all:
         code_server_password: "{{ code_server_password }}"
         github_token: "{{ magent_github_token }}"
         mood_poller: true  # wake a turn on web-posted @magent mentions
+        # magent's second harness here: a Mood whose model is another vendor's
+        # (openrouter/...) runs magent on Pi; Anthropic's stay on Claude Code
+        # (magenta#71). The Pi trial (magent-self, 2026-10-21) is in a Mood
+        # whose newest magent session is in this container.
+        magent_also_harness: pi
 
       - name: rj  # rj's own container, the older shape (people, above)
         ssh_port: 2223

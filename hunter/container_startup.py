@@ -650,15 +650,61 @@ def write_poller_env(path=POLLER_ENV):
     if not token:
         path.unlink(missing_ok=True)
         return False
+    # With Pi as magent's second harness, OpenRouter's key too (setup_magent_pi).
+    openrouter = os.environ.get('MAGENT_OPENROUTER_API_KEY', '').strip() if magent_also_harness() == 'pi' else ''
     path.parent.mkdir(parents=True, exist_ok=True)
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, 'w') as f:
         f.write(f'CLAUDE_CODE_OAUTH_TOKEN={shlex.quote(token)}\n')
+        if openrouter:
+            f.write(f'OPENROUTER_API_KEY={shlex.quote(openrouter)}\n')
     os.chmod(path, 0o600)
     for q in (path.parent.parent, path.parent, path):
         shutil.chown(q, user='magent', group='magent')
     logger.info(f"✓ The poller signs in with the subscription's setup-token ({path})")
     return True
+
+
+def magent_also_harness():
+    """'pi' if this container runs magent on Pi as well (the inventory's magent_also_harness), else ''."""
+    value = os.environ.get('MAGENT_ALSO_HARNESS', '').strip()
+    return value if value == 'pi' else ''
+
+
+def setup_magent_pi(home=Path('/home/magent')):
+    """What Pi needs to be magent: the same rules and the same MCP servers as its Claude Code.
+
+    TEMPORARY, for the Pi trial (magent-self, 2026-10-21): once magent lives in agency, setup_agent
+    does all of this, and this function, magent_also_harness and the inventory's
+    magent_also_harness go (Cryptograss:Moods/magent-self/todo).
+
+    Its rules: ~/.pi/agent/AGENTS.md, linked to ~/.claude/CLAUDE.md (agents/magent.md, which the
+    user-instance role copies there), so both harnesses read one file. Its MCP servers: the memory
+    record, and PickiPedia as Magent exactly as Claude Code runs it (~/.claude.json, written by
+    configure_mcp_server before the poller starts), so Pi gets whichever server that is.
+    Playwright stays Claude Code's: it runs through docker."""
+    import json
+    pi_dir = home / '.pi' / 'agent'
+    pi_dir.mkdir(parents=True, exist_ok=True)
+    rules = pi_dir / 'AGENTS.md'
+    rules.unlink(missing_ok=True)
+    rules.symlink_to(home / '.claude' / 'CLAUDE.md')
+    servers = {'magenta-memory-v2': {'url': os.environ.get('MCP_MEMORY_URL', 'https://mcp.maybelle.cryptograss.live'),
+                                     'description': 'The record: what was said in the Moods and sessions.'}}
+    try:
+        wiki = json.loads((home / '.claude.json').read_text()).get('mcpServers', {}).get('pickipedia') or {}
+    except (OSError, ValueError):
+        wiki = {}
+    if wiki.get('command'):
+        servers['pickipedia'] = {'command': wiki['command'], 'args': wiki.get('args', []), 'env': wiki.get('env', {}),
+                                 'description': 'PickiPedia, as Magent.'}
+    mcp = pi_dir / 'mcp.json'
+    mcp.write_text(json.dumps({'mcpServers': servers}, indent=2))
+    os.chmod(mcp, 0o600)
+    for p in (home / '.pi', pi_dir, mcp):
+        shutil.chown(p, user='magent', group='magent')
+    os.lchown(rules, 1000, 1000)
+    logger.info(f"✓ magent on Pi too: rules linked, {len(servers)} MCP servers")
 
 
 def poller_command(args, signed_in):
@@ -692,6 +738,9 @@ def start_mood_poller():
         # full tools for the people in it; a person's answers what it can wake.
         # (Plain words only: run_command wraps this in single quotes for su.)
         args = '--agent magent'
+        if magent_also_harness() == 'pi':
+            setup_magent_pi()
+            args += ' --also-harness pi'
         slug = os.environ.get('MOOD_SLUG', '').strip()
         if slug:
             people = os.environ.get('MOOD_FULL_TOOLS_FOR', '').strip()
