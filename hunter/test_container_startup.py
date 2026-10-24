@@ -199,3 +199,22 @@ class AgentWorkspaceTest(unittest.TestCase):
                     mock.patch.object(container_startup, 'run_command'), \
                     mock.patch.object(container_startup, 'Path', side_effect=lambda p, *a: Path(str(p).replace('/home/magent', str(home)), *a)):
                 container_startup.setup_workspace()
+
+
+class MagentRulesBundleTest(unittest.TestCase):
+    """magent's poller takes --rules-bundle when its container says so, as the agents' do."""
+
+    def started(self, env):
+        ran = []
+        with mock.patch.dict(os.environ, {'MOOD_POLLER': '1', **env}, clear=False), \
+                mock.patch.object(container_startup, 'run_command', side_effect=lambda cmd, **kw: ran.append(cmd)), \
+                mock.patch.object(container_startup, 'magent_also_harness', return_value=None), \
+                mock.patch.object(container_startup, 'write_runner_key'), \
+                mock.patch.object(container_startup, 'write_poller_env', return_value=True), \
+                mock.patch.object(container_startup.Path, 'exists', return_value=True):
+            container_startup.start_mood_poller()
+        return ' '.join(c for c in ran if 'mood_poller' in c)
+
+    def test_only_with_magent_rules_bundle(self):
+        self.assertIn('--agent magent --rules-bundle', self.started({'MAGENT_RULES_BUNDLE': '1'}))
+        self.assertNotIn('--rules-bundle', self.started({'MAGENT_RULES_BUNDLE': ''}))

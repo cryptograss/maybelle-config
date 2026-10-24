@@ -743,6 +743,9 @@ def start_mood_poller():
         if magent_also_harness() == 'pi':
             setup_magent_pi()
             args += ' --also-harness pi'
+        # Its rules from PickiPedia, given to each turn as system prompt, as the agents' are.
+        if os.environ.get('MAGENT_RULES_BUNDLE') == '1':
+            args += ' --rules-bundle'
         slug = os.environ.get('MOOD_SLUG', '').strip()
         if slug:
             people = os.environ.get('MOOD_FULL_TOOLS_FOR', '').strip()

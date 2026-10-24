@@ -103,6 +103,11 @@ services:
       - MAGENT_ALSO_HARNESS=pi
       - MAGENT_OPENROUTER_API_KEY={{ magent_openrouter_api_key | default(model_openrouter_api_key | default('')) }}
 {% endif %}
+{% if user.magent_rules_bundle | default(false) %}
+      # magent's rules from PickiPedia, given to each turn as system prompt
+      # (magenta poller/rules_bundle.py, --rules-bundle), as the agents' are.
+      - MAGENT_RULES_BUNDLE=1
+{% endif %}
 {% endif %}
 {% set magent_key = magent_runner_key | default(memory_lane_runner_key | default('')) %}
 {% if user.mood_poller | default(false) and magent_key %}
