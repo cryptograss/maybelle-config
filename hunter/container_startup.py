@@ -743,6 +743,9 @@ def start_mood_poller():
         if magent_also_harness() == 'pi':
             setup_magent_pi()
             args += ' --also-harness pi'
+        # Its instructions from PickiPedia, given to each turn as system prompt, as the agents' are.
+        if os.environ.get('MAGENT_INSTRUCTIONS') == '1':
+            args += ' --instructions'
         slug = os.environ.get('MOOD_SLUG', '').strip()
         if slug:
             people = os.environ.get('MOOD_FULL_TOOLS_FOR', '').strip()
@@ -868,18 +871,28 @@ def setup_agent(agent):
             run_command(f"git clone --quiet https://github.com/{repo}.git {target}", user=name, check=False)
     run_command(f"git config --global user.name {name}", user=name, check=False)
     run_command(f"git config --global user.email {name}@cryptograss.live", user=name, check=False)
-    # Its rules, where Pi and Claude Code look for standing instructions.
-    rules = agent.get('rules')
     claude_dir = home / '.claude'
     claude_dir.mkdir(exist_ok=True)
-    if rules and (home / rules).exists():
-        for link in (pi_dir / 'AGENTS.md', claude_dir / 'CLAUDE.md'):
-            link.unlink(missing_ok=True)
-            link.symlink_to(home / rules)
+    link_rules(home, agent.get('rules'), (pi_dir / 'AGENTS.md', claude_dir / 'CLAUDE.md'))
     for p in (home / '.pi', pi_dir, claude_dir, config, config / 'magenta'):
         if p.exists():
             shutil.chown(p, user=name, group=name)
     logger.info(f"✓ Agent {name} set up as its own user ({agent.get('harness', 'claude-code')})")
+
+
+def link_rules(home, rules, links):
+    """Its rules file, where Pi and Claude Code look for standing instructions (AGENTS.md, CLAUDE.md).
+    With none, what it is told is its instructions alone (--instructions): a link left from when it
+    had one would go on giving it the old file beside them, so it goes. A real file there is
+    someone's, and stays."""
+    if rules and (home / rules).exists():
+        for link in links:
+            link.unlink(missing_ok=True)
+            link.symlink_to(home / rules)
+    elif not rules:
+        for link in links:
+            if link.is_symlink():
+                link.unlink()
 
 
 REPO = re.compile(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+')
@@ -953,16 +966,16 @@ def start_agent_poller(agent):
     letter = agent.get('letter')
     if letter and re.fullmatch(r'[A-Za-z0-9_./-]+', letter):
         args += f" --letter {home / letter}"
-    # Its rules from PickiPedia, given to each turn as system prompt (magenta poller/rules_bundle.py,
-    # --rules-bundle): for an agent whose rules live only there, as blu's do.
-    if agent.get('rules_bundle') is True:
-        args += " --rules-bundle"
-    # And its rules must be able to reach it at all: a rules file in its home, or the bundle.
+    # Its instructions from PickiPedia, given to each turn as system prompt (magenta
+    # poller/instructions.py, --instructions): for an agent whose instructions live there, as blu's do.
+    if agent.get('instructions') is True:
+        args += " --instructions"
+    # And something must be able to reach it at all: a rules file in its home, or its instructions.
     # Without either it wakes with none. blu did, at 06:56Z on 21 Oct, woken by an "@blu"
     # quoted in passing, while the runner key was the only gate (magent-self).
     rules = agent.get('rules')
-    if agent.get('rules_bundle') is not True and not (rules and (home / rules).is_file()):
-        logger.error(f"Agent {name}: no rules can reach it (no rules: file in its home, no rules_bundle); "
+    if agent.get('instructions') is not True and not (rules and (home / rules).is_file()):
+        logger.error(f"Agent {name}: nothing can reach it (no rules: file in its home, no instructions); "
                      f"poller not started")
         return
     # (Plain words only: run_command wraps this in single quotes for su.)
