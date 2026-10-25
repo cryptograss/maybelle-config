@@ -62,6 +62,19 @@ RUN git clone --quiet https://github.com/cryptograss/pickipedia-mcp.git /opt/pic
 
 # Install system dependencies for Playwright first (as root)
 RUN npx playwright install-deps
+
+# A browser for every emergent, not only magent (Justin, magent-self, 25 Oct
+# 2026: "I want everyone to have playwright"): Microsoft's Playwright MCP
+# server, run in each container over stdio, with its browser in the image.
+# magent's runs through docker.sock instead, which only its container has
+# (it is root on hunter); emergent-re and emergent-blu have none. Pinned: the
+# server expects the browser build it was released with. Readable by every
+# user; each emergent's server finds it by PLAYWRIGHT_BROWSERS_PATH
+# (container_startup.playwright_server).
+ARG PLAYWRIGHT_MCP_VERSION=0.0.83
+RUN npm install -g --no-audit --no-fund @playwright/mcp@${PLAYWRIGHT_MCP_VERSION} \
+    && PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright playwright-mcp install-browser chrome-for-testing \
+    && chmod -R a+rX /opt/ms-playwright
 RUN npx @modelcontextprotocol/server-puppeteer
 
 # Install Docker CLI and add docker group

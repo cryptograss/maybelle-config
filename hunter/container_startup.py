@@ -340,6 +340,20 @@ def memory_server(key=''):
     return server
 
 
+BROWSERS = '/opt/ms-playwright'  # where the image puts Playwright's browser (hunter/Dockerfile)
+
+
+def playwright_server(home):
+    """A browser, as an mcpServers entry: Microsoft's Playwright MCP server, run here over stdio
+    (magent-self, 25 Oct 2026: every emergent gets one). Headless; --isolated, so each session
+    starts with a clean profile and two harnesses never fight over one; screenshots and
+    snapshots it saves go in ~/playwright-output."""
+    return {'command': 'playwright-mcp',
+            'args': ['--headless', '--isolated', '--browser', 'chromium', '--output-dir', str(home / 'playwright-output')],
+            'env': {'PLAYWRIGHT_BROWSERS_PATH': BROWSERS},
+            'description': 'A browser: open pages, read them, click, fill forms, take screenshots.'}
+
+
 def for_claude_code(server):
     """An mcpServers entry as Claude Code's ~/.claude.json takes it."""
     if 'url' in server:
@@ -839,9 +853,9 @@ def setup_agent(agent):
                   ''.join(f'{var}={shlex.quote(value)}\n' for var, value in sorted(keys.items())), name)
     logger.info(f"Agent {name}: model keys for {', '.join(sorted(keys)) or 'no vendor yet'}")
 
-    # Its MCP servers: the memory record, and PickiPedia as its own bot
-    # account. Pi reads them from ~/.pi/agent/mcp.json.
-    servers = {'magenta-memory-v2': memory_server(runner_key)}
+    # Its MCP servers: the memory record, a browser, and PickiPedia as its own
+    # bot account. Pi reads them from ~/.pi/agent/mcp.json.
+    servers = {'magenta-memory-v2': memory_server(runner_key), 'playwright': playwright_server(home)}
     wiki_password = secret('PICKIPEDIA_BOT_PASSWORD')
     if wiki_password and agent.get('wiki_user'):
         wiki_config = config / 'mediawiki-mcp' / 'config.json'
