@@ -340,6 +340,20 @@ def memory_server(key=''):
     return server
 
 
+BROWSERS = '/opt/ms-playwright'  # where the image puts Playwright's browser (hunter/Dockerfile)
+
+
+def playwright_server(home):
+    """A browser, as an mcpServers entry: Microsoft's Playwright MCP server, run here over stdio
+    (magent-self, 25 Oct 2026: every emergent gets one). Headless; --isolated, so each session
+    starts with a clean profile and two harnesses never fight over one; screenshots and
+    snapshots it saves go in ~/playwright-output."""
+    return {'command': 'playwright-mcp',
+            'args': ['--headless', '--isolated', '--browser', 'chromium', '--output-dir', str(home / 'playwright-output')],
+            'env': {'PLAYWRIGHT_BROWSERS_PATH': BROWSERS},
+            'description': 'A browser: open pages, read them, click, fill forms, take screenshots.'}
+
+
 def for_claude_code(server):
     """An mcpServers entry as Claude Code's ~/.claude.json takes it."""
     if 'url' in server:
@@ -374,13 +388,13 @@ def configure_mcp_server():
     write_claude_mcp(Path('/home/magent/.claude.json'), {'magenta-memory-v2': server}, 'magent')
     logger.info(f"✓ MCP memory server configured: {server['url']}" + (" (as magent, by its key)" if key else ''))
 
-    # Add Playwright MCP server for browser automation via Docker
-    run_command(
-        "claude mcp add --scope user --transport stdio playwright 'docker run -i --rm --init --network magenta-net --pull=always mcr.microsoft.com/playwright/mcp'",
-        user='magent',
-        check=False
-    )
-    logger.info("✓ Playwright MCP server configured (via Docker on magenta-net)")
+    # A browser: the same pinned Playwright MCP server every emergent has, in
+    # this container (playwright_server). It was a `docker run --pull=always`
+    # of Microsoft's image, unpinned and through docker.sock (re, magent-self,
+    # 25 Oct: one toolchain, identical everywhere). This container is on
+    # magenta-net as that one was, so it reaches the same previews.
+    write_claude_mcp(Path('/home/magent/.claude.json'), {'playwright': playwright_server(Path('/home/magent'))}, 'magent')
+    logger.info("✓ Playwright MCP server configured (in this container, pinned)")
 
     # NOTE: Jenkins MCP server removed - it returns massive responses that bust context
     # Use the public Jenkins API directly instead: https://maybelle.cryptograss.live/api/
@@ -684,7 +698,7 @@ def setup_magent_pi(home=Path('/home/magent')):
     user-instance role copies there), so both harnesses read one file. Its MCP servers: the memory
     record, and PickiPedia as Magent exactly as Claude Code runs it (~/.claude.json, written by
     configure_mcp_server before the poller starts), so Pi gets whichever server that is.
-    Playwright stays Claude Code's: it runs through docker."""
+    And the browser every emergent has (playwright_server)."""
     import json
     pi_dir = home / '.pi' / 'agent'
     pi_dir.mkdir(parents=True, exist_ok=True)
@@ -700,6 +714,7 @@ def setup_magent_pi(home=Path('/home/magent')):
     if wiki.get('command'):
         servers['pickipedia'] = {'command': wiki['command'], 'args': wiki.get('args', []), 'env': wiki.get('env', {}),
                                  'description': 'PickiPedia, as Magent.'}
+    servers['playwright'] = playwright_server(home)
     mcp = pi_dir / 'mcp.json'
     mcp.write_text(json.dumps({'mcpServers': servers}, indent=2))
     os.chmod(mcp, 0o600)
@@ -839,9 +854,9 @@ def setup_agent(agent):
                   ''.join(f'{var}={shlex.quote(value)}\n' for var, value in sorted(keys.items())), name)
     logger.info(f"Agent {name}: model keys for {', '.join(sorted(keys)) or 'no vendor yet'}")
 
-    # Its MCP servers: the memory record, and PickiPedia as its own bot
-    # account. Pi reads them from ~/.pi/agent/mcp.json.
-    servers = {'magenta-memory-v2': memory_server(runner_key)}
+    # Its MCP servers: the memory record, a browser, and PickiPedia as its own
+    # bot account. Pi reads them from ~/.pi/agent/mcp.json.
+    servers = {'magenta-memory-v2': memory_server(runner_key), 'playwright': playwright_server(home)}
     wiki_password = secret('PICKIPEDIA_BOT_PASSWORD')
     if wiki_password and agent.get('wiki_user'):
         wiki_config = config / 'mediawiki-mcp' / 'config.json'

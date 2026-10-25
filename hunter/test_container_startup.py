@@ -163,6 +163,35 @@ class MemoryKeyTest(unittest.TestCase):
         self.assertTrue(state['hasCompletedOnboarding'])
 
 
+class BrowserTest(unittest.TestCase):
+    """Every emergent has a browser, in its own container, not through docker.sock (magent-self, 25 Oct)."""
+
+    def test_the_browser_server_runs_here_and_finds_the_image_browser(self):
+        server = container_startup.playwright_server(Path('/home/re'))
+        self.assertEqual(server['command'], 'playwright-mcp')
+        self.assertIn('--headless', server['args'])
+        self.assertIn('/home/re/playwright-output', server['args'])
+        self.assertEqual(server['env'], {'PLAYWRIGHT_BROWSERS_PATH': '/opt/ms-playwright'})
+        self.assertNotIn('docker', ' '.join([server['command'], *server['args']]))
+
+    def test_claude_code_and_pi_take_it_alike(self):
+        server = container_startup.playwright_server(Path('/home/blu'))
+        given = container_startup.for_claude_code(server)
+        self.assertEqual(given['type'], 'stdio')
+        self.assertEqual((given['command'], given['args'], given['env']), (server['command'], server['args'], server['env']))
+
+    def test_magent_has_the_same_one_not_docker(self):
+        source = (Path(__file__).parent / 'container_startup.py').read_text()
+        self.assertNotIn('mcr.microsoft.com/playwright/mcp', source)
+        self.assertIn("{'playwright': playwright_server(Path('/home/magent'))}", source)
+
+    def test_the_image_installs_the_pinned_server_and_its_browser(self):
+        dockerfile = (Path(__file__).parent / 'Dockerfile').read_text()
+        self.assertIn('@playwright/mcp@${PLAYWRIGHT_MCP_VERSION}', dockerfile)
+        self.assertIn('PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright playwright-mcp install-browser', dockerfile)
+        self.assertIn(container_startup.BROWSERS, dockerfile)
+
+
 class AgentContainerTest(unittest.TestCase):
     """An agent's own container (agency-<name>) starts its agents and nothing for people."""
 
