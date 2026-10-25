@@ -180,6 +180,11 @@ class BrowserTest(unittest.TestCase):
         self.assertEqual(given['type'], 'stdio')
         self.assertEqual((given['command'], given['args'], given['env']), (server['command'], server['args'], server['env']))
 
+    def test_magent_has_the_same_one_not_docker(self):
+        source = (Path(__file__).parent / 'container_startup.py').read_text()
+        self.assertNotIn('mcr.microsoft.com/playwright/mcp', source)
+        self.assertIn("{'playwright': playwright_server(Path('/home/magent'))}", source)
+
     def test_the_image_installs_the_pinned_server_and_its_browser(self):
         dockerfile = (Path(__file__).parent / 'Dockerfile').read_text()
         self.assertIn('@playwright/mcp@${PLAYWRIGHT_MCP_VERSION}', dockerfile)

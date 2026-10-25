@@ -388,13 +388,13 @@ def configure_mcp_server():
     write_claude_mcp(Path('/home/magent/.claude.json'), {'magenta-memory-v2': server}, 'magent')
     logger.info(f"✓ MCP memory server configured: {server['url']}" + (" (as magent, by its key)" if key else ''))
 
-    # Add Playwright MCP server for browser automation via Docker
-    run_command(
-        "claude mcp add --scope user --transport stdio playwright 'docker run -i --rm --init --network magenta-net --pull=always mcr.microsoft.com/playwright/mcp'",
-        user='magent',
-        check=False
-    )
-    logger.info("✓ Playwright MCP server configured (via Docker on magenta-net)")
+    # A browser: the same pinned Playwright MCP server every emergent has, in
+    # this container (playwright_server). It was a `docker run --pull=always`
+    # of Microsoft's image, unpinned and through docker.sock (re, magent-self,
+    # 25 Oct: one toolchain, identical everywhere). This container is on
+    # magenta-net as that one was, so it reaches the same previews.
+    write_claude_mcp(Path('/home/magent/.claude.json'), {'playwright': playwright_server(Path('/home/magent'))}, 'magent')
+    logger.info("✓ Playwright MCP server configured (in this container, pinned)")
 
     # NOTE: Jenkins MCP server removed - it returns massive responses that bust context
     # Use the public Jenkins API directly instead: https://maybelle.cryptograss.live/api/
@@ -698,7 +698,7 @@ def setup_magent_pi(home=Path('/home/magent')):
     user-instance role copies there), so both harnesses read one file. Its MCP servers: the memory
     record, and PickiPedia as Magent exactly as Claude Code runs it (~/.claude.json, written by
     configure_mcp_server before the poller starts), so Pi gets whichever server that is.
-    Playwright stays Claude Code's: it runs through docker."""
+    And the browser every emergent has (playwright_server)."""
     import json
     pi_dir = home / '.pi' / 'agent'
     pi_dir.mkdir(parents=True, exist_ok=True)
@@ -714,6 +714,7 @@ def setup_magent_pi(home=Path('/home/magent')):
     if wiki.get('command'):
         servers['pickipedia'] = {'command': wiki['command'], 'args': wiki.get('args', []), 'env': wiki.get('env', {}),
                                  'description': 'PickiPedia, as Magent.'}
+    servers['playwright'] = playwright_server(home)
     mcp = pi_dir / 'mcp.json'
     mcp.write_text(json.dumps({'mcpServers': servers}, indent=2))
     os.chmod(mcp, 0o600)
