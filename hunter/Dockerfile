@@ -53,7 +53,7 @@ RUN npm install -g @earendil-works/pi-coding-agent@1.1.0
 # as proposed, so the wiki's verification gate takes them. Upstream's doesn't,
 # and the gate refuses its edits. Pinned: merging the fork changes nothing
 # that runs until this line does. Outside /home, so no mount hides it.
-ARG PICKIPEDIA_MCP_COMMIT=ef685da9b2c351692460f14f85d4e907c19ea73e
+ARG PICKIPEDIA_MCP_COMMIT=6d97516f55c81ad87ed74e3ba074b152c664ab36
 RUN git clone --quiet https://github.com/cryptograss/pickipedia-mcp.git /opt/pickipedia-mcp \
     && cd /opt/pickipedia-mcp && git checkout --quiet "$PICKIPEDIA_MCP_COMMIT" \
     && npm ci --ignore-scripts --no-audit --no-fund && npm run build \
