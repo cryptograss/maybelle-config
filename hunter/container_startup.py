@@ -705,8 +705,7 @@ def setup_magent_pi(home=Path('/home/magent')):
     rules = pi_dir / 'AGENTS.md'
     rules.unlink(missing_ok=True)
     rules.symlink_to(home / '.claude' / 'CLAUDE.md')
-    servers = {'magenta-memory-v2': {'url': os.environ.get('MCP_MEMORY_URL', 'https://mcp.maybelle.cryptograss.live'),
-                                     'description': 'The record: what was said in the Moods and sessions.'}}
+    servers = {'magenta-memory-v2': memory_server(os.environ.get('MEMORY_LANE_RUNNER_KEY', '').strip())}
     try:
         wiki = json.loads((home / '.claude.json').read_text()).get('mcpServers', {}).get('pickipedia') or {}
     except (OSError, ValueError):
