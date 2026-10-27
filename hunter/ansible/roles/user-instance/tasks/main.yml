@@ -55,6 +55,7 @@
     mode: '0644'
     content: |
       {
+        "attribution": { "commit": "", "pr": "", "sessionUrl": false },
         "includeCoAuthoredBy": false,
         "permissions": {
           "allow": [
