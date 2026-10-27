@@ -460,7 +460,10 @@ def configure_claude_settings():
     else:
         settings = {}
 
-    # Set includeCoAuthoredBy to false
+    # No "Generated with Claude Code" footer on PRs, and no attribution in commits (Claude Code's `attribution`
+    # object; empty strings and sessionUrl false hide it all). `includeCoAuthoredBy` is the older knob, deprecated
+    # in favour of `attribution`, and on its own no longer hides the PR footer — kept for older versions.
+    settings['attribution'] = {'commit': '', 'pr': '', 'sessionUrl': False}
     settings['includeCoAuthoredBy'] = False
 
     # Write settings back
