@@ -82,6 +82,26 @@ jobs:
       - name: Run tests
         run: pytest -v maybelle/scripts/tests
 
+  # recovery-gate decides what Pi may do on hunter's host as the `recovery`
+  # user: deny the calls that crashed dockerd, anything that deletes
+  # containers or reboots, ask Justin for everything else. It is the only
+  # thing between a root-equivalent session and `reboot`, so being wrong
+  # there is worse than a red build. Its tests existed from the start and
+  # nothing ran them — not GitHub, either Jenkinsfile, nor the deploy, which
+  # copies recovery-gate.ts to hunter and left the test behind. See #234.
+  recovery-gate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # jiti, not node --experimental-strip-types: node's type stripping
+      # depends on the build, not the version (22.22.1 here has none; jiti is
+      # how Pi loads this file too). The file itself registers its tests with
+      # node:test, so this runs the whole suite.
+      - name: Run tests
+        run: npx --yes jiti@2 hunter/ansible/roles/recovery/test_recovery_gate.mjs
+
   # What a change to the deploy logic renders differently from production,
   # in the run's summary (scripts/render_diff.py): every template and every
   # Jinja string the servers' playbooks reach, found by walking them, with
