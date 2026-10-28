@@ -13,6 +13,9 @@ class Settings(BaseSettings):
     # IPFS
     ipfs_api_url: str = "http://ipfs:5001"
     ipfs_gateway_url: str = "https://ipfs.delivery-kid.cryptograss.live"
+    # The kubo gateway inside the compose network, for reading local content
+    # without a round trip through Caddy (waveform peaks).
+    ipfs_local_gateway_url: str = "http://ipfs:8080"
 
     # Pinata backup
     pinata_jwt: str = ""
