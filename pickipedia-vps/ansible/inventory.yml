@@ -88,7 +88,11 @@ all:
     # every episode of that show. The importer never deletes, so those pages
     # would outlive the pattern that made them — which is why this is a
     # ceiling rather than something to clean up afterwards.
-    import_max_changes: 50
+    #
+    # 360 for one night only (block 26,298,825): October 9's description fix
+    # and a Picky Fingers feed change held the import for 20 nights at 353.
+    # Both checked as intended (blu, #connectome). Set back to 50 after it runs.
+    import_max_changes: 360
 
     # Where the import leaves a note saying how it went, served over HTTP so
     # that the cron-health job on maybelle can see it. Cron output goes to
