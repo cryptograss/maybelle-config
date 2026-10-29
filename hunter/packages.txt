@@ -47,4 +47,9 @@ libaa-bin
 mesa-utils
 ffmpeg
 unzip
+php-cli
+php-mbstring
+php-xml
+php-intl
+composer
 wget
