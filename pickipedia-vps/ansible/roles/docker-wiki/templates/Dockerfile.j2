@@ -2,12 +2,10 @@
 # Thin image — MediaWiki code is bind-mounted from /var/www/pickipedia
 # MariaDB socket is mounted from host
 
-# Pinned to the release that fixes CVE-2026-109618/-109619 (21 Oct 2026):
-# the moving 8.2-apache tag lagged the release by hours. amd64/php is the
-# same official image, pushed per architecture before php:8.2.35-apache's
-# multi-arch list was filled in (it was still empty at 16:30Z). The VPS is
-# amd64. Go back to php:8.2.<n>-apache on the next bump.
-FROM amd64/php:8.2.35-apache
+# Pinned to the release that fixes CVE-2026-109618/-109619 (21 Oct 2026).
+# Multi-arch manifests for php:8.2.35-apache are published; unpinned from the amd64/php workaround.
+# Note: PHP 8.2 reaches end of life on 31 Dec 2026.
+FROM php:8.2.35-apache
 
 # Install PHP extensions needed by MediaWiki. ghostscript, poppler-utils and
 # librsvg2-bin draw PDF pages and SVGs (pickipedia LocalSettings: PdfHandler, rsvg).
