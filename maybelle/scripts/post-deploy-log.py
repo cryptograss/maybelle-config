@@ -344,8 +344,11 @@ def post(args):
         print('⚠ No DrivingThatTrain_Bot_Username / _Password in the vault; deploy log not posted')
         tell(args, 'log not posted: no DrivingThatTrain_Bot_Username / _Password in the vault')
         return
-    wiki = Wiki()
     for attempt in range(3):  # a pickipedia deploy may still be settling
+        # A fresh session each try: logging in again on one already signed in with a BotPassword is refused
+        # ("Cannot log in when using ...BotPasswordSessionProvider sessions"), and that refusal hid why the
+        # first try failed (31 Oct).
+        wiki = Wiki()
         try:
             wiki.login(username, password)
             made = wiki.create(title, text, f'{args.server} {args.state}: deploy log')
@@ -353,7 +356,7 @@ def post(args):
         except Exception as e:
             if attempt == 2:
                 raise
-            print(f'  [wiki not ready ({type(e).__name__}); trying again in 20 s]', file=sys.stderr)
+            print(f'  [wiki not ready ({why(e)}); trying again in 20 s]', file=sys.stderr)
             time.sleep(20)
     url = f"{WIKI_URL}/wiki/{urllib.parse.quote(made.replace(' ', '_'), safe=':/')}"
     print(f'✓ Deploy log: {url}')

@@ -278,3 +278,37 @@ def test_who_deployed_is_their_pickipedia_page(tmp_path):
     assert poster.wiki_user('rj', inventory) == 'rj'  # no PickiPedia name: as said
     assert poster.wiki_user('<remote>', inventory) == '&lt;remote&gt;'
     assert poster.wiki_user('justin', tmp_path / 'missing.yml') == 'justin'
+
+
+def test_a_retry_signs_in_afresh_and_says_why_the_first_try_failed(monkeypatch, tmp_path, capsys):
+    # 31 Oct: the page write failed once, the retry logged in again on the same BotPassword session, and the
+    # wiki's refusal ("Cannot log in when using ...BotPasswordSessionProvider sessions") hid why.
+    def run(cmd, **k):
+        return SimpleNamespace(stdout=VAULT_YAML if cmd[0] == 'ansible-vault' else 'ae318170abcd\n')
+    monkeypatch.setattr(poster.subprocess, 'run', run)
+    monkeypatch.setattr(poster, 'current_block', lambda: 26314196)
+    monkeypatch.setattr(poster.time, 'sleep', lambda s: None)
+    made = []
+
+    class OnceSignedIn:
+        def __init__(self):
+            self.signed_in = False
+
+        def login(self, username, password):
+            if self.signed_in:
+                raise RuntimeError('wiki login: Aborted: Cannot log in when using BotPasswordSessionProvider sessions.')
+            self.signed_in = True
+
+        def create(self, title, text, summary):
+            made.append(title)
+            if len(made) == 1:
+                raise RuntimeError('wiki: readonly: the wiki is in read-only mode')
+            return title
+    monkeypatch.setattr(poster, 'Wiki', OnceSignedIn)
+    log = tmp_path / 'deploy.log'
+    log.write_text(FINISHED)
+    monkeypatch.setattr(sys, 'argv', ['post-deploy-log.py', 'hunter', 'finished', str(log), '--vault-password-file', '/v'])
+    assert poster.main() == 0
+    out = capsys.readouterr()
+    assert '✓ Deploy log:' in out.out
+    assert 'readonly' in out.err  # the first try's own reason, not just its type
