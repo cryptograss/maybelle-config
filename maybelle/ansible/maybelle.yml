@@ -907,6 +907,13 @@
           PICKIPEDIA_TODO_BOT_USER={{ pickipedia_todo_bot_user | default('DrivingThatTrain@magenta-todo') }}
           PICKIPEDIA_TODO_BOT_PASSWORD={{ pickipedia_todo_bot_password }}
           {% endif %}
+          {% if memory_lane_github_token is defined %}
+          # GitHub's API for memory-lane (to-do ticks, merge asks, PR cards, status): unsigned, maybelle shares
+          # 60 calls an hour across all of it, and on 31 Oct ran out (merge asks stood after their PRs merged;
+          # status: "could not query GitHub: HTTPError"). A fine-grained token, read-only, public repositories:
+          # 5000 an hour. Unset: unsigned, as before.
+          GITHUB_TOKEN={{ memory_lane_github_token }}
+          {% endif %}
           {% if memory_lane_github_webhook_secret is defined %}
           # A Mood's to-do list ticks a merged pull request at once (memory-lane
           # services/todo.py): GitHub's webhook (pull requests) to
