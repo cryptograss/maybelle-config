@@ -61,8 +61,10 @@ all:
     # Containers taken out of the inventory: stopped and removed before the
     # others are made (playbook.yml), their files kept on hunter's disk. The
     # shared agency went when each agent got its own container: re's and
-    # blu's homes move from it to theirs (home_from).
-    retired: [agency]
+    # blu's homes moved from it to theirs (home_from). agency-re and
+    # agency-blu went when those were renamed emergent-<name> (Justin,
+    # emergence, 31 Oct 2026): the homes move again, whole.
+    retired: [agency, agency-re, agency-blu]
 
     # Containers (the user-instance role, one each). A person's own container
     # takes its git identity and key from that person's entry above.
@@ -130,7 +132,7 @@ all:
           workspace: maybelle-config
 
       # docs-tests-qa: re's home Mood. re lived in this container until it
-      # moved to agency (below); magent answers here as magent.
+      # moved to its own container (below); magent answers here as magent.
       - name: docs-tests-qa
         mood: docs-tests-qa
         people: [justin, skyler]
@@ -144,20 +146,21 @@ all:
         mood_poller: true
         magent_instructions: true
 
-      # agency-<name>: each agent's own container (magent-self, 23-24 Oct 2026:
-      # Justin, re, magent). It holds the agent's home, its poller and its
-      # rules bundle, and nothing else: kind: agent, so no published ports, no
+      # emergent-<name>: each agent's own container (magent-self, 23-24 Oct 2026:
+      # Justin, re, magent; first called agency-<name>). It holds the agent's
+      # home, its poller and its rules bundle, and nothing else: kind: agent,
+      # so no published ports, no
       # code-server, no previews; its own memory and CPU limit, so one agent
       # can't starve another and a bad start takes down one agent, not all.
-      # A Mood-kind entry (`mood: agency`) for what that brings: no
-      # docker.sock, full tools only for `people`. No Mood called agency need
+      # A Mood-kind entry (`mood: emergent`) for what that brings: no
+      # docker.sock, full tools only for `people`. No Mood called emergent need
       # exist. The agent's home is kept on hunter's disk at
-      # /opt/magenta/agency-<name>/agents/<name> (hunter/CONTAINERS.md). Its
+      # /opt/magenta/emergent-<name>/agents/<name> (hunter/CONTAINERS.md). Its
       # keys are <agent>_runner_key and <agent>_pickipedia_bot_password; the
       # model vendors' are shared by all of them (model_<vendor>_api_key). Its
       # poller doesn't start until its runner key is there.
-      - name: agency-re
-        mood: agency
+      - name: emergent-re
+        mood: emergent
         kind: agent
         people: [justin, skyler]
         full_name: "magent-cryptograss"
@@ -170,10 +173,10 @@ all:
         cpus: 1.5
         agents:
           - name: re
-            # Its home moves here from the shared agency the first time (agent_homes.py):
+            # Its home moves here from agency-re, the first time (agent_homes.py):
             # its sessions, its poller's state and its clones come with it. Harmless
             # once moved; it can go after that deploy.
-            home_from: agency
+            home_from: agency-re
             uid: 2001  # its unix user, in the container and on hunter's disk (its home is kept there)
             # pi, or claude-code; both are set up either way. Anthropic's models run
             # on the subscription (claude_code_oauth_token in the vault, from
@@ -211,8 +214,8 @@ all:
             instructions: true
             repos: [magent-cryptograss/red, cryptograss/magenta, cryptograss/maybelle-config,
                     cryptograss/pickipedia, cryptograss/arthel]
-      - name: agency-blu
-        mood: agency
+      - name: emergent-blu
+        mood: emergent
         kind: agent
         people: [justin, skyler]
         full_name: "magent-cryptograss"
@@ -225,7 +228,7 @@ all:
         cpus: 1.5
         agents:
           - name: blu
-            home_from: agency  # as re's: moved over whole the first time
+            home_from: agency-blu  # as re's: moved over whole the first time
             uid: 2002  # never reused: its home is kept on hunter's disk under this number
             # The blue agent, for the connectome (Justin, magent-self, 2026-10-19).
             # Set up like re: Pi for other vendors' models, Claude Code for

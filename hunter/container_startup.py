@@ -693,7 +693,7 @@ def magent_also_harness():
 def setup_magent_pi(home=Path('/home/magent')):
     """What Pi needs to be magent: the same rules and the same MCP servers as its Claude Code.
 
-    TEMPORARY, for the Pi trial (magent-self, 2026-10-21): once magent lives in agency, setup_agent
+    TEMPORARY, for the Pi trial (magent-self, 2026-10-21): once magent lives in emergent-magent, setup_agent
     does all of this, and this function, magent_also_harness and the inventory's
     magent_also_harness go (Cryptograss:Moods/magent-self/todo).
 
@@ -1002,7 +1002,7 @@ def start_agent_poller(agent):
 
 
 def agent_container():
-    """Whether this is an agent's own container (agency-<name>, CONTAINER_KIND=agent): it runs its
+    """Whether this is an agent's own container (emergent-<name>, CONTAINER_KIND=agent): it runs its
     agents' pollers and nothing for people -- no code-server, no Godot workspace, no previews,
     and no ports to reach them by."""
     return os.environ.get('CONTAINER_KIND', '') == 'agent'
