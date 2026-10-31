@@ -59,13 +59,22 @@ pipeline {
 
         stage('Install Dependencies') {
             steps {
-                // Only install if node_modules doesn't exist or lockfile changed
+                // Always run pnpm install. The "skip if pnpm-lock.yaml isn't
+                // newer than node_modules" guard that stood here can strand
+                // the build on a stale tree: node_modules's mtime moves
+                // whenever anything is written inside it, so the lockfile
+                // check races it. arthel's integration/Jenkinsfile hit
+                // exactly this when @wagmi/core was added (the tree stayed
+                // pinned to a pre-wagmi snapshot) and dropped the guard
+                // (arthel 7b9b5c6); this is the same fix.
+                //
+                // pnpm install against an already-satisfied lockfile is
+                // fast (hardlinks from the content-addressable store), so
+                // the optimisation isn't worth the failure mode.
                 sh '''#!/bin/bash
-                    if [ ! -d "node_modules" ] || [ pnpm-lock.yaml -nt node_modules ]; then
-                        . "$NVM_DIR/nvm.sh" --silent
-                        nvm use ${NODE_VERSION} --silent
-                        pnpm install --no-frozen-lockfile --config.ignore-scripts=false
-                    fi
+                    . "$NVM_DIR/nvm.sh" --silent
+                    nvm use ${NODE_VERSION} --silent
+                    pnpm install --no-frozen-lockfile --config.ignore-scripts=false
                 '''
             }
         }
