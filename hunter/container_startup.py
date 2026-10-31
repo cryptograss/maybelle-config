@@ -626,7 +626,7 @@ def setup_godot():
 
 
 def write_runner_key():
-    """Hand the poller its runner key (memory-lane's MOOD_RUNNER_KEYS).
+    """Hand the poller its runner key (memory-lane's MOOD_RUNNER_KEY_<AGENT>).
 
     The poller is started by `su -`, which leaves this container's
     environment behind, so the key goes in a file only magent can read --
