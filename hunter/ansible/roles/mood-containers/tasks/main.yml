@@ -56,26 +56,10 @@
     label: "{{ item.name }}"
 
 - name: Its settings
-  copy:
+  template:
+    src: config.json.j2
     dest: "{{ base_dir }}/mood-containers/config.json"
     mode: '0644'
-    content: "{{ cfg | to_nice_json }}\n"
-  vars:
-    cfg:
-      api: https://magenta.cryptograss.live
-      key_file: /etc/magenta/access-key
-      base_dir: "{{ base_dir }}"
-      shared_dir: "{{ base_dir }}/mood-containers"
-      env_file: "{{ base_dir }}/mood-containers/mood.env"
-      image: magenta-arthel:latest
-      memory_lane_dir: "{{ memory_lane_dir }}"
-      instructions: /opt/magenta/magenta-source/agents/magent.md
-      domain: "{{ base_domain }}"
-      caddy_dir: /etc/caddy/moods.d
-      caddyfile: /etc/caddy/Caddyfile
-      people: "{{ people | map(attribute='name') | list }}"
-      memory_limit: 4g
-      cpus: 2
 
 - name: Where their Caddy files go (the Caddyfile imports them)
   file:

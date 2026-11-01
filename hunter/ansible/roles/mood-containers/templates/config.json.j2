@@ -1,0 +1,16 @@
+{
+  "api": "https://magenta.cryptograss.live",
+  "key_file": "/etc/magenta/access-key",
+  "base_dir": {{ base_dir | to_json }},
+  "shared_dir": {{ (base_dir ~ '/mood-containers') | to_json }},
+  "env_file": {{ (base_dir ~ '/mood-containers/mood.env') | to_json }},
+  "image": "magenta-arthel:latest",
+  "memory_lane_dir": {{ memory_lane_dir | to_json }},
+  "instructions": "/opt/magenta/magenta-source/agents/magent.md",
+  "domain": {{ base_domain | to_json }},
+  "caddy_dir": "/etc/caddy/moods.d",
+  "caddyfile": "/etc/caddy/Caddyfile",
+  "people": {{ people | map(attribute='name') | list | to_json }},
+  "memory_limit": "4g",
+  "cpus": 2
+}
