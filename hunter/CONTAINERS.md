@@ -1,10 +1,14 @@
 # What a container on hunter is
 
-Proposed in the magent-self Mood on 2026-10-11, as the shape we're moving to.
-Some of it is already true (the `uploads-and-embeds` and `docs-tests-qa` containers);
-some is not yet (the containers still named after people).
+**Since 1 Nov 2026, Moods own directories and agents own processes**
+(Cryptograss:Moods as Directories on PickiPedia; the model is
+Cryptograss:Mood Architecture). A Mood is `/moods/<slug>`, seen by every
+container; each agent has one container and one poller (`emergent-<name>`);
+people have `workbench`. The sections at the end say how. The Mood containers
+below (uploads-and-embeds, docs-tests-qa) were retired in step 5, their
+workspaces folded into `/moods`; what follows about them is history.
 
-## A container belongs to a Mood
+## A container belongs to a Mood (until 1 Nov 2026)
 
 A Mood (a conversation in magenta, about one thing) can have a container on
 hunter. The container is named after the Mood, and it holds what work in that
@@ -192,3 +196,21 @@ them). A dev server started in workbench on one of them, bound to
   Let's Encrypt's 50 new certificates a week for cryptograss.live.
 - A Mood named like a container that still has its own `<name>0-9`
   (uploads-and-embeds, docs-tests-qa) waits until that container retires.
+
+## Step 5: the Mood containers fold into /moods
+
+uploads-and-embeds (delivery-kid before 1 Nov) and docs-tests-qa are
+`retired`. Their workspaces move, whole and once, into
+`/opt/magenta/moods/<slug>` (`hunter/scripts/fold_mood_homes.py`, the
+inventory's `folds`): clones, worktrees, uncommitted edits, branches on no
+remote. A worktree records both its ends by absolute path, so each is
+rewritten from `/home/magent/workspace/` to `/moods/<slug>/`, and the group
+`moods` is given the lot. A `.folded-from` file in the Mood's directory says
+what came from where. Tried on a copy of uploads-and-embeds' real
+workspace: all 21 worktrees resolve from `/moods`, none prunable, and every
+uncommitted edit came along.
+
+Their magent sessions stay on their homes' disk, not resumed: with the Mood
+containers gone, justin-arthel's poller is magent's only one
+(`magent_only_poller`), so a mention there starts over from the record.
+

@@ -66,7 +66,19 @@ all:
     # emergence, 31 Oct 2026): the homes move again, whole.
     # delivery-kid went when its container took its Mood's name, uploads-and-embeds
     # (renamed_from, below).
-    retired: [agency, agency-re, agency-blu, delivery-kid]
+    # uploads-and-embeds (delivery-kid before 1 Nov) and docs-tests-qa went when
+    # Moods became directories (Cryptograss:Moods as Directories, step 5): their
+    # workspaces folded into /opt/magenta/moods/<slug> (`folds`, below).
+    retired: [agency, agency-re, agency-blu, delivery-kid, uploads-and-embeds, docs-tests-qa]
+
+    # A retired Mood container's workspace, moved whole into its Mood's directory
+    # the first time (hunter/scripts/fold_mood_homes.py): from the first of `from`
+    # that has one, a container that went by more than one name.
+    folds:
+      - mood: uploads-and-embeds
+        from: [uploads-and-embeds, delivery-kid]
+      - mood: docs-tests-qa
+        from: [docs-tests-qa]
 
     # Containers (the user-instance role, one each). A person's own container
     # takes its git identity and key from that person's entry above.
@@ -77,6 +89,10 @@ all:
         code_server_password: "{{ code_server_password }}"
         github_token: "{{ magent_github_token }}"
         mood_poller: true  # wake a turn on web-posted @magent mentions
+        # magent's only poller since the Mood containers went (Moods as Directories,
+        # step 5): a session of its not on this disk is lost, so a mention there
+        # starts over from the record rather than waiting for another container.
+        magent_only_poller: true
         # magent's instructions from PickiPedia as each turn's system prompt (--instructions):
         # its greeting line, General Orders, Cryptograss:Agents/Magent/Instructions, the Mood's.
         magent_instructions: true
@@ -103,54 +119,6 @@ all:
         port_range_start: 14030
         code_server_password: "{{ code_server_password }}"
         github_token: "{{ magent_github_token }}"
-
-      # --- Moods (memory-lane Moods) with a container of their own -------
-      # (memory-lane #52.) An entry with `mood:` is a Mood's container, not a
-      # person's: no docker.sock, so full tools can open up to the `people`
-      # in it; a poller that answers that Mood (its sessions live only here);
-      # git as magent. Reached by SSH on its own port with any of the people's
-      # keys (`ssh -p <ssh_port> magent@hunter.cryptograss.live`), not through
-      # the router, which routes each key to its owner's container. Its web
-      # ports work as anyone's: <name>1.hunter.cryptograss.live and so on.
-      - name: uploads-and-embeds
-        mood: uploads-and-embeds
-        # Its Mood's name since 1 Nov 2026 (it was the Mood's old slug): the
-        # directory moves over whole the first time (user-instance role).
-        # Harmless once moved; it can go after that deploy.
-        renamed_from: delivery-kid
-        people: [justin, skyler]
-        full_name: "magent-cryptograss"
-        email: "magent@cryptograss.live"
-        github_username: "magent-cryptograss"
-        ssh_port: 2230
-        port_range_start: 14040  # 14040-14049
-        code_server_password: "{{ code_server_password }}"
-        github_token: "{{ magent_github_token }}"
-        mood_poller: true
-        magent_instructions: true
-        # Brought over once, before the container first starts: Sky's
-        # delivery-kid session and the checkout it works in, at the same
-        # paths, so a wake here can resume it. Skipped once it's here.
-        import_session:
-          from: skyler
-          id: b44becf4-487a-4e9f-bf3a-a881c7420e01
-          project: -home-magent-workspace-maybelle-config--claude-worktrees-preview-and-progress-fixes
-          workspace: maybelle-config
-
-      # docs-tests-qa: re's home Mood. re lived in this container until it
-      # moved to its own container (below); magent answers here as magent.
-      - name: docs-tests-qa
-        mood: docs-tests-qa
-        people: [justin, skyler]
-        full_name: "magent-cryptograss"
-        email: "magent@cryptograss.live"
-        github_username: "magent-cryptograss"
-        ssh_port: 2231
-        port_range_start: 14050  # 14050-14059
-        code_server_password: "{{ code_server_password }}"
-        github_token: "{{ magent_github_token }}"
-        mood_poller: true
-        magent_instructions: true
 
       # workbench: the people's box (Cryptograss:Moods as Directories, Justin,
       # emergence, 1 Nov 2026). Every Mood's directory is in it, at /moods,

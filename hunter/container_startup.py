@@ -763,6 +763,10 @@ def start_mood_poller():
         # Its instructions from PickiPedia, given to each turn as system prompt, as the agents' are.
         if os.environ.get('MAGENT_INSTRUCTIONS') == '1':
             args += ' --instructions'
+        # Its only poller (Moods as Directories, step 5): a session not on this disk is lost, not another
+        # container's, so a mention there starts over from the record.
+        if os.environ.get('MAGENT_ONLY_POLLER') == '1' and not os.environ.get('MOOD_SLUG', '').strip():
+            args += ' --only-poller yes'
         slug = os.environ.get('MOOD_SLUG', '').strip()
         if slug:
             people = os.environ.get('MOOD_FULL_TOOLS_FOR', '').strip()

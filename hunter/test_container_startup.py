@@ -249,6 +249,14 @@ class MagentInstructionsTest(unittest.TestCase):
         self.assertIn('--agent magent --instructions', self.started({'MAGENT_INSTRUCTIONS': '1'}))
         self.assertNotIn('--instructions', self.started({'MAGENT_INSTRUCTIONS': ''}))
 
+    def test_its_only_poller_once_the_mood_containers_went(self):
+        # Moods as Directories, step 5: justin-arthel's poller is magent's only one.
+        self.assertIn('--only-poller yes', self.started({'MAGENT_ONLY_POLLER': '1', 'MOOD_SLUG': ''}))
+        self.assertNotIn('--only-poller', self.started({'MAGENT_ONLY_POLLER': '', 'MOOD_SLUG': ''}))
+        # A Mood's own container never says so, whatever it's given.
+        self.assertNotIn('--only-poller', self.started({'MAGENT_ONLY_POLLER': '1', 'MOOD_SLUG': 'chartifacts',
+                                                         'MOOD_FULL_TOOLS_FOR': 'justin'}))
+
 
 class AgentInstructionsTest(unittest.TestCase):
     """An agent with instructions: true gets --instructions; one with neither them nor a rules file isn't started."""
