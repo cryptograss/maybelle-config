@@ -176,6 +176,6 @@
           {% endfor %}
 
           Next steps:
-          - SSH to container: ssh justin@hunter.cryptograss.live
+          - SSH in: ssh sshrouter@hunter.cryptograss.live <mood-slug>, or workbench
           - Test MCP bootstrap on fresh Claude Code session
           ============================================

@@ -77,8 +77,8 @@ in_list "$USER" "${OWN_CONTAINERS[@]}" || TARGET_USER=workbench
 # Usage:
 #   ssh sshrouter@hunter                  → plain shell in your container (workbench, if you have none)
 #   ssh sshrouter@hunter tmux             → attach to tmux session "magenta" in your container
-#   ssh sshrouter@hunter justin           → join justin's container (tmux session "magenta")
-#   ssh sshrouter@hunter justin jam       → join justin's container (tmux session "jam")
+#   ssh sshrouter@hunter emergent-magent  → join magent's container (tmux session "magenta")
+#   ssh sshrouter@hunter emergent-magent jam → the same, tmux session "jam"
 #   ssh sshrouter@hunter workbench        → plain shell in workbench, the people's box
 #   ssh sshrouter@hunter chartifacts      → a shell in workbench, in /moods/chartifacts
 #   ssh sshrouter@hunter chartifacts tmux → tmux session "chartifacts" there, shared by whoever joins it

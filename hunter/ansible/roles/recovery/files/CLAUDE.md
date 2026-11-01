@@ -38,10 +38,10 @@ Justin can open the other with `magenta.sh recovery --subscription` or
 - **Your rules:** `/opt/magenta/magenta-source/agents/magent.md` and
   `/opt/magenta/magenta-source/notes/REAWAKEN_MAGENT.md` (hunter's copy of the
   magenta repo; it can be days behind GitHub).
-- **Your own notes:** in your home in Justin's container, on this disk:
-  `/opt/magenta/justin/home/.claude/projects/-home-magent/memory/MEMORY.md`
+- **Your own notes:** in your home in your own container (emergent-magent), on this disk:
+  `/opt/magenta/emergent-magent/home/.claude/projects/-home-magent/memory/MEMORY.md`
   and the files beside it. Only uid 1000 can read them. While Docker works:
-  `docker run --rm -v /opt/magenta/justin/home/.claude/projects/-home-magent/memory:/m:ro alpine cat /m/MEMORY.md`.
+  `docker run --rm -v /opt/magenta/emergent-magent/home/.claude/projects/-home-magent/memory:/m:ro alpine cat /m/MEMORY.md`.
 - **What hunter is:** `/opt/magenta/maybelle-config/hunter/CONTAINERS.md`, and
   the deploy that makes it, `/opt/magenta/maybelle-config/hunter/ansible/`.
 

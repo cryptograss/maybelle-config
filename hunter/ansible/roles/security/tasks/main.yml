@@ -68,9 +68,8 @@
     rule: allow
     port: '{{ item }}'
     proto: tcp
-  # People's containers, and each Mood's own container (reached directly,
-  # not through the router).
-  loop: "{{ ['2222', '2223', '2224'] + (users | selectattr('mood', 'defined') | selectattr('ssh_port', 'defined') | map(attribute='ssh_port') | map('string') | list) }}"
+  # Each Mood's own container (reached directly, not through the router).
+  loop: "{{ (users | selectattr('mood', 'defined') | selectattr('ssh_port', 'defined') | map(attribute='ssh_port') | map('string') | list) }}"
 
 - name: Configure UFW - allow HTTP/HTTPS
   ufw:
@@ -81,11 +80,16 @@
     - '80'
     - '443'
 
-- name: Configure UFW - allow container web ports
+# The people's own containers (justin, rj, skyler, fibonacci) retired on 1 Nov
+# 2026: their ssh and web ports close. Removing a rule from a loop above
+# doesn't remove it from ufw, so this does, once.
+- name: Configure UFW - close the retired people's containers' ports
   ufw:
     rule: allow
-    port: '14000:14029'
+    port: '{{ item }}'
     proto: tcp
+    delete: true
+  loop: ['2222', '2223', '2224', '14000:14029']
 
 - name: Configure UFW - allow shared services
   ufw:
