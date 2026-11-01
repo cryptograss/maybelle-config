@@ -1,7 +1,7 @@
 ---
 # Hunter: Multi-user development environment
 # PostgreSQL and Memory Lane services are now on maybelle
-# Hunter runs: user containers, watcher (posting to maybelle)
+# Hunter runs: user containers (Moods', agents', people's), faces
 - name: Setup Magenta Multi-User Development Environment
   hosts: hunter
   become: yes
@@ -68,7 +68,7 @@
         ssh_announce_server: hunter
         ssh_announce_key_group: sshrouter
 
-    - name: Include services role (watcher posting to maybelle)
+    - name: Include services role (takes down what no longer runs here, the watcher among them)
       include_role:
         name: services
 
@@ -162,7 +162,7 @@
           PostgreSQL: maybelle (10.0.0.2)
           Memory Lane: https://memory-lane.maybelle.cryptograss.live
           MCP Server: http://10.0.0.2:8000
-          Watcher: posting to maybelle ingest endpoint
+          Turns reach the record from each poller's own stream (no watcher)
 
           User instances deployed:
           {% for user in users %}

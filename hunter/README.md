@@ -7,8 +7,8 @@ Infrastructure for deploying the magenta memory system to hunter VPS.
 Cryptograss:Mood Architecture). A Mood is a directory at `/moods/<slug>`,
 seen by every container. Each emergent has one container and one poller
 (`emergent-<name>`); people have `workbench`. PostgreSQL does not run on
-hunter: the database lives on maybelle. The watcher is being retired
-(maybelle-config#254); the poller already records the same lines itself.
+hunter: the database lives on maybelle. The watcher is retired
+(maybelle-config#254): the pollers record every turn themselves.
 
 ## Architecture
 
@@ -126,9 +126,10 @@ ansible-playbook -i inventory.yml playbook.yml
 
 This deploys the shared directory and its ACLs, the emergents' containers from
 the inventory (`emergent-*`), `workbench`, the ssh router and Caddy, and
-runs the hourly unpushed-work backup (`housekeeping`). It also still
-deploys the watcher (`services` role, posting to maybelle) until #254
-merges, and `faces`. Postgres is not deployed: it lives on maybelle.
+runs the hourly unpushed-work backup (`housekeeping`), and `faces`. The
+`services` role only takes down what used to run here (the watcher,
+retired by #254; mcp-server, memory-lane, magenta-postgres). Postgres
+lives on maybelle.
 
 ## Logs
 

@@ -1,67 +1,25 @@
 ---
-# Hunter services: only watcher (postgres, MCP, Memory Lane are on maybelle)
-- name: Create .env file for watcher
-  copy:
-    dest: "{{ memory_lane_dir }}/.env"
-    content: |
-      WATCHER_REMOTE_ENDPOINT=https://memory-lane.maybelle.cryptograss.live/api/ingest/
-      INGEST_API_KEY={{ ingest_api_key }}
-    mode: '0600'
-
-- name: Create watcher-only docker-compose file
-  copy:
-    dest: "{{ memory_lane_dir }}/docker-compose.watcher.yml"
-    content: |
-      services:
-        watcher:
-          build:
-            context: .
-            dockerfile: Dockerfile.services
-          container_name: watcher
-          env_file: .env
-          environment:
-            - DJANGO_SETTINGS_MODULE=memory_viewer.settings
-            # People's containers only (a home shared with another entry, as
-            # emergent-magent's is, once). A Mood's container is not one person's:
-            # the watcher would file what's typed there under the container's
-            # name, as if it were someone. Its woken turns reach the record
-            # through the runner's stream instead (memory-lane #40).
-            - CLAUDE_LOGS_DIR={% for user in users if user.mood is not defined and user.home_dir is not defined %}/project-logs/{{ user.name }}{% if not loop.last %}:{% endif %}{% endfor %}
-
-            - WATCHER_ERA_NAME=Live Conversations
-            # One-time recovery switch (jMyles/memory-lane#15). Flip
-            # watcher_replay_from_start to true in inventory.yml for a single
-            # deploy: the watcher re-ingests every existing JSONL line before
-            # tracking from the end. The importer is idempotent by uuid, so
-            # nothing duplicates. Flip it back afterwards.
-            - WATCHER_REPLAY_FROM_START={{ 'true' if (watcher_replay_from_start | default(false) | bool) else '' }}
-          volumes:
-      {% for user in users if user.mood is not defined and user.home_dir is not defined %}
-            - /opt/magenta/{{ user.name }}/home/.claude/projects:/project-logs/{{ user.name }}:ro
-      {% endfor %}
-          restart: unless-stopped
-          command: python watcher/conversation_watcher.py
-    mode: '0644'
-
-- name: Stop old services that should no longer run on hunter
+# Hunter services: none of its own any more. postgres, MCP and Memory Lane
+# moved to maybelle long ago; the watcher went on 1 Nov 2026 (Justin,
+# emergence): every turn reaches the record from the pollers' own stream
+# (events/1, Claude Code and Pi alike), and the watcher only re-sent the same
+# Claude Code lines, by the same uuids, while failing on the newer line types.
+# These tasks take the old ones down and leave nothing behind, once.
+- name: Stop services that no longer run on hunter
   command: docker rm -f {{ item }}
   loop:
     - mcp-server
     - memory-lane
     - magenta-postgres
-  ignore_errors: yes
+    - watcher
+  register: stopped
+  changed_when: stopped.rc == 0
+  failed_when: false
 
-- name: Remove existing watcher container
-  command: docker rm -f watcher
-  ignore_errors: yes
-
-# -p: the project's name from when it ran in memory-lane-source (as faces).
-- name: Start watcher service
-  command: docker compose -p memory-lane-source -f docker-compose.watcher.yml up -d --build --force-recreate
-  args:
-    chdir: "{{ memory_lane_dir }}"
-
-- name: Verify watcher is running
-  command: docker ps --filter "name=watcher" --format "{% raw %}{{.Names}}{% endraw %}"
-  register: watcher_check
-  failed_when: "'watcher' not in watcher_check.stdout"
+- name: Remove the watcher's compose file and its .env (the ingest key)
+  file:
+    path: "{{ memory_lane_dir }}/{{ item }}"
+    state: absent
+  loop:
+    - docker-compose.watcher.yml
+    - .env
