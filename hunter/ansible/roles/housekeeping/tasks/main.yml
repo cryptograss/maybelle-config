@@ -129,6 +129,46 @@
       #!/bin/sh
       exec /usr/local/sbin/hunter-disk-report --motd
 
+# Git work that exists only on hunter (a branch on no remote, an uncommitted edit), in any
+# home, kept hourly in /opt/magenta/vcs-backup for maybelle to pull (maybelle.yml: hunter VCS
+# backup). hunter stays cheap to lose (Justin, emergence, 1 Nov 2026). It only reads the checkouts.
+- name: Install the unpushed-work script
+  copy:
+    src: vcs-unpushed.py
+    dest: /usr/local/sbin/hunter-vcs-unpushed
+    mode: "0755"
+
+- name: Unpushed-work service
+  copy:
+    dest: /etc/systemd/system/hunter-vcs-unpushed.service
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=Keep git work that exists only on hunter in /opt/magenta/vcs-backup
+
+      [Service]
+      Type=oneshot
+      ExecStart=/usr/local/sbin/hunter-vcs-unpushed --base-dir /opt/magenta --out /opt/magenta/vcs-backup
+      TimeoutStartSec=30min
+      Nice=10
+      IOSchedulingClass=idle
+
+- name: Unpushed-work timer
+  copy:
+    dest: /etc/systemd/system/hunter-vcs-unpushed.timer
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=Keep hunter's unpushed git work, hourly
+
+      [Timer]
+      OnCalendar=hourly
+      Persistent=true
+      RandomizedDelaySec=120
+
+      [Install]
+      WantedBy=timers.target
+
 - name: Enable the housekeeping timers
   systemd:
     name: "{{ item }}"
@@ -139,3 +179,4 @@
     - pickipedia-backup-retention.timer
     - docker-builder-prune.timer
     - hunter-disk-report.timer
+    - hunter-vcs-unpushed.timer
