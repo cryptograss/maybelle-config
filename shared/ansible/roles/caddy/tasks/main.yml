@@ -11,6 +11,24 @@
     state: directory
     mode: '0755'
 
+# hunter: the Caddyfile imports moods.caddy and reads moods-ask, both written
+# each minute by hunter-mood-previews (mood-previews role); they're here, empty,
+# before Caddy first loads it.
+- name: Each Mood's previews, an empty start (hunter)
+  copy:
+    dest: /etc/caddy/moods.caddy
+    content: "# Written by hunter-mood-previews each minute.\n"
+    force: no
+    mode: '0644'
+  when: caddy_config_type | default('') == 'hunter'
+
+- name: What on-demand TLS may ask for (hunter)
+  file:
+    path: /etc/caddy/moods-ask
+    state: directory
+    mode: '0755'
+  when: caddy_config_type | default('') == 'hunter'
+
 - name: Deploy Caddyfile
   template:
     src: "Caddyfile.{{ caddy_config_type | default('default') }}.j2"

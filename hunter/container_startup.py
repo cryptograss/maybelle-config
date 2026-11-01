@@ -763,6 +763,10 @@ def start_mood_poller():
         # Its instructions from PickiPedia, given to each turn as system prompt, as the agents' are.
         if os.environ.get('MAGENT_INSTRUCTIONS') == '1':
             args += ' --instructions'
+        # Its only poller (Moods as Directories, step 5): a session not on this disk is lost, not another
+        # container's, so a mention there starts over from the record.
+        if os.environ.get('MAGENT_ONLY_POLLER') == '1' and not os.environ.get('MOOD_SLUG', '').strip():
+            args += ' --only-poller yes'
         slug = os.environ.get('MOOD_SLUG', '').strip()
         if slug:
             people = os.environ.get('MOOD_FULL_TOOLS_FOR', '').strip()
@@ -835,6 +839,9 @@ def setup_agent(agent):
                 shutil.copy2(skel, home / skel.name)
                 shutil.chown(home / skel.name, user=name, group=name)
     shutil.chown(home, user=name, group=name)
+    # Every Mood's directory is the group moods' (Cryptograss:Moods as Directories):
+    # its clones are any agent's to work in. Each start, so an agent made before it joins too.
+    run_command(f"usermod -aG moods {name}")
     # The others can't read magent's home, where its GitHub token, wiki
     # password and runner key are; nor magent theirs.
     os.chmod('/home/magent', 0o750)

@@ -1,5 +1,24 @@
 # Auto-generated Caddyfile for Magenta multi-user environment
 
+{
+    # Each Mood's previews (moods.caddy, below) get a certificate only when one
+    # of their hostnames is first visited, and only for a hostname listed in
+    # /etc/caddy/moods-ask: ten hostnames a Mood would pass Let's Encrypt's 50
+    # new certificates a week for cryptograss.live.
+    on_demand_tls {
+        ask http://localhost:5555/check
+    }
+}
+
+# What on_demand_tls may ask for: a file for each Mood preview hostname, kept by
+# hunter-mood-previews. 200 if it's there, 404 if not.
+http://localhost:5555 {
+    bind 127.0.0.1
+    rewrite * /{query.domain}
+    root * /etc/caddy/moods-ask
+    file_server
+}
+
 {# An agent's own container (emergent-<name>) publishes nothing. #}
 {% for user in users if user.kind | default('') != 'agent' %}
 # {{ user.name }} - Port range {{ user.port_range_start }}-{{ user.port_range_start + 9 }}
@@ -30,3 +49,7 @@ arthel.{{ user.name }}.{{ base_domain }} {
 faces.{{ base_domain }} {
     reverse_proxy localhost:8090
 }
+
+# Each Mood's previews, <slug>0-9.{{ base_domain }}, in workbench (Cryptograss:Moods
+# as Directories): written each minute by hunter-mood-previews.
+import /etc/caddy/moods.caddy

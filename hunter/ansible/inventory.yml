@@ -61,7 +61,19 @@ all:
     # emergence, 31 Oct 2026): the homes move again, whole.
     # delivery-kid went when its container took its Mood's name, uploads-and-embeds
     # (renamed_from, below).
-    retired: [agency, agency-re, agency-blu, delivery-kid]
+    # uploads-and-embeds (delivery-kid before 1 Nov) and docs-tests-qa went when
+    # Moods became directories (Cryptograss:Moods as Directories, step 5): their
+    # workspaces folded into /opt/magenta/moods/<slug> (`folds`, below).
+    retired: [agency, agency-re, agency-blu, delivery-kid, uploads-and-embeds, docs-tests-qa]
+
+    # A retired Mood container's workspace, moved whole into its Mood's directory
+    # the first time (hunter/scripts/fold_mood_homes.py): from the first of `from`
+    # that has one, a container that went by more than one name.
+    folds:
+      - mood: uploads-and-embeds
+        from: [uploads-and-embeds, delivery-kid]
+      - mood: docs-tests-qa
+        from: [docs-tests-qa]
 
     # Containers (the user-instance role, one each). A person's own container
     # takes its git identity and key from that person's entry above.
@@ -71,15 +83,9 @@ all:
         port_range_start: 14000  # 14000-14009
         code_server_password: "{{ code_server_password }}"
         github_token: "{{ magent_github_token }}"
-        mood_poller: true  # wake a turn on web-posted @magent mentions
-        # magent's instructions from PickiPedia as each turn's system prompt (--instructions):
-        # its greeting line, General Orders, Cryptograss:Agents/Magent/Instructions, the Mood's.
-        magent_instructions: true
-        # magent's second harness here: a Mood whose model is another vendor's
-        # (openrouter/...) runs magent on Pi; Anthropic's stay on Claude Code
-        # (magenta#71). The Pi trial (magent-self, 2026-10-21) is in a Mood
-        # whose newest magent session is in this container.
-        magent_also_harness: pi
+        # magent's poller moved to emergent-magent (Moods as Directories, step 6):
+        # this container is Justin's terminal and previews until it retires.
+        mood_poller: false
 
       - name: rj  # rj's own container, the older shape (people, above)
         ssh_port: 2223
@@ -99,53 +105,24 @@ all:
         code_server_password: "{{ code_server_password }}"
         github_token: "{{ magent_github_token }}"
 
-      # --- Moods (memory-lane Moods) with a container of their own -------
-      # (memory-lane #52.) An entry with `mood:` is a Mood's container, not a
-      # person's: no docker.sock, so full tools can open up to the `people`
-      # in it; a poller that answers that Mood (its sessions live only here);
-      # git as magent. Reached by SSH on its own port with any of the people's
-      # keys (`ssh -p <ssh_port> magent@hunter.cryptograss.live`), not through
-      # the router, which routes each key to its owner's container. Its web
-      # ports work as anyone's: <name>1.hunter.cryptograss.live and so on.
-      - name: uploads-and-embeds
-        mood: uploads-and-embeds
-        # Its Mood's name since 1 Nov 2026 (it was the Mood's old slug): the
-        # directory moves over whole the first time (user-instance role).
-        # Harmless once moved; it can go after that deploy.
-        renamed_from: delivery-kid
-        people: [justin, skyler]
+      # workbench: the people's box (Cryptograss:Moods as Directories, Justin,
+      # emergence, 1 Nov 2026). Every Mood's directory is in it, at /moods,
+      # as in every agent's container: people work there beside the agents.
+      # A terminal, code-server and the previews; no poller, and no
+      # docker.sock (a Mood-kind entry). Reached through the router:
+      # `ssh sshrouter@hunter chartifacts` is a shell in /moods/chartifacts,
+      # `ssh sshrouter@hunter workbench` one in its home; or on its own port.
+      - name: workbench
+        mood: workbench
+        people: [justin, skyler, rj, fibonacci]
         full_name: "magent-cryptograss"
         email: "magent@cryptograss.live"
         github_username: "magent-cryptograss"
-        ssh_port: 2230
-        port_range_start: 14040  # 14040-14049
+        ssh_port: 2240
+        port_range_start: 14100  # 14100-14109: workbench0-9.hunter, until previews go by Mood (step 4)
         code_server_password: "{{ code_server_password }}"
         github_token: "{{ magent_github_token }}"
-        mood_poller: true
-        magent_instructions: true
-        # Brought over once, before the container first starts: Sky's
-        # delivery-kid session and the checkout it works in, at the same
-        # paths, so a wake here can resume it. Skipped once it's here.
-        import_session:
-          from: skyler
-          id: b44becf4-487a-4e9f-bf3a-a881c7420e01
-          project: -home-magent-workspace-maybelle-config--claude-worktrees-preview-and-progress-fixes
-          workspace: maybelle-config
-
-      # docs-tests-qa: re's home Mood. re lived in this container until it
-      # moved to its own container (below); magent answers here as magent.
-      - name: docs-tests-qa
-        mood: docs-tests-qa
-        people: [justin, skyler]
-        full_name: "magent-cryptograss"
-        email: "magent@cryptograss.live"
-        github_username: "magent-cryptograss"
-        ssh_port: 2231
-        port_range_start: 14050  # 14050-14059
-        code_server_password: "{{ code_server_password }}"
-        github_token: "{{ magent_github_token }}"
-        mood_poller: true
-        magent_instructions: true
+        mood_poller: false
 
       # emergent-<name>: each agent's own container (magent-self, 23-24 Oct 2026:
       # Justin, re, magent; first called agency-<name>). It holds the agent's
@@ -160,6 +137,34 @@ all:
       # keys are <agent>_runner_key and <agent>_pickipedia_bot_password; the
       # model vendors' are shared by all of them (model_<vendor>_api_key). Its
       # poller doesn't start until its runner key is there.
+      # emergent-magent: magent's own container, as re and blu have theirs
+      # (Moods as Directories, step 6). Its home is the one magent has always had,
+      # justin-arthel's, mounted where it is (home_dir): 11G of sessions and clones,
+      # not copied, so every session resumes. justin-arthel writes the home's files
+      # (git identity, CLAUDE.md) until it retires, and the home moves here then.
+      # No `mood:`: magent answers every Mood, and keeps docker.sock (Justin, 1 Nov
+      # 05:24Z). No ports; reached with `ssh sshrouter@hunter emergent-magent`.
+      - name: emergent-magent
+        kind: agent
+        home_dir: /opt/magenta/justin/home
+        full_name: "magent-cryptograss"
+        email: "magent@cryptograss.live"
+        github_username: "magent-cryptograss"
+        code_server_password: "{{ code_server_password }}"
+        github_token: "{{ magent_github_token }}"
+        memory_limit: 8g
+        cpus: 3
+        mood_poller: true  # wake a turn on web-posted @magent mentions
+        # magent's instructions from PickiPedia as each turn's system prompt (--instructions):
+        # its greeting line, General Orders, Cryptograss:Agents/Magent/Instructions, the Mood's.
+        magent_instructions: true
+        # magent's second harness: a Mood whose model is another vendor's runs magent
+        # on Pi (magenta#71). Its scaffolding goes once that trial is settled.
+        magent_also_harness: pi
+        # Its only poller: a session not on this disk is lost, and a mention there
+        # starts over from the record.
+        magent_only_poller: true
+
       - name: emergent-re
         mood: emergent
         kind: agent

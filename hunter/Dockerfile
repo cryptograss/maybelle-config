@@ -95,6 +95,15 @@ ARG DOCKER_GID=999
 RUN groupadd -g ${DOCKER_GID} docker \
     && usermod -aG docker magent
 
+# /moods: every Mood's directory, shared by every container on hunter
+# (Cryptograss:Moods as Directories). Owned by the group moods, gid 3000 here
+# and on hunter's disk; magent is in it, and each agent joins at startup
+# (container_startup.py setup_agent). Git trusts the clones there whoever
+# made them, since one agent's clone is another's to work in.
+RUN groupadd -g 3000 moods \
+    && usermod -aG moods magent \
+    && git config --system --add safe.directory '/moods/*'
+
 # Install GitHub CLI (following official docs)
 RUN (type -p wget >dev/null || (apt update && apt install wget -y)) \
     && mkdir -p -m 755 /etc/apt/keyrings \

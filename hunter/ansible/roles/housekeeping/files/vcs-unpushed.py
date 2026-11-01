@@ -5,7 +5,8 @@ hunter is meant to be cheap to lose (Justin, emergence, 1 Nov 2026): the record
 lives on maybelle, the code on GitHub, the secrets in the vault. What slipped in
 is work in the homes that was never pushed: a branch with commits on no remote,
 or edits never committed. This finds both, hourly, in every home under
-/opt/magenta (people's, Moods', agents'), and writes for each checkout that has any:
+/opt/magenta (people's, Moods', agents') and in every Mood's directory (/opt/magenta/moods/<slug>,
+Cryptograss:Moods as Directories), and writes for each checkout that has any:
 
     <out>/<container>/<home>/<repo path, / as __>/branches.bundle   the branches with commits on no remote
     <out>/<container>/<home>/<repo path, / as __>/<worktree>.patch  uncommitted changes to tracked files
@@ -37,20 +38,24 @@ def git(repo, *args, out=None):
 
 
 def homes(base):
-    """(container, home name, path) for each home: a container's own, and its agents'."""
+    """(container, home name, path, where its checkouts are) for each home: a container's own and
+    its agents', whose checkouts are in workspace/; and each Mood's directory, whose are in it."""
     for container in sorted(p for p in base.iterdir() if p.is_dir()):
         if (container / 'home').is_dir():
-            yield container.name, 'magent', container / 'home'
+            yield container.name, 'magent', container / 'home', container / 'home' / 'workspace'
         agents = container / 'agents'
         if agents.is_dir():
             for agent in sorted(p for p in agents.iterdir() if p.is_dir()):
-                yield container.name, agent.name, agent
+                yield container.name, agent.name, agent, agent / 'workspace'
+    moods = base / 'moods'
+    if moods.is_dir():
+        for mood in sorted(p for p in moods.iterdir() if p.is_dir()):
+            yield 'moods', mood.name, mood, mood
 
 
-def checkouts(home):
-    """Each checkout under the home's workspace/ with its own .git directory (a worktree's
-    .git is a file: its branches are its main checkout's, and its edits are found from there)."""
-    root = home / 'workspace'
+def checkouts(root):
+    """Each checkout under root with its own .git directory (a worktree's .git is a file:
+    its branches are its main checkout's, and its edits are found from there)."""
     if not root.is_dir():
         return
     for dirpath, dirnames, _ in os.walk(root):
@@ -97,7 +102,9 @@ def keep(repo, dest):
         dirty = git(tree, 'diff', 'HEAD', '--quiet')
         if dirty.returncode == 1:
             dest.mkdir(parents=True, exist_ok=True)
-            name = 'main' if tree == repo else tree.name
+            # Named by where it is beside its checkout: a Mood's threads each have a worktree
+            # of the same repo (threads/<thread>/<repo>), which tree.name alone would mix up.
+            name = 'main' if tree == repo else os.path.relpath(tree, repo.parent).replace('/', '__')
             with open(dest / f'{name}.patch', 'w') as f:
                 git(tree, 'diff', 'HEAD', '--binary', out=f)
             summary.setdefault('dirty', []).append(str(tree))
@@ -110,10 +117,10 @@ def run(base, out):
         shutil.rmtree(part)
     part.mkdir(parents=True)
     found = {}
-    for container, home_name, home in homes(base):
+    for container, home_name, home, root in homes(base):
         if home.resolve() == out.resolve() or container in (out.name, part.name):
             continue
-        for repo in checkouts(home):
+        for repo in checkouts(root):
             rel = repo.relative_to(home)
             key = f'{container}/{home_name}/{rel}'
             try:

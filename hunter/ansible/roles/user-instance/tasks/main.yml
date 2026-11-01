@@ -26,6 +26,7 @@
     mode: '0755'
 
 - name: Create home directory volume for user
+  when: user.home_dir is not defined  # a home another entry owns: that entry writes it
   file:
     path: "{{ base_dir }}/{{ user.name }}/home"
     state: directory
@@ -34,6 +35,7 @@
     mode: '0755'
 
 - name: Create workspace directory for user
+  when: user.home_dir is not defined  # a home another entry owns: that entry writes it
   file:
     path: "{{ base_dir }}/{{ user.name }}/home/workspace"
     state: directory
@@ -42,6 +44,7 @@
     mode: '0755'
 
 - name: Create .claude directory for user (in persistent home directory)
+  when: user.home_dir is not defined  # a home another entry owns: that entry writes it
   file:
     path: "{{ base_dir }}/{{ user.name }}/home/.claude"
     state: directory
@@ -60,6 +63,7 @@
 # magent's instructions: magenta's agents/magent.md (no CLAUDE.md at magenta's root, where
 # everyone working in magenta/memory-lane would read it as theirs). The one copy each session reads.
 - name: Copy magent's instructions to user .claude directory
+  when: user.home_dir is not defined  # a home another entry owns: that entry writes it
   copy:
     src: "/opt/magenta/magenta-source/agents/magent.md"
     dest: "{{ base_dir }}/{{ user.name }}/home/.claude/CLAUDE.md"
@@ -68,6 +72,7 @@
     remote_src: yes
 
 - name: Create Claude Code local settings
+  when: user.home_dir is not defined  # a home another entry owns: that entry writes it
   copy:
     dest: "{{ base_dir }}/{{ user.name }}/home/.claude/settings.local.json"
     owner: 1000
@@ -102,6 +107,7 @@
       }
 
 - name: Create user context file
+  when: user.home_dir is not defined  # a home another entry owns: that entry writes it
   copy:
     dest: "{{ base_dir }}/{{ user.name }}/home/.claude/USER_CONTEXT.md"
     owner: 1000
@@ -131,13 +137,14 @@
       {{ person.ssh_pubkey }}
       {% endfor %}
       {% else %}
-      {{ user.ssh_pubkey }}
+      {{ user.ssh_pubkey | default('') }}
       {% endif %}
     owner: 1000  # magent user ID in container
     group: 1000
     mode: '0600'
 
 - name: Create git config for user (in persistent home directory)
+  when: user.home_dir is not defined  # a home another entry owns: that entry writes it
   copy:
     dest: "{{ base_dir }}/{{ user.name }}/home/.gitconfig"
     owner: 1000
@@ -205,7 +212,7 @@
     seconds: 5
 
 - name: Deploy .env file from vault for arthel builds
-  when: user.mood is not defined  # a Mood's container has no arthel checkout
+  when: user.mood is not defined and user.home_dir is not defined  # no arthel checkout of its own
   copy:
     content: |
       ALCHEMY_API_KEY={{ ALCHEMY_API_KEY }}
