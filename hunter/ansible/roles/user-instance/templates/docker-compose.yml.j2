@@ -66,12 +66,13 @@ services:
       # DELIVERY_KID_API_KEY and PICKIPEDIA_DEV_SENTRY_DSN (only a PickiPedia
       # preview read them, and none starts any more: emergent-* are agents,
       # workbench is a Mood's kind). The magent user's own credentials
-      # (GitHub, PickiPedia as Magent, the preview role) go only where the
+      # (GitHub, PickiPedia as Magent) go only where the
       # magent user works: a container without resident agents (emergent-magent,
       # workbench). container_startup.py takes back what an earlier deploy
       # left in a home (.bashrc, gh, the wiki's MCP config).
 {% set magent_works_here = user.agents is not defined %}
-{% if magent_works_here and memory_lane_preview_db_password is defined %}
+{# memory-lane previews are served from workbench (Moods' previews), so only there; an agent's container has no ports to serve one #}
+{% if magent_works_here and user.kind | default('') != 'agent' and memory_lane_preview_db_password is defined %}
       # memory-lane previews (tools/preview.sh) connect to the live record as
       # the restricted memory_lane_preview role, not as magent
       - MEMORY_LANE_PREVIEW_DB_PASSWORD={{ memory_lane_preview_db_password }}
