@@ -52,36 +52,64 @@ fi
 
 # Valid usernames for cross-container access
 VALID_USERS=({% for user in users %}"{{ user.name }}" {% endfor %})
+# The people who still have a container of their own; everyone else lands in workbench.
+OWN_CONTAINERS=({% for user in users if user.mood is not defined %}"{{ user.name }}" {% endfor %})
 
-is_valid_user() {
-    for u in "${VALID_USERS[@]}"; do
-        [ "$u" = "$1" ] && return 0
+in_list() {
+    local want=$1; shift
+    for u in "$@"; do
+        [ "$u" = "$want" ] && return 0
     done
     return 1
 }
+is_valid_user() { in_list "$1" "${VALID_USERS[@]}"; }
+
+# A Mood's directory (Cryptograss:Moods as Directories): its slug, and it's there.
+MOODS_DIR={{ base_dir }}/moods
+is_mood() {
+    [[ "$1" =~ ^[a-z0-9][a-z0-9_-]*$ ]] && [ -d "$MOODS_DIR/$1" ]
+}
 
 TARGET_USER="$USER"
+in_list "$USER" "${OWN_CONTAINERS[@]}" || TARGET_USER=workbench
 
 # Parse SSH_ORIGINAL_COMMAND
 # Usage:
-#   ssh sshrouter@hunter             → plain shell in your container
-#   ssh sshrouter@hunter tmux        → attach to tmux session "magenta" in your container
-#   ssh sshrouter@hunter justin      → join justin's container (tmux session "magenta")
-#   ssh sshrouter@hunter justin jam  → join justin's container (tmux session "jam")
-#   ssh sshrouter@hunter "ls -la"    → run command in your container
+#   ssh sshrouter@hunter                  → plain shell in your container (workbench, if you have none)
+#   ssh sshrouter@hunter tmux             → attach to tmux session "magenta" in your container
+#   ssh sshrouter@hunter justin           → join justin's container (tmux session "magenta")
+#   ssh sshrouter@hunter justin jam       → join justin's container (tmux session "jam")
+#   ssh sshrouter@hunter workbench        → plain shell in workbench, the people's box
+#   ssh sshrouter@hunter chartifacts      → a shell in workbench, in /moods/chartifacts
+#   ssh sshrouter@hunter chartifacts tmux → tmux session "chartifacts" there, shared by whoever joins it
+#   ssh sshrouter@hunter "ls -la"         → run command in your container
 TARGET_SESSION="magenta"
 JOIN_TMUX=false
+MOOD=""
 if [ -n "$SSH_ORIGINAL_COMMAND" ]; then
     read -r FIRST_ARG REST_ARGS <<< "$SSH_ORIGINAL_COMMAND"
     if [ "$FIRST_ARG" = "tmux" ]; then
         JOIN_TMUX=true
         [ -n "$REST_ARGS" ] && TARGET_SESSION="$REST_ARGS"
     elif is_valid_user "$FIRST_ARG"; then
-        JOIN_TMUX=true
         TARGET_USER="$FIRST_ARG"
-        [ -n "$REST_ARGS" ] && TARGET_SESSION="$REST_ARGS"
+        if [ "$TARGET_USER" = "workbench" ]; then
+            # The people's box: a plain shell, unless tmux is asked for.
+            [ "$REST_ARGS" = "tmux" ] && JOIN_TMUX=true
+            SSH_ORIGINAL_COMMAND=""
+        else
+            JOIN_TMUX=true
+            [ -n "$REST_ARGS" ] && TARGET_SESSION="$REST_ARGS"
+        fi
         if [ "$TARGET_USER" != "$USER" ]; then
             echo "Joining ${TARGET_USER}'s container (session: ${TARGET_SESSION})..."
+        fi
+    elif is_mood "$FIRST_ARG"; then
+        MOOD="$FIRST_ARG"
+        TARGET_USER=workbench
+        if [ "$REST_ARGS" = "tmux" ]; then
+            JOIN_TMUX=true
+            TARGET_SESSION="$MOOD"
         fi
     fi
 fi
@@ -90,7 +118,8 @@ CONTAINER="${TARGET_USER}-arthel"
 
 # Said in magenta's #general: who came in, to whose container, and how -- never
 # the command itself. In the background, cut loose from this session.
-if [ "$JOIN_TMUX" = true ]; then HOW="tmux ${TARGET_SESSION}"
+if [ -n "$MOOD" ]; then HOW="#${MOOD}$([ "$JOIN_TMUX" = true ] && echo ', in tmux')"
+elif [ "$JOIN_TMUX" = true ]; then HOW="tmux ${TARGET_SESSION}"
 elif [ -n "$SSH_ORIGINAL_COMMAND" ]; then HOW="a command"
 else HOW="a shell"; fi
 setsid /usr/local/bin/announce-ssh "$USER" "$TARGET_USER" "$HOW" </dev/null >/dev/null 2>&1 &
@@ -101,7 +130,14 @@ if ! docker ps --format '{% raw %}{{.Names}}{% endraw %}' | grep -q "^${CONTAINE
     exit 1
 fi
 
-if [ "$JOIN_TMUX" = true ]; then
+if [ -n "$MOOD" ]; then
+    # Slug checked above (is_mood): plain words, safe inside the quotes.
+    if [ "$JOIN_TMUX" = true ]; then
+        docker exec -it "$CONTAINER" su - magent -c "tmux new-session -A -s $MOOD -c /moods/$MOOD"
+    else
+        docker exec -it "$CONTAINER" su - magent -c "cd /moods/$MOOD && exec bash -l"
+    fi
+elif [ "$JOIN_TMUX" = true ]; then
     docker exec -it "$CONTAINER" su - magent -c "tmux new-session -A -s $TARGET_SESSION"
 elif [ -n "$SSH_ORIGINAL_COMMAND" ]; then
     docker exec -it "$CONTAINER" su - magent -c "$SSH_ORIGINAL_COMMAND"
