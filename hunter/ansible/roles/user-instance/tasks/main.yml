@@ -19,6 +19,26 @@
   changed_when: renamed.stdout == 'moved'
   when: user.renamed_from is defined
 
+# A home another container had, moved here whole, once (emergent-magent's, from
+# justin-arthel's): a rename on the same disk, so 11G moves at once and every
+# session in it resumes. Only once its old container is retired (its compose
+# file renamed by the playbook's retire step), and never over a home here.
+- name: Move a home here from a retired container
+  shell: |
+    set -e
+    old="{{ user.home_moved_from }}"
+    new="{{ base_dir }}/{{ user.name }}/home"
+    if [ -e "$new" ] || [ ! -d "$old" ]; then echo unchanged; exit 0; fi
+    if [ -e "$(dirname "$old")/docker-compose.yml" ]; then
+      echo "$(dirname "$old") still has a live docker-compose.yml: retire its container first" >&2; exit 1
+    fi
+    mkdir -p "{{ base_dir }}/{{ user.name }}"
+    mv "$old" "$new"
+    echo moved
+  register: home_moved
+  changed_when: home_moved.stdout == 'moved'
+  when: user.home_moved_from is defined
+
 - name: Create user directory
   file:
     path: "{{ base_dir }}/{{ user.name }}"
@@ -26,7 +46,6 @@
     mode: '0755'
 
 - name: Create home directory volume for user
-  when: user.home_dir is not defined  # a home another entry owns: that entry writes it
   file:
     path: "{{ base_dir }}/{{ user.name }}/home"
     state: directory
@@ -35,7 +54,6 @@
     mode: '0755'
 
 - name: Create workspace directory for user
-  when: user.home_dir is not defined  # a home another entry owns: that entry writes it
   file:
     path: "{{ base_dir }}/{{ user.name }}/home/workspace"
     state: directory
@@ -44,7 +62,6 @@
     mode: '0755'
 
 - name: Create .claude directory for user (in persistent home directory)
-  when: user.home_dir is not defined  # a home another entry owns: that entry writes it
   file:
     path: "{{ base_dir }}/{{ user.name }}/home/.claude"
     state: directory
@@ -63,7 +80,6 @@
 # magent's instructions: magenta's agents/magent.md (no CLAUDE.md at magenta's root, where
 # everyone working in magenta/memory-lane would read it as theirs). The one copy each session reads.
 - name: Copy magent's instructions to user .claude directory
-  when: user.home_dir is not defined  # a home another entry owns: that entry writes it
   copy:
     src: "/opt/magenta/magenta-source/agents/magent.md"
     dest: "{{ base_dir }}/{{ user.name }}/home/.claude/CLAUDE.md"
@@ -72,7 +88,6 @@
     remote_src: yes
 
 - name: Create Claude Code local settings
-  when: user.home_dir is not defined  # a home another entry owns: that entry writes it
   copy:
     dest: "{{ base_dir }}/{{ user.name }}/home/.claude/settings.local.json"
     owner: 1000
@@ -107,7 +122,6 @@
       }
 
 - name: Create user context file
-  when: user.home_dir is not defined  # a home another entry owns: that entry writes it
   copy:
     dest: "{{ base_dir }}/{{ user.name }}/home/.claude/USER_CONTEXT.md"
     owner: 1000
@@ -144,7 +158,6 @@
     mode: '0600'
 
 - name: Create git config for user (in persistent home directory)
-  when: user.home_dir is not defined  # a home another entry owns: that entry writes it
   copy:
     dest: "{{ base_dir }}/{{ user.name }}/home/.gitconfig"
     owner: 1000
@@ -212,7 +225,7 @@
     seconds: 5
 
 - name: Deploy .env file from vault for arthel builds
-  when: user.mood is not defined and user.home_dir is not defined  # no arthel checkout of its own
+  when: user.mood is not defined  # a Mood's container has no arthel checkout of its own
   copy:
     content: |
       ALCHEMY_API_KEY={{ ALCHEMY_API_KEY }}

@@ -50,14 +50,14 @@ def test_workbench_by_name(route):
     assert route('justin', 'workbench') == ['exec -it workbench-arthel su - magent']
 
 
-def test_a_person_with_a_container_of_their_own_still_lands_in_it(route):
-    assert route('justin') == ['exec -it justin-arthel su - magent']
+def test_a_person_whose_own_container_retired_lands_in_workbench(route):
+    assert route('justin') == ['exec -it workbench-arthel su - magent']
 
 
 def test_a_person_without_one_lands_in_workbench(route):
     assert route('someone-new') == ['exec -it workbench-arthel su - magent']
 
 
-def test_what_isnt_a_moods_directory_is_a_command_in_your_own_container_as_before(route):
+def test_what_isnt_a_moods_directory_is_a_command_in_workbench(route):
     for command in ('nosuchmood', '../etc', 'chartifacts; rm -rf /'):
-        assert route('justin', command) == [f'exec -it justin-arthel su - magent -c {command}']
+        assert route('justin', command) == [f'exec -it workbench-arthel su - magent -c {command}']

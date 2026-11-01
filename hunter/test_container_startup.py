@@ -250,7 +250,7 @@ class MagentInstructionsTest(unittest.TestCase):
         self.assertNotIn('--instructions', self.started({'MAGENT_INSTRUCTIONS': ''}))
 
     def test_its_only_poller_once_the_mood_containers_went(self):
-        # Moods as Directories, step 5: justin-arthel's poller is magent's only one.
+        # Moods as Directories, step 5: magent has one poller (emergent-magent's since step 6).
         self.assertIn('--only-poller yes', self.started({'MAGENT_ONLY_POLLER': '1', 'MOOD_SLUG': ''}))
         self.assertNotIn('--only-poller', self.started({'MAGENT_ONLY_POLLER': '', 'MOOD_SLUG': ''}))
         # A Mood's own container never says so, whatever it's given.
