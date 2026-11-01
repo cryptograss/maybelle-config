@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
@@ -133,6 +134,22 @@ class GithouseTest(unittest.TestCase):
         run('git', 'push', '--quiet', 'origin', 'HEAD:main', cwd=self.upstream)
         githouse.fetch(self.repo)
         self.assertIn('re/fresh', githouse.refs(self.repo, 'refs/heads/'))
+
+    def test_a_push_landing_while_retiring_keeps_the_branch_live(self):
+        self.commit(self.work, 'mine')
+        self.push('re', 'HEAD:re/foo')
+        merged_tip = githouse.refs(self.repo, 'refs/heads/')['re/foo']
+        self.merge_on_github('re/foo')
+        githouse.git(self.repo, 'fetch', '--quiet', 'github', '+refs/heads/main:refs/heads/main')
+        self.commit(self.work, 'more')
+        self.push('re', 'HEAD:re/foo')  # lands after retire() has read the branches
+        real = githouse.refs
+        stale = lambda repo, prefix: {**real(repo, prefix), **({'re/foo': merged_tip} if prefix == 'refs/heads/' else {})}
+        with unittest.mock.patch.object(githouse, 'refs', stale):
+            self.assertEqual(githouse.retire(self.repo), [])
+        self.assertNotEqual(githouse.refs(self.repo, 'refs/heads/').get('re/foo'), merged_tip)
+        self.assertIn('re/foo', githouse.refs(self.repo, 'refs/heads/'))
+        self.assertIsNone(githouse.retired(self.repo, 're/foo'))
 
     def test_deleted_is_closed_and_the_name_is_taken(self):
         self.commit(self.work, 'mine')

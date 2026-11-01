@@ -53,10 +53,13 @@ if (ROOT / '.deploy_key').exists() and 'GIT_SSH_COMMAND' not in os.environ:
 
 
 def git(repo, *args, check=True, env=None):
+    """Its output; on failure, raise -- or, with check=False, None."""
     done = subprocess.run(['git', '--git-dir', str(repo), *args], capture_output=True, text=True,
                           env={**os.environ, **(env or {})})
-    if check and done.returncode != 0:
-        raise RuntimeError(f"git {' '.join(args)}: {done.stderr.strip()}")
+    if done.returncode != 0:
+        if check:
+            raise RuntimeError(f"git {' '.join(args)}: {done.stderr.strip()}")
+        return None
     return done.stdout
 
 
@@ -74,15 +77,15 @@ def refs(repo, prefix):
 def retired(repo, branch):
     """'merged' or 'closed' if the name was used already, or None."""
     for kind in ('merged', 'closed'):
-        if git(repo, 'rev-parse', '--verify', '--quiet', f'refs/{kind}/{branch}', check=False).strip():
+        if (git(repo, 'rev-parse', '--verify', '--quiet', f'refs/{kind}/{branch}', check=False) or '').strip():
             return kind
     return None
 
 
 def next_free(repo, branch):
     n = 2
-    while retired(repo, f'{branch}-{n}') or git(repo, 'rev-parse', '--verify', '--quiet',
-                                                 f'refs/heads/{branch}-{n}', check=False).strip():
+    while retired(repo, f'{branch}-{n}') or (git(repo, 'rev-parse', '--verify', '--quiet',
+                                                  f'refs/heads/{branch}-{n}', check=False) or '').strip():
         n += 1
     return f'{branch}-{n}'
 
@@ -130,7 +133,7 @@ def after(repo, user, updates, forward=None):
         if new == ZERO and old != ZERO:
             git(repo, 'update-ref', f'refs/closed/{branch}', old)
     if forward is None:
-        forward = bool(git(repo, 'config', '--get', 'githouse.forward', check=False).strip())
+        forward = bool((git(repo, 'config', '--get', 'githouse.forward', check=False) or '').strip())
     if forward:
         specs = [f':{ref}' if new == ZERO else f'+{ref}:{ref}' for old, new, ref in updates]
         done = subprocess.run(['git', '--git-dir', str(repo), 'push', '--quiet', 'github', *specs],
@@ -180,8 +183,10 @@ def retire(repo):
             continue
         for base, sha in bases.items():
             if tip not in lines[base] and _ancestor(repo, tip, sha):
+                # Only if it still holds that tip: a push landing meanwhile keeps it live, and unretired.
+                if git(repo, 'update-ref', '-d', f'refs/heads/{branch}', tip, check=False) is None:
+                    break
                 git(repo, 'update-ref', f'refs/merged/{branch}', tip)
-                git(repo, 'update-ref', '-d', f'refs/heads/{branch}', tip)
                 moved.append(branch)
                 break
     return moved
