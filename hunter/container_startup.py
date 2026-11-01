@@ -303,6 +303,11 @@ def configure_github_cli():
 
     gh_token = os.environ.get('GH_TOKEN')
     if not gh_token:
+        # Not shipped here (any more): take back a login an earlier deploy left in the home.
+        for left in (Path('/home/magent/.config/gh/hosts.yml'), Path('/home/magent/.git-credential-helper.sh')):
+            if left.exists():
+                left.unlink()
+                logger.info(f"No GH_TOKEN here: removed {left}")
         logger.info("No GH_TOKEN provided, skipping GitHub CLI setup")
         return
 
@@ -441,6 +446,12 @@ def configure_mcp_server():
         )
         logger.info("✓ PickiPedia MediaWiki MCP server configured")
     else:
+        # Not shipped here (any more): take back the password an earlier deploy wrote into the home.
+        left = Path("/home/magent/.config/mediawiki-mcp/config.json")
+        if left.exists():
+            left.unlink()
+            run_command("claude mcp remove --scope user pickipedia", user='magent', check=False)
+            logger.info(f"No PICKIPEDIA_BOT_PASSWORD here: removed {left} and the MCP server")
         logger.warning("⚠ PICKIPEDIA_BOT_PASSWORD not set, skipping MediaWiki MCP server")
 
 
@@ -474,6 +485,16 @@ def configure_claude_settings():
     logger.info("✓ Claude Code settings configured")
 
 
+def prune_exports(text, names, environ):
+    """A .bashrc without the `export NAME=` lines for any of `names` the environment no longer
+    has: a secret an earlier deploy exported stays in the home otherwise, after the container
+    stops being given it."""
+    gone = {n for n in names if not environ.get(n)}
+    kept = [line for line in text.splitlines(keepends=True)
+            if not any(line.startswith(f'export {n}=') for n in gone)]
+    return ''.join(kept)
+
+
 def setup_environment_variables():
     """Export container environment variables to shell profile."""
     logger.info("=== Setting up environment variables ===")
@@ -495,10 +516,15 @@ def setup_environment_variables():
 
     bashrc_path = Path('/home/magent/.bashrc')
 
-    # Read current .bashrc
+    # Read current .bashrc, without what this container is no longer given
     if bashrc_path.exists():
         with open(bashrc_path, 'r') as f:
             bashrc_content = f.read()
+        pruned = prune_exports(bashrc_content, env_vars, os.environ)
+        if pruned != bashrc_content:
+            bashrc_path.write_text(pruned)
+            logger.info("✓ Removed exports of variables this container no longer has")
+            bashrc_content = pruned
     else:
         bashrc_content = ''
 

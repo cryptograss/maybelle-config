@@ -11,7 +11,7 @@ from unittest import mock
 
 sys.path.insert(0, os.path.dirname(__file__))
 import container_startup  # noqa: E402
-from container_startup import (agent_uid, clone_in_background, memory_server, poller_command,  # noqa: E402
+from container_startup import (agent_uid, clone_in_background, memory_server, poller_command, prune_exports,  # noqa: E402
                                repos_by_when, retire_home_claude_md, write_claude_mcp, write_poller_env)
 
 RE = {'name': 're', 'uid': 2001, 'rules': 'workspace/red/RULES.md', 'letter': 'workspace/red/LETTER.md',
@@ -117,6 +117,27 @@ class PollerSignInTest(unittest.TestCase):
         self.assertTrue(signed.endswith('--agent magent >> /tmp/mood-poller.log 2>&1 &'))
         self.assertNotIn('poller.env', poller_command('--agent magent', False))
         self.assertNotIn("'", signed)  # run_command wraps it in single quotes for su
+
+
+class PruneExportsTest(unittest.TestCase):
+    BASHRC = ('# mine\nalias ll="ls -l"\n\n# Container environment variables\n'
+              'export DEVELOPER_NAME="emergent-magent"\nexport POSTGRES_PASSWORD="old"\n'
+              'export MEMORY_LANE_PREVIEW_DB_PASSWORD="p"\n')
+
+    def test_a_secret_no_longer_given_is_taken_out_and_the_rest_stays(self):
+        out = prune_exports(self.BASHRC, ['DEVELOPER_NAME', 'POSTGRES_PASSWORD', 'MEMORY_LANE_PREVIEW_DB_PASSWORD'],
+                            {'DEVELOPER_NAME': 'emergent-magent', 'MEMORY_LANE_PREVIEW_DB_PASSWORD': 'p'})
+        self.assertNotIn('POSTGRES_PASSWORD', out)
+        self.assertIn('export MEMORY_LANE_PREVIEW_DB_PASSWORD="p"', out)
+        self.assertIn('alias ll="ls -l"', out)
+
+    def test_a_name_it_doesnt_manage_is_left_alone(self):
+        text = 'export MY_OWN_TOKEN="x"\n'
+        self.assertEqual(prune_exports(text, ['POSTGRES_PASSWORD'], {}), text)
+
+    def test_a_longer_name_sharing_the_start_is_not_taken(self):
+        text = 'export POSTGRES_PASSWORD_OLD="x"\n'
+        self.assertEqual(prune_exports(text, ['POSTGRES_PASSWORD'], {}), text)
 
 
 if __name__ == '__main__':
