@@ -734,10 +734,18 @@ def identity_exports(environ=None):
     a container whose home is another's (emergent-magent in Justin's), but
     `su -` starts a clean environment, and .bashrc and poller.env are in that
     shared home, so it is handed over here. A value with anything but plain
-    name-and-address characters is left out rather than quoted."""
+    name-and-address characters is left out rather than quoted, and said so in
+    the startup log: git then falls back to the home's .gitconfig, its owner's."""
     environ = os.environ if environ is None else environ
-    return ''.join(f'export {var}="{environ[var]}"; ' for var in GIT_IDENTITY
-                   if re.fullmatch(r'[\w .@+-]+', environ.get(var, '')))
+    exports = []
+    for var in GIT_IDENTITY:
+        value = environ.get(var, '')
+        if re.fullmatch(r'[\w .@+-]+', value):
+            exports.append(f'export {var}="{value}"; ')
+        elif value:
+            logger.warning(f"{var} has characters other than letters, digits, space and .@+-_; "
+                           f"left out, so git falls back to the home's .gitconfig")
+    return ''.join(exports)
 
 
 def poller_command(args, signed_in, environ=None):

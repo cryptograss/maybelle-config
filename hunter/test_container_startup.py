@@ -130,8 +130,11 @@ class PollerSignInTest(unittest.TestCase):
         self.assertNotIn('GIT_', poller_command('--agent magent', False, {}))
 
     def test_a_value_that_would_need_quoting_is_left_out(self):
-        line = poller_command('--agent magent', False, {'GIT_AUTHOR_NAME': "o'brien", 'GIT_AUTHOR_EMAIL': '$(x)@y'})
+        with self.assertLogs(container_startup.logger, 'WARNING') as logs:
+            line = poller_command('--agent magent', False, {'GIT_AUTHOR_NAME': "o'brien", 'GIT_AUTHOR_EMAIL': '$(x)@y'})
         self.assertNotIn('GIT_', line)
+        self.assertEqual(len(logs.output), 2)
+        self.assertIn('GIT_AUTHOR_NAME', logs.output[0])
 
 
 if __name__ == '__main__':
