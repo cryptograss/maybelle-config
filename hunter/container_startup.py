@@ -835,6 +835,9 @@ def setup_agent(agent):
                 shutil.copy2(skel, home / skel.name)
                 shutil.chown(home / skel.name, user=name, group=name)
     shutil.chown(home, user=name, group=name)
+    # Every Mood's directory is the group moods' (Cryptograss:Moods as Directories):
+    # its clones are any agent's to work in. Each start, so an agent made before it joins too.
+    run_command(f"usermod -aG moods {name}")
     # The others can't read magent's home, where its GitHub token, wiki
     # password and runner key are; nor magent theirs.
     os.chmod('/home/magent', 0o750)

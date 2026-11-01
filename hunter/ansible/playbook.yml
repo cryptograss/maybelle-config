@@ -86,6 +86,35 @@
       failed_when: network_create.rc != 0 and 'already exists' not in network_create.stderr
       changed_when: network_create.rc == 0
 
+    # /opt/magenta/moods, mounted at /moods in every container: a directory per
+    # Mood, with its clones and files (Cryptograss:Moods as Directories). The
+    # agents are each their own unix user, so it belongs to the group moods
+    # (gid 3000, as in the image), setgid, with a default ACL: whatever anyone
+    # makes in it stays the group's to write, whatever their umask.
+    - name: The group that owns every Mood's directory
+      group:
+        name: moods
+        gid: 3000
+
+    - name: setfacl, for the Mood directories' default ACL
+      apt:
+        name: acl
+        state: present
+
+    - name: Every Mood's directory lives here
+      file:
+        path: "{{ base_dir }}/moods"
+        state: directory
+        owner: root
+        group: moods
+        mode: '2775'
+
+    - name: What's made in it stays the group's to write
+      shell: >
+        getfacl -p {{ base_dir }}/moods | grep -qx 'default:group:moods:rwx'
+        || setfacl -m g:moods:rwx,d:u::rwx,d:g::rwx,d:g:moods:rwx,d:o::rx {{ base_dir }}/moods
+      changed_when: false
+
     # Taken out of the inventory (`retired`): stopped and removed, before the
     # containers that replace it are made, so an agent's home it mounted can
     # move (agent_homes.py refuses while a compose file still mounts it). Its

@@ -137,3 +137,22 @@ and put the old name in `retired:`. After the retire step, the user-instance
 role moves `/opt/magenta/<old>` to `/opt/magenta/<new>` whole, the first time,
 and refuses while the old compose file is still live. `delivery-kid` became
 `uploads-and-embeds` this way on 1 Nov 2026, taking its Mood's name.
+
+## /moods: a directory per Mood
+
+Moods own directories; agents own processes (Justin, emergence, 1 Nov 2026;
+the plan and its steps are on PickiPedia, Cryptograss:Moods as Directories).
+`/opt/magenta/moods/<slug>` on hunter's disk holds a Mood's clones and files,
+and every container mounts it at `/moods`:
+
+- **The group `moods`, gid 3000,** owns it, here and in the image. magent is
+  in it from the image; each agent joins at startup (`setup_agent`).
+- **setgid and a default ACL** (playbook.yml) keep whatever anyone makes in it
+  the group's to write, whatever their umask: one agent's clone is another's
+  to commit in. Tried with magent and re as different users, umask 022: each
+  committed in the other's clone and worktree, and `git gc` ran clean.
+- **Git trusts `/moods/*`** (`safe.directory`, system-wide in the image), so
+  a clone made by one user isn't "dubious ownership" to another.
+- **A thread** gets a worktree under `/moods/<slug>/threads/<thread>/`.
+- **The hourly backup** (`hunter-vcs-unpushed`) keeps what's only here in
+  each Mood's directory too, as `moods/<slug>/...`.
