@@ -2,10 +2,10 @@
 
 Infrastructure for deploying the magenta memory system to hunter VPS.
 
-**Since 1 Nov 2026, Moods own directories and agents own processes**
+**Since 1 Nov 2026, Moods own directories and emergents own processes**
 (Cryptograss:Moods as Directories on PickiPedia; the model is
 Cryptograss:Mood Architecture). A Mood is a directory at `/moods/<slug>`,
-seen by every container. Each agent has one container and one poller
+seen by every container. Each emergent has one container and one poller
 (`emergent-<name>`); people have `workbench`. PostgreSQL does not run on
 hunter: the database lives on maybelle. The watcher is being retired
 (maybelle-config#254); the poller already records the same lines itself.
@@ -16,15 +16,15 @@ hunter: the database lives on maybelle. The watcher is being retired
 
 `/opt/magenta/moods/<slug>` on hunter's disk holds a Mood's clones and
 files. Every container mounts it at `/moods`. It is owned by the group
-`moods` (gid 3000), setgid, with a default ACL, so one agent's clone is
+`moods` (gid 3000), setgid, with a default ACL, so one emergent's clone is
 another's to commit in whatever their umask; git trusts `/moods/*`
 system-wide. A thread gets a worktree under `/moods/<slug>/threads/<thread>/`.
 
-### Agents
+### Emergents
 
-One container per agent (`emergent-<name>`, first `agency-<name>`), each
+One container per emergent (`emergent-<name>`, first `agency-<name>`), each
 with its own home, poller and workspace. The container image is built from
-this directory's `Dockerfile`; a new agent joins the `moods` group at
+this directory's `Dockerfile`; a new emergent joins the `moods` group at
 startup (`container_startup.py setup_agent`).
 
 ### workbench
@@ -52,7 +52,7 @@ issued on demand, only for listed hostnames.
 
 ## Files
 
-- `Dockerfile` - the base agent image (joins the `moods` group, git
+- `Dockerfile` - the base container image (joins the `moods` group, git
   `safe.directory` for `/moods/*`)
 - `docker-compose.local.yml` - local development setup
 - `multi-log-viewer.sh` - a tmux layout of the running containers' logs
@@ -124,7 +124,7 @@ cd hunter/ansible
 ansible-playbook -i inventory.yml playbook.yml
 ```
 
-This deploys the shared directory and its ACLs, the agent containers from
+This deploys the shared directory and its ACLs, the emergents' containers from
 the inventory (`emergent-*`), `workbench`, the ssh router and Caddy, and
 runs the hourly unpushed-work backup (`housekeeping`). It also still
 deploys the watcher (`services` role, posting to maybelle) until #254
