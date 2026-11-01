@@ -769,7 +769,10 @@ def start_mood_poller():
             if not re.fullmatch(r'[a-z0-9-]+', slug) or not re.fullmatch(r'[a-z0-9_,-]*', people):
                 logger.error(f"MOOD_SLUG / MOOD_FULL_TOOLS_FOR not plain words; poller not started")
                 return
-            args += f" --moods {slug} --full-tools-for {people or ','}"
+            # This container is the Mood's only poller for magent, so a session of its that isn't
+            # on this disk was lost (an older container's home): start over from the record rather
+            # than call it someone else's and answer nothing (#docs-tests-qa, Nov 2026).
+            args += f" --moods {slug} --full-tools-for {people or ','} --only-poller yes"
         run_command(poller_command(args, signed_in), user='magent')
         logger.info("✓ Mood poller started (log: /tmp/mood-poller.log)")
     except Exception as e:
