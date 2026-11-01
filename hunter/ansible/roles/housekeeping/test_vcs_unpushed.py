@@ -85,3 +85,24 @@ def test_a_pushed_branch_drops_out_on_the_next_run(base):
     sh(repo, 'push', 'origin', 'later-pushed')
     assert vcs.run(base, out) == {}
     assert not (out / 'justin').exists()
+
+
+def test_a_moods_checkout_and_its_threads_worktrees_are_kept_apart(base, tmp_path):
+    """A Mood's directory (Cryptograss:Moods as Directories): its checkouts sit in it, not in a
+    workspace/, and each thread has a worktree of the same repo, under threads/<thread>/."""
+    repo = base / 'moods/chartifacts/magenta'
+    sh(tmp_path, 'clone', str(tmp_path / 'origin.git'), str(repo))
+    sh(repo, 'checkout', '-b', 'main', 'origin/arthel')
+    for thread in ('axis-labels', 'legend'):
+        tree = base / 'moods/chartifacts/threads' / thread / 'magenta'
+        tree.parent.mkdir(parents=True)
+        sh(repo, 'worktree', 'add', '-b', thread, str(tree))
+        (tree / 'a.txt').write_text(f'{thread}, unsaved\n')
+    out = base / 'vcs-backup'
+    found = vcs.run(base, out)
+    assert list(found) == ['moods/chartifacts/magenta']
+    # The threads' branches have no commits of their own yet; what's only here is their unsaved edits.
+    assert len(found['moods/chartifacts/magenta']['dirty']) == 2
+    kept = out / 'moods/chartifacts/magenta'
+    for thread in ('axis-labels', 'legend'):
+        assert f'{thread}, unsaved' in (kept / f'threads__{thread}__magenta.patch').read_text()

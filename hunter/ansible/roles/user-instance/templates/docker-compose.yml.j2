@@ -36,6 +36,9 @@ services:
       # container never gets it, so full tools there stay inside it.
       - /var/run/docker.sock:/var/run/docker.sock
 {% endif %}
+      # Every Mood's directory, one per Mood (Cryptograss:Moods as Directories):
+      # each agent's turn in a Mood starts in its own, and people work in them too.
+      - {{ base_dir }}/moods:/moods
       # PickiPedia backups (synced from maybelle daily)
       - /opt/magenta/pickipedia-backups:/opt/magenta/pickipedia-backups:ro
       # Mood poller: memory-lane as deployed, in hunter's clone of magenta main
