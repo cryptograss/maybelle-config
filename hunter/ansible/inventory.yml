@@ -17,11 +17,6 @@ all:
     # Domain for subdomains
     base_domain: hunter.cryptograss.live
 
-    # Set true for exactly one deploy to make the watcher re-ingest every
-    # existing JSONL line (recovers lines an older watcher dropped; see
-    # jMyles/memory-lane#15). Idempotent. Set back to false afterwards.
-    watcher_replay_from_start: false
-
     # The people: who each is, and the SSH key hunter knows them by. Apart
     # from containers, so that retiring a container never takes its owner's
     # key with it. Read by: magenta's allowed_signers and wiki names

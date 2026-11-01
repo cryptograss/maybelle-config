@@ -630,8 +630,8 @@ def write_runner_key():
 
     The poller is started by `su -`, which leaves this container's
     environment behind, so the key goes in a file only magent can read --
-    never on a command line, where ps would show it. Without the key the
-    poller still works; woken turns reach Moods through the watcher.
+    never on a command line, where ps would show it. Without the key, the
+    turns it wakes have no way into the record (the watcher that once carried them is gone).
     """
     key = os.environ.get('MEMORY_LANE_RUNNER_KEY', '').strip()
     path = Path('/home/magent/.config/magenta/runner_key')
