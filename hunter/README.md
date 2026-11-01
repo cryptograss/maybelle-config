@@ -2,51 +2,81 @@
 
 Infrastructure for deploying the magenta memory system to hunter VPS.
 
+**Since 1 Nov 2026, Moods own directories and emergents own processes**
+(Cryptograss:Moods as Directories on PickiPedia; the model is
+Cryptograss:Mood Architecture). A Mood is a directory at `/moods/<slug>`,
+seen by every container. Each emergent has one container and one poller
+(`emergent-<name>`); people have `workbench`. PostgreSQL does not run on
+hunter: the database lives on maybelle. The watcher is being retired
+(maybelle-config#254); the poller already records the same lines itself.
+
 ## Architecture
 
-### Shared Services (run on hunter host or dedicated container)
+### The shared directory (`/moods`)
 
-**PostgreSQL Database** (`ai-sandbox` or `postgres` container):
-- Database: `magenta_memory`
-- Accessible from all user containers
-- Stores all conversation history with `from`/`to` columns
+`/opt/magenta/moods/<slug>` on hunter's disk holds a Mood's clones and
+files. Every container mounts it at `/moods`. It is owned by the group
+`moods` (gid 3000), setgid, with a default ACL, so one emergent's clone is
+another's to commit in whatever their umask; git trusts `/moods/*`
+system-wide. A thread gets a worktree under `/moods/<slug>/threads/<thread>/`.
 
-**Conversation Watcher** (`watcher` container or systemd service):
-- Monitors `/opt/magenta/*/` claude logs directories
-- Auto-imports new messages in real-time
-- Runs as single shared service
-- Configuration:
-  - `CLAUDE_LOGS_DIR`: Colon-separated paths to watch (e.g., `/opt/magenta/justin/.claude/project-logs:/opt/magenta/rj/.claude/project-logs`)
-  - `WATCHER_ERA_NAME`: Era to import into (default: "Current Working Era (Era N)")
+### Emergents
 
-### Per-User Containers
+One container per emergent (`emergent-<name>`, first `agency-<name>`), each
+with its own home, poller and workspace. The container image is built from
+this directory's `Dockerfile`; a new emergent joins the `moods` group at
+startup (`container_startup.py setup_agent`).
 
-Each team member gets isolated container with:
-- Dedicated ports (e.g., justin: 14000-14009, rj: 14010-14019)
-- Own `.claude` directory mounted from `/opt/magenta/{username}/`
-- Shared access to PostgreSQL database
-- SSH access via key-based routing
+### workbench
+
+The people's box (maybelle-config#257): mounts `/moods`, has ssh and
+code-server, and no docker.sock and no poller. Reached with
+`ssh sshrouter@hunter workbench`, or by Mood slug:
+`ssh sshrouter@hunter chartifacts` puts you in `/moods/chartifacts`
+(append `tmux` for a shared session named after the Mood).
+
+### The ssh router
+
+`sshrouter@hunter` takes a person's name (their own container) or a Mood's
+slug (a shell in workbench, in that Mood's directory). Anything else falls
+through to the default. `roles/ssh-router/templates/route-ssh.sh.j2` renders
+it; its tests run in CI.
+
+### Previews
+
+Each Mood directory has ten preview ports in workbench, kept in its
+`.previews` file, served at `<slug><N>.hunter.cryptograss.live` through
+Caddy (roles/mood-previews; `mood-previews.py`, installed as
+`hunter-mood-previews` on a one-minute timer). Certificates are
+issued on demand, only for listed hostnames.
 
 ## Files
 
-- `Dockerfile` - Main user container image
-- `Dockerfile.services` - Services container (watcher, postgres)
-- `docker-compose.services.yml` - Shared services stack
-- `docker-compose.local.yml` - Local development setup
-- `ansible/` - Ansible playbooks for hunter deployment
+- `Dockerfile` - the base container image (joins the `moods` group, git
+  `safe.directory` for `/moods/*`)
+- `docker-compose.local.yml` - local development setup
+- `multi-log-viewer.sh` - a tmux layout of the running containers' logs
+- `ansible/` - playbooks for hunter deployment (inventory, roles, router)
+- `container_startup.py` - what runs when a container starts
+- `scripts/agent_homes.py`, `scripts/fold_mood_homes.py` - home moves and
+  the fold of a retired Mood container's workspace into `/moods`
 
 ## Deployment
 
-### Local Development
+### Local development
 
 **Prerequisites:**
-1. An SSH tunnel to maybelle's postgres (or hunter's postgres via maybelle):
+
+1. An SSH tunnel to maybelle's postgres (the database has never run on
+   hunter):
    ```bash
    ssh -L 172.17.0.1:15432:10.0.0.2:5432 root@maybelle.cryptograss.live
    ```
-   Note: Bind to `172.17.0.1` (Docker bridge IP) so containers can reach it via `host.docker.internal`.
+   Note: Bind to `172.17.0.1` (Docker bridge IP) so containers can reach it
+   via `host.docker.internal`.
 
-2. A `.env.local` file with required variables (see magenta repo for template):
+2. A `.env.local` file with required variables (see magenta repo for
+   template):
    ```bash
    POSTGRES_PASSWORD=your_password
    GH_TOKEN=ghp_your_token  # Optional, for GitHub CLI in container
@@ -54,89 +84,54 @@ Each team member gets isolated container with:
    ```
 
 **Starting the dev environment:**
+
 ```bash
 cd hunter
 
-# Read your SSH key into the env and start
 SSH_AUTHORIZED_KEY="$(cat ~/.ssh/id_ed25519.pub)" \
   docker compose -f docker-compose.local.yml \
   --env-file ~/projects/JustinHolmesMusic/magenta/.env.local \
   up --build
 ```
 
-**Services started:**
-- `magenta-dev` - Development container with code-server, SSH on port 2222
-- `memory-lane-local` - Django memory viewer on port 3000
-
 **Connecting:**
-```bash
-# SSH into the container
-ssh -p 2222 magent@localhost
 
-# Or use code-server in browser
-open http://localhost:8080
+```bash
+ssh -p 2222 magent@localhost
+open http://localhost:8080  # code-server
 ```
 
-**MCP Server:**
-The local dev container connects to the public MCP endpoint at `https://mcp.maybelle.cryptograss.live` by default. No tunnel needed for MCP.
+**MCP server:** the dev container connects to the public MCP endpoint at
+`https://mcp.maybelle.cryptograss.live` by default. No tunnel needed.
 
 **Troubleshooting:**
 
-*"host.docker.internal" not resolving:*
-The compose file includes `extra_hosts` to map this on Linux. If still failing, ensure the postgres tunnel is bound to `172.17.0.1`, not `127.0.0.1` or `0.0.0.0`.
+*"host.docker.internal" not resolving:* the compose file includes
+`extra_hosts` to map this on Linux. If it still fails, ensure the postgres
+tunnel is bound to `172.17.0.1`, not `127.0.0.1` or `0.0.0.0`.
 
-*SSH asking for password:*
-The `SSH_AUTHORIZED_KEY` env var wasn't set or is empty. Pass it explicitly:
-```bash
-SSH_AUTHORIZED_KEY="$(cat ~/.ssh/id_ed25519.pub)" docker compose ...
-```
+*SSH asking for password:* the `SSH_AUTHORIZED_KEY` env var wasn't set or
+is empty. Pass it explicitly (see the start command above).
 
-*MCP "connection already closed":*
-Check that `https://mcp.maybelle.cryptograss.live` is reachable. Run `/mcp` in Claude Code to reconnect.
+*MCP "connection already closed":* check that
+`https://mcp.maybelle.cryptograss.live` is reachable. Run `/mcp` in Claude
+Code to reconnect.
 
 ### Hunter VPS
 
 ```bash
-# Deploy everything
 cd hunter/ansible
 ansible-playbook -i inventory.yml playbook.yml
 ```
 
-This will:
-1. Build shared base image
-2. Deploy postgres container
-3. Deploy watcher container
-4. Create per-user containers for justin, rj, skyler
-5. Configure SSH routing and Caddy reverse proxy
-
-## Watcher Service
-
-The watcher runs as a **shared service** (not per-user) because:
-- Single process can watch multiple user directories
-- Deduplication works across all users
-- Simpler resource usage
-- Consistent era management
-
-It watches all user log directories and imports to shared database with proper `from`/`to` attribution.
-
-## Database Access
-
-All containers access the shared database:
-- Host: `postgres` (container name) or `ai-sandbox` (if using existing postgres)
-- Database: `magenta_memory`
-- User: `magent`
-- Password: (from ansible vault or environment)
+This deploys the shared directory and its ACLs, the emergents' containers from
+the inventory (`emergent-*`), `workbench`, the ssh router and Caddy, and
+runs the hourly unpushed-work backup (`housekeeping`). It also still
+deploys the watcher (`services` role, posting to maybelle) until #254
+merges, and `faces`. Postgres is not deployed: it lives on maybelle.
 
 ## Logs
 
-- Watcher: `/opt/magenta/logs/watcher.log` (rotated, 10MB max, 5 backups)
-- Import counts displayed in real-time
-- Deduplication stats tracked
-
-## Ready for Hunter
-
-✅ Import count tracking (created vs skipped)
-✅ Line accounting with verification
-✅ Perfect deduplication (tested on 365 files, 131K+ lines)
-✅ Watcher running and importing in real-time
-✅ All infrastructure organized in `/hunter`
+Run `multi-log-viewer.sh` from a machine with root ssh to hunter: a tmux
+layout with one pane per running container plus Caddy. For one container:
+`ssh root@hunter.cryptograss.live "docker logs -f <name>"`.
