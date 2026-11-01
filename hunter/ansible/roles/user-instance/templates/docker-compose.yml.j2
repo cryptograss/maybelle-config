@@ -106,6 +106,11 @@ services:
       - MAGENT_ALSO_HARNESS=pi
       - MAGENT_OPENROUTER_API_KEY={{ magent_openrouter_api_key | default(model_openrouter_api_key | default('')) }}
 {% endif %}
+{% if user.magent_only_poller | default(false) %}
+      # magent's only poller (Moods as Directories, step 5): a session not on this
+      # disk is lost, and a mention there starts over from the record.
+      - MAGENT_ONLY_POLLER=1
+{% endif %}
 {% if user.magent_instructions | default(false) %}
       # magent's instructions from PickiPedia, given to each turn as system prompt
       # (magenta poller/instructions.py, --instructions), as the agents' are.
