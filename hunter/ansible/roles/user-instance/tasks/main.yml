@@ -98,7 +98,7 @@
       Port range: {{ user.port_range_start }}-{{ user.port_range_start + 9 }}
       Subdomains: {{ user.name }}1.{{ base_domain }} through {{ user.name }}10.{{ base_domain }}
       {% else %}
-      No ports: an agent's own container (agency-<name>).
+      No ports: an agent's own container (emergent-<name>).
       {% endif %}
 
 # A Mood's container lets in the people in it, by their keys.

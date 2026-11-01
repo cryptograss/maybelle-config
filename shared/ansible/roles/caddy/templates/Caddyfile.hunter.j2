@@ -1,6 +1,6 @@
 # Auto-generated Caddyfile for Magenta multi-user environment
 
-{# An agent's own container (agency-<name>) publishes nothing. #}
+{# An agent's own container (emergent-<name>) publishes nothing. #}
 {% for user in users if user.kind | default('') != 'agent' %}
 # {{ user.name }} - Port range {{ user.port_range_start }}-{{ user.port_range_start + 9 }}
 {% for i in range(10) %}

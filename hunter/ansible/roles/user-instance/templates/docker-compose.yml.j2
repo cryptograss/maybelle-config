@@ -7,7 +7,7 @@ services:
     hostname: {{ user.name }}@hunter
 {% if user.memory_limit is defined %}
     # Its own ceiling: a runaway here can't starve the rest of hunter, or
-    # another agent (agency-<name>).
+    # another agent (emergent-<name>).
     mem_limit: {{ user.memory_limit }}
 {% endif %}
 {% if user.cpus is defined %}
@@ -67,7 +67,7 @@ services:
       - GH_TOKEN={{ user.github_token | default('') }}
       - DJANGO_SECRET_KEY={{ user.django_secret_key | default('') }}
       - SSH_PORT={{ user.ssh_port | default('') }}
-      # agent: an agent's own container (agency-<name>), which starts only
+      # agent: an agent's own container (emergent-<name>), which starts only
       # what its agents need (container_startup.py)
       - CONTAINER_KIND={{ user.kind | default('') }}
       # Use private network for MCP on hunter (10.0.0.2 is maybelle)

@@ -193,7 +193,7 @@ class BrowserTest(unittest.TestCase):
 
 
 class AgentContainerTest(unittest.TestCase):
-    """An agent's own container (agency-<name>) starts its agents and nothing for people."""
+    """An agent's own container (emergent-<name>) starts its agents and nothing for people."""
 
     def test_only_container_kind_agent_is_one(self):
         with mock.patch.dict(os.environ, {'CONTAINER_KIND': 'agent'}):

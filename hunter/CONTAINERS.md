@@ -96,14 +96,15 @@ deliberately small in what it can touch:
 - **Files on hunter:** what its own user can read in its own container.
 
 Its first container was `docs-tests-qa`, its home Mood. It moved to the
-shared `agency`, and from there to its own, `agency-re` (below), its home with
-it each time.
+shared `agency`, from there to its own, `agency-re`, and then to the same
+container renamed `emergent-re` (below), its home with it each time.
 
-## agency-<name>: each agent's own container
+## emergent-<name>: each agent's own container
 
 Agents answer in every Mood, so where their processes run isn't named after a
 Mood (Justin, magent-self, 2026-10-21). Each agent has a container of its own,
-`agency-<name>` (magent-self, 23-24 Oct 2026: Justin, re, magent), holding its
+`emergent-<name>` (magent-self, 23-24 Oct 2026: Justin, re, magent; first
+called `agency-<name>`, renamed in emergence on 31 Oct 2026), holding its
 home, its poller and its rules bundle, and nothing for people:
 
 - **`kind: agent`:** no published ports, no code-server, no Godot workspace, no
@@ -113,10 +114,10 @@ home, its poller and its rules bundle, and nothing for people:
   can't starve the rest of hunter, or another agent, and a bad start takes down
   one agent, not all of them. The shared `agency` before it could cap the
   agents together but not apart.
-- **A Mood-kind entry** (`mood: agency`) for what that brings: no docker.sock
-  and full tools only for its `people`. No Mood called agency need exist, and
+- **A Mood-kind entry** (`mood: emergent`) for what that brings: no docker.sock
+  and full tools only for its `people`. No Mood called emergent need exist, and
   magent's own poller isn't started in it (`mood_poller: false`).
-- **Its home** is `/opt/magenta/agency-<name>/agents/<name>` on hunter's disk.
+- **Its home** is `/opt/magenta/emergent-<name>/agents/<name>` on hunter's disk.
 
 An agent's poller starts only once its runner key is in the vault; blu's is
 held back until the poller passes its rules bundle as system prompt, since
@@ -128,4 +129,5 @@ others, and renames its compose file `docker-compose.retired.yml`; everything
 else under `/opt/magenta/<name>` stays on disk. That is also what lets an
 agent's home move out of it (`home_from`): agent_homes.py refuses while a
 compose file still mounts the home. The shared `agency` was the first retired
-this way, when re and blu moved to `agency-re` and `agency-blu`.
+this way, when re and blu moved to `agency-re` and `agency-blu`; those two
+were retired in turn when their homes moved to `emergent-re` and `emergent-blu`.
