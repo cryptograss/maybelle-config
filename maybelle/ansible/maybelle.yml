@@ -581,6 +581,31 @@
         job: "/usr/local/bin/deploy-pickipedia-to-vps.sh"
         minute: "*/2"
 
+    # ----- hunter VCS backup (host cron) -----
+    # hunter keeps, hourly, the git work that exists only there: branches on no remote and
+    # uncommitted edits, in any home (hunter housekeeping: hunter-vcs-unpushed). Pulled here
+    # with root's hunter key, so hunter can be lost without losing them (Justin, emergence,
+    # 1 Nov 2026). latest/ mirrors hunter's; one copy a day is kept for 30 days.
+    - name: Create hunter VCS backup pull script
+      copy:
+        dest: /usr/local/bin/pull-hunter-vcs.sh
+        mode: '0750'
+        content: |
+          #!/bin/bash
+          set -euo pipefail
+          DIR=/mnt/persist/hunter-vcs
+          mkdir -p "$DIR/latest" "$DIR/daily"
+          rsync -a --delete root@hunter.cryptograss.live:/opt/magenta/vcs-backup/ "$DIR/latest/"
+          today="$DIR/daily/$(date -u +%F)"
+          [ -e "$today" ] || cp -al "$DIR/latest" "$today"
+          find "$DIR/daily" -mindepth 1 -maxdepth 1 -type d -mtime +30 -exec rm -rf {} +
+
+    - name: Cronjob to pull hunter's unpushed git work
+      ansible.builtin.cron:
+        name: "pull hunter vcs backup"
+        job: "/usr/local/bin/pull-hunter-vcs.sh >> /var/log/pull-hunter-vcs.log 2>&1"
+        minute: "20"
+
     - name: Remove old rsync cron if exists
       ansible.builtin.cron:
         name: "push sites to prod"
