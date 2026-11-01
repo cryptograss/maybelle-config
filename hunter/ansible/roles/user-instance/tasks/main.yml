@@ -1,4 +1,24 @@
 ---
+# A container renamed (`renamed_from` in its inventory entry, the old name also
+# in `retired`): its whole directory, home and all, takes the new name the first
+# time, so its sessions, clones and poller state come with it. The retire step
+# (playbook.yml) has already stopped the old container. Refused while the old
+# compose file is still live; nothing to do once moved.
+- name: Move a renamed container's directory to its new name
+  shell: |
+    set -e
+    old="{{ base_dir }}/{{ user.renamed_from }}"
+    new="{{ base_dir }}/{{ user.name }}"
+    if [ -e "$new" ] || [ ! -d "$old" ]; then echo unchanged; exit 0; fi
+    if [ -e "$old/docker-compose.yml" ]; then
+      echo "$old still has a live docker-compose.yml: retire {{ user.renamed_from }} first" >&2; exit 1
+    fi
+    mv "$old" "$new"
+    echo moved
+  register: renamed
+  changed_when: renamed.stdout == 'moved'
+  when: user.renamed_from is defined
+
 - name: Create user directory
   file:
     path: "{{ base_dir }}/{{ user.name }}"
