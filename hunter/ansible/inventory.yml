@@ -13,6 +13,10 @@ all:
     base_dir: /opt/magenta
     # memory-lane: part of magenta since 18 Oct 2026, in hunter's clone of it (build-image)
     memory_lane_dir: /opt/magenta/magenta-source/memory-lane
+    # githouse's repositories (roles/githouse): public ones only, until it
+    # has the deploy key. Each is /srv/git/<name>.git in every container.
+    githouse_repos: [cryptograss/magenta, cryptograss/maybelle-config, cryptograss/pickipedia,
+                     cryptograss/pickipedia-mcp, cryptograss/arthel, cryptograss/rabbithole]
 
     # Domain for subdomains
     base_domain: hunter.cryptograss.live

@@ -86,6 +86,10 @@
       failed_when: network_create.rc != 0 and 'already exists' not in network_create.stderr
       changed_when: network_create.rc == 0
 
+    - name: githouse, our canonical clones (before the containers that mount them)
+      include_role:
+        name: githouse
+
     # Taken out of the inventory (`retired`): stopped and removed, before the
     # containers that replace it are made, so an agent's home it mounted can
     # move (agent_homes.py refuses while a compose file still mounts it). Its

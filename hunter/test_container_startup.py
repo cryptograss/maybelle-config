@@ -291,3 +291,31 @@ class LinkRulesTest(unittest.TestCase):
             (home / 'CLAUDE.md').write_text("someone's own")
             container_startup.link_rules(home, None, (home / 'CLAUDE.md',))
             self.assertEqual((home / 'CLAUDE.md').read_text(), "someone's own")
+
+
+class GithouseRemoteTest(unittest.TestCase):
+    """A clone's remote `hunter`: githouse's copy, fetched from the mount, pushed to over ssh with a key."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        (self.tmp / 'magenta.git').mkdir()
+        (self.tmp / 'magenta.git' / 'HEAD').write_text('ref: refs/heads/main\n')
+        patcher = mock.patch.object(container_startup, 'GITHOUSE', self.tmp)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_with_a_key_fetch_from_the_mount_and_push_over_ssh(self):
+        steps = container_startup.githouse_steps('re', Path('/home/re/workspace/magenta'), True)
+        self.assertEqual(steps, ['git -C /home/re/workspace/magenta remote remove hunter',
+                                 f"git -C /home/re/workspace/magenta remote add hunter {self.tmp / 'magenta.git'}",
+                                 'git -C /home/re/workspace/magenta remote set-url --push hunter git@githouse:magenta.git'])
+        self.assertTrue(all("'" not in step for step in steps))  # they go inside run_command's single quotes
+
+    def test_without_a_key_fetch_only(self):
+        steps = container_startup.githouse_steps('blu', Path('/home/blu/workspace/magenta'), False)
+        self.assertFalse(any('--push' in step for step in steps))
+
+    def test_nothing_for_a_repository_githouse_hasnt_got(self):
+        self.assertEqual(container_startup.githouse_steps('re', Path('/home/re/workspace/red'), True), [])
+        self.assertEqual(container_startup.reference(Path('/home/re/workspace/red')), '')
+        self.assertIn('--reference-if-able', container_startup.reference(Path('/home/re/workspace/magenta')))

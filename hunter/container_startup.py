@@ -885,9 +885,10 @@ def setup_agent(agent):
         if target.exists():
             run_command(f"git -C {target} pull --ff-only --quiet", user=name, check=False)
         else:
-            run_command(f"git clone --quiet https://github.com/{repo}.git {target}", user=name, check=False)
+            run_command(f"git clone --quiet {reference(target)}https://github.com/{repo}.git {target}", user=name, check=False)
     run_command(f"git config --global user.name {name}", user=name, check=False)
     run_command(f"git config --global user.email {name}@cryptograss.live", user=name, check=False)
+    setup_githouse(name, home, secret('GIT_KEY'))
     claude_dir = home / '.claude'
     claude_dir.mkdir(exist_ok=True)
     link_rules(home, agent.get('rules'), (pi_dir / 'AGENTS.md', claude_dir / 'CLAUDE.md'))
@@ -895,6 +896,45 @@ def setup_agent(agent):
         if p.exists():
             shutil.chown(p, user=name, group=name)
     logger.info(f"✓ Agent {name} set up as its own user ({agent.get('harness', 'claude-code')})")
+
+
+GITHOUSE = Path('/srv/git')
+
+
+def githouse_steps(name, target, pushable):
+    """Commands giving a clone the remote `hunter`: githouse's copy (hunter/githouse), fetched from the
+    read-only mount and, with a key, pushed to over ssh as `name`. Nothing for a repository githouse
+    hasn't got. origin stays GitHub, so branches pushed there directly are still fetched from it.
+    (Plain words only: they may go into run_command's single quotes.)"""
+    repo = GITHOUSE / f'{target.name}.git'
+    if not (repo / 'HEAD').exists():
+        return []
+    steps = [f"git -C {target} remote remove hunter", f"git -C {target} remote add hunter {repo}"]
+    if pushable:
+        steps.append(f"git -C {target} remote set-url --push hunter git@githouse:{target.name}.git")
+    return steps
+
+
+def setup_githouse(name, home, key):
+    """Its way to githouse: its key (the vault's <name>_git_private_key, newlines as \\n), the host
+    named in ~/.ssh/config, and `hunter` in each clone githouse has. Without a key it fetches only."""
+    if key:
+        ssh = home / '.ssh'
+        ssh.mkdir(mode=0o700, exist_ok=True)
+        shutil.chown(ssh, user=name, group=name)
+        write_private(ssh / 'githouse', key.replace('\\n', '\n').strip() + '\n', name)
+        config = ssh / 'config'
+        said = config.read_text() if config.exists() else ''
+        if 'Host githouse' not in said:
+            write_private(config, said + ('\n' if said and not said.endswith('\n') else '') +
+                          f"Host githouse\n    User git\n    IdentityFile {ssh / 'githouse'}\n"
+                          f"    IdentitiesOnly yes\n    StrictHostKeyChecking accept-new\n", name)
+    workspace = home / 'workspace'
+    for target in sorted(workspace.iterdir()) if workspace.exists() else []:
+        if (target / '.git').exists():
+            for step in githouse_steps(name, target, bool(key)):
+                run_command(step, user=name, check=False)
+    logger.info(f"Agent {name}: githouse {'fetch and push' if key else 'fetch only (no git key in the vault)'}")
 
 
 def link_rules(home, rules, links):
@@ -931,14 +971,22 @@ def repos_by_when(agent):
     return first, later
 
 
+def reference(target):
+    """'--reference-if-able <githouse's copy> ' for a clone, so its objects come from hunter's disk, not GitHub."""
+    repo = GITHOUSE / f'{target.name}.git'
+    return f"--reference-if-able {repo} --dissociate " if (repo / 'HEAD').exists() else ''
+
+
 def clone_in_background(agent):
     """The agent's other clones, after its poller has started: a missing one
     is cloned, one already on its disk is fetched (its branches are its own
     business). Logged to /tmp/clones-<agent>.log."""
     name = agent['name']
     _, later = repos_by_when(agent)
+    pushable = bool(os.environ.get(f"AGENT_{name.upper().replace('-', '_')}_GIT_KEY", '').strip())
     steps = [f"git -C {target} fetch --quiet" if target.exists()
-             else f"git clone --quiet https://github.com/{repo}.git {target}" for repo, target in later]
+             else f"git clone --quiet {reference(target)}https://github.com/{repo}.git {target}" for repo, target in later]
+    steps += [step for _, target in later if not target.exists() for step in githouse_steps(name, target, pushable)]
     if not steps:
         return
     # (Plain words only: run_command wraps this in single quotes for su.)

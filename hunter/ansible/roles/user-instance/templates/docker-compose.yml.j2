@@ -41,6 +41,8 @@ services:
       # Mood poller: memory-lane as deployed, in hunter's clone of magenta main
       # (build-image keeps it current), not a workspace checkout on any branch
       - {{ memory_lane_dir }}/poller:/opt/mood-poller:ro
+      # githouse's repositories, to clone and fetch from; pushes go over ssh (roles/githouse)
+      - {{ base_dir }}/git:/srv/git:ro
 {% for agent in user.agents | default([]) %}
       # {{ agent.name }}'s home, kept across recreation (hunter/scripts/agent_homes.py)
       - {{ base_dir }}/{{ user.name }}/agents/{{ agent.name }}:/home/{{ agent.name }}
@@ -126,6 +128,7 @@ services:
 {% set prefix = 'AGENT_' ~ (agent.name | upper | replace('-', '_')) %}
       - {{ prefix }}_RUNNER_KEY={{ lookup('vars', agent.name ~ '_runner_key', default='') }}
       - {{ prefix }}_PICKIPEDIA_BOT_PASSWORD={{ lookup('vars', agent.name ~ '_pickipedia_bot_password', default='') }}
+      - {{ prefix }}_GIT_KEY={{ lookup('vars', agent.name ~ '_git_private_key', default='') | replace('\n', '\\n') }}
 {# A vendor's key is shared by every agent (model_<vendor>_api_key), unless one has its own (<agent>_<vendor>_api_key). #}
 {% for vendor, env_name in (agent.model_keys | default({})).items() %}
       - {{ prefix }}_KEY_{{ env_name }}={{ lookup('vars', agent.name ~ '_' ~ vendor ~ '_api_key', default=lookup('vars', 'model_' ~ vendor ~ '_api_key', default='')) }}
