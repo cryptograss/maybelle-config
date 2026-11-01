@@ -1,7 +1,7 @@
 # What a container on hunter is
 
 Proposed in the magent-self Mood on 2026-10-11, as the shape we're moving to.
-Some of it is already true (the `delivery-kid` and `docs-tests-qa` containers);
+Some of it is already true (the `uploads-and-embeds` and `docs-tests-qa` containers);
 some is not yet (the containers still named after people).
 
 ## A container belongs to a Mood
@@ -131,3 +131,9 @@ agent's home move out of it (`home_from`): agent_homes.py refuses while a
 compose file still mounts the home. The shared `agency` was the first retired
 this way, when re and blu moved to `agency-re` and `agency-blu`; those two
 were retired in turn when their homes moved to `emergent-re` and `emergent-blu`.
+
+**Renaming a container:** give the entry its new name and `renamed_from: <old>`,
+and put the old name in `retired:`. After the retire step, the user-instance
+role moves `/opt/magenta/<old>` to `/opt/magenta/<new>` whole, the first time,
+and refuses while the old compose file is still live. `delivery-kid` became
+`uploads-and-embeds` this way on 1 Nov 2026, taking its Mood's name.

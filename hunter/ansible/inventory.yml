@@ -64,7 +64,9 @@ all:
     # blu's homes moved from it to theirs (home_from). agency-re and
     # agency-blu went when those were renamed emergent-<name> (Justin,
     # emergence, 31 Oct 2026): the homes move again, whole.
-    retired: [agency, agency-re, agency-blu]
+    # delivery-kid went when its container took its Mood's name, uploads-and-embeds
+    # (renamed_from, below).
+    retired: [agency, agency-re, agency-blu, delivery-kid]
 
     # Containers (the user-instance role, one each). A person's own container
     # takes its git identity and key from that person's entry above.
@@ -110,8 +112,12 @@ all:
       # keys (`ssh -p <ssh_port> magent@hunter.cryptograss.live`), not through
       # the router, which routes each key to its owner's container. Its web
       # ports work as anyone's: <name>1.hunter.cryptograss.live and so on.
-      - name: delivery-kid
-        mood: delivery-kid
+      - name: uploads-and-embeds
+        mood: uploads-and-embeds
+        # Its Mood's name since 1 Nov 2026 (it was the Mood's old slug): the
+        # directory moves over whole the first time (user-instance role).
+        # Harmless once moved; it can go after that deploy.
+        renamed_from: delivery-kid
         people: [justin, skyler]
         full_name: "magent-cryptograss"
         email: "magent@cryptograss.live"
@@ -173,10 +179,6 @@ all:
         cpus: 1.5
         agents:
           - name: re
-            # Its home moves here from agency-re, the first time (agent_homes.py):
-            # its sessions, its poller's state and its clones come with it. Harmless
-            # once moved; it can go after that deploy.
-            home_from: agency-re
             uid: 2001  # its unix user, in the container and on hunter's disk (its home is kept there)
             # pi, or claude-code; both are set up either way. Anthropic's models run
             # on the subscription (claude_code_oauth_token in the vault, from
@@ -228,7 +230,6 @@ all:
         cpus: 1.5
         agents:
           - name: blu
-            home_from: agency-blu  # as re's: moved over whole the first time
             uid: 2002  # never reused: its home is kept on hunter's disk under this number
             # The blue agent, for the connectome (Justin, magent-self, 2026-10-19).
             # Set up like re: Pi for other vendors' models, Claude Code for
