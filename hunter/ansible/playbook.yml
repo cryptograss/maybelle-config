@@ -138,6 +138,11 @@
       vars:
         user: "{{ (people | selectattr('name', 'equalto', entry.name) | first | default({})) | combine(entry) }}"
 
+    # After workbench is up: each Mood's previews by its name, from workbench.
+    - name: Include mood-previews role (each Mood's <slug>0-9 hostnames)
+      include_role:
+        name: mood-previews
+
     - name: Display deployment summary
       debug:
         msg: |

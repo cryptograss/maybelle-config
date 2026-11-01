@@ -173,3 +173,22 @@ workbench`). Its keys are every person's in its `people`.
   have one, else to workbench.
 - Its own port too, 2240, for scp, rsync and VS Code Remote; previews on
   `workbench0-9.hunter` until previews go by Mood (step 4).
+
+## Previews by Mood: <slug>0-9.hunter
+
+Each Mood with a directory under `/moods` has ten preview ports in
+workbench, from 15000 up, given the first time it's seen and kept in its
+`.previews` file (ports beside hostnames; renaming the directory keeps
+them). A dev server started in workbench on one of them, bound to
+`0.0.0.0`, is at `https://<slug><N>.hunter.cryptograss.live`.
+
+- `hunter-mood-previews` (mood-previews role), each minute as root, writes
+  `/etc/caddy/moods.caddy` (each hostname to workbench's address on
+  magenta-net: no published ports) and `/etc/caddy/moods-ask`, and reloads
+  Caddy only when they change and `caddy validate` takes them.
+- Certificates on demand: one is asked for only when a hostname is first
+  visited, and only for a hostname in `moods-ask` (Caddy's own
+  `localhost:5555` answers). Ten names a Mood, all at once, would pass
+  Let's Encrypt's 50 new certificates a week for cryptograss.live.
+- A Mood named like a container that still has its own `<name>0-9`
+  (uploads-and-embeds, docs-tests-qa) waits until that container retires.

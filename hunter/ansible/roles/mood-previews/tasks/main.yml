@@ -1,0 +1,46 @@
+---
+# Each Mood's previews by its name, <slug>0-9.hunter.cryptograss.live, served from
+# workbench (Cryptograss:Moods as Directories, step 4). Every minute, a script reads
+# the Mood directories under /opt/magenta/moods, gives each a block of ten ports (kept
+# in its .previews file), and writes /etc/caddy/moods.caddy and the hostnames Caddy
+# may get a certificate for, reloading Caddy only when they change.
+- name: Install the Mood previews script
+  copy:
+    src: mood-previews.py
+    dest: /usr/local/sbin/hunter-mood-previews
+    mode: "0755"
+
+- name: Mood previews service
+  copy:
+    dest: /etc/systemd/system/hunter-mood-previews.service
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=Each Mood's previews by its name, from workbench
+
+      [Service]
+      Type=oneshot
+      ExecStart=/usr/local/sbin/hunter-mood-previews --base-dir {{ base_dir }} --domain {{ base_domain }}
+      TimeoutStartSec=5min
+
+- name: Mood previews timer
+  copy:
+    dest: /etc/systemd/system/hunter-mood-previews.timer
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=Each Mood's previews by its name, each minute
+
+      [Timer]
+      OnBootSec=1min
+      OnUnitActiveSec=1min
+
+      [Install]
+      WantedBy=timers.target
+
+- name: Start the Mood previews timer
+  systemd:
+    name: hunter-mood-previews.timer
+    enabled: yes
+    state: started
+    daemon_reload: yes
