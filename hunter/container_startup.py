@@ -764,12 +764,23 @@ def start_mood_poller():
         if os.environ.get('MAGENT_INSTRUCTIONS') == '1':
             args += ' --instructions'
         slug = os.environ.get('MOOD_SLUG', '').strip()
-        if slug:
-            people = os.environ.get('MOOD_FULL_TOOLS_FOR', '').strip()
-            if not re.fullmatch(r'[a-z0-9-]+', slug) or not re.fullmatch(r'[a-z0-9_,-]*', people):
-                logger.error(f"MOOD_SLUG / MOOD_FULL_TOOLS_FOR not plain words; poller not started")
-                return
+        container = os.environ.get('MOOD_CONTAINER', '').strip()
+        people = os.environ.get('MOOD_FULL_TOOLS_FOR', '').strip()
+        if (slug or container) and (not re.fullmatch(r'[a-z0-9-]+', slug or 'x')
+                                    or not re.fullmatch(r'(mood-\d+)?', container)
+                                    or not re.fullmatch(r'[a-z0-9_,-]*', people)):
+            logger.error(f"MOOD_SLUG / MOOD_CONTAINER / MOOD_FULL_TOOLS_FOR not plain words; poller not started")
+            return
+        if container:
+            # A Mood's own container, on demand (hunter-mood-containers): it answers the Moods it is the
+            # container of -- its Mood and its threads -- and starts their sessions here, over from the
+            # record where their last one lives elsewhere.
+            args += f" --container {container} --only-poller yes --full-tools-for {people or ','}"
+        elif slug:
             args += f" --moods {slug} --full-tools-for {people or ','}"
+        else:
+            # Everywhere else: leaving the Moods a container of their own answers.
+            args += " --leave-containers yes"
         run_command(poller_command(args, signed_in), user='magent')
         logger.info("✓ Mood poller started (log: /tmp/mood-poller.log)")
     except Exception as e:

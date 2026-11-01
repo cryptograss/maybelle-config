@@ -1,0 +1,132 @@
+---
+# A Mood's own container, brought up when the Mood asks for one (magenta: a Mood's "Give it a container";
+# Justin, emergence, 1 Nov 2026), named mood-<id> after the Mood's id: no inventory entry and no redeploy.
+# hunter-mood-containers (files/mood-containers.py) reads what's wanted from magenta every minute, with the
+# access key the SSH router already reports with, and brings each up or down. What the deploy gives it: what
+# every Mood container shares (the secrets in mood.env, the people's keys, Claude Code's settings), the
+# firewall for their SSH ports, and a place in Caddy for their previews.
+- name: Its directory (root's only)
+  file:
+    path: "{{ base_dir }}/mood-containers"
+    state: directory
+    mode: '0700'
+
+- name: What every Mood container shares, from the vault
+  template:
+    src: mood.env.j2
+    dest: "{{ base_dir }}/mood-containers/mood.env"
+    mode: '0600'
+  no_log: true
+
+# Every person with a key may come into any Mood's container, as into recovery (Justin, magent-self, 23 Oct).
+- name: The people's keys, for each Mood container's authorized_keys
+  copy:
+    dest: "{{ base_dir }}/mood-containers/authorized_keys"
+    mode: '0644'
+    content: |
+      {% for person in people if person.ssh_pubkey is defined %}
+      {{ person.ssh_pubkey }}
+      {% endfor %}
+
+- name: Claude Code's settings and git identity, as the deploy writes them for a Mood's container
+  copy:
+    dest: "{{ base_dir }}/mood-containers/{{ item.name }}"
+    mode: '0644'
+    content: "{{ item.content }}"
+  loop:
+    - name: settings.local.json
+      content: |
+        {
+          "attribution": { "commit": "", "pr": "", "sessionUrl": false },
+          "includeCoAuthoredBy": false,
+          "permissions": {
+            "allow": ["Read(*)", "Bash(git:*)", "Bash(ls:*)", "Bash(cat:*)", "Bash(head:*)", "Bash(tail:*)",
+                      "Bash(wc:*)", "Bash(ps:*)", "Bash(find:*)", "Bash(grep:*)",
+                      "mcp__magenta-memory-v2", "mcp__pickipedia"]
+          }
+        }
+    - name: gitconfig
+      content: |
+        [user]
+          name = magent-cryptograss
+          email = magent@cryptograss.live
+        [github]
+          user = magent-cryptograss
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Its settings
+  copy:
+    dest: "{{ base_dir }}/mood-containers/config.json"
+    mode: '0644'
+    content: "{{ cfg | to_nice_json }}\n"
+  vars:
+    cfg:
+      api: https://magenta.cryptograss.live
+      key_file: /etc/magenta/access-key
+      base_dir: "{{ base_dir }}"
+      shared_dir: "{{ base_dir }}/mood-containers"
+      env_file: "{{ base_dir }}/mood-containers/mood.env"
+      image: magenta-arthel:latest
+      memory_lane_dir: "{{ memory_lane_dir }}"
+      instructions: /opt/magenta/magenta-source/agents/magent.md
+      domain: "{{ base_domain }}"
+      caddy_dir: /etc/caddy/moods.d
+      caddyfile: /etc/caddy/Caddyfile
+      people: "{{ people | map(attribute='name') | list }}"
+      memory_limit: 4g
+      cpus: 2
+
+- name: Where their Caddy files go (the Caddyfile imports them)
+  file:
+    path: /etc/caddy/moods.d
+    state: directory
+    mode: '0755'
+
+- name: Their SSH ports (2300 + the Mood's id)
+  ufw:
+    rule: allow
+    port: '2300:2999'
+    proto: tcp
+
+- name: Install the process
+  copy:
+    src: mood-containers.py
+    dest: /usr/local/sbin/hunter-mood-containers
+    mode: '0755'
+
+- name: Its service
+  copy:
+    dest: /etc/systemd/system/hunter-mood-containers.service
+    mode: '0644'
+    content: |
+      [Unit]
+      Description=Bring up (or down) the Mood containers magenta asks for
+      After=docker.service
+
+      [Service]
+      Type=oneshot
+      ExecStart=/usr/local/sbin/hunter-mood-containers --config {{ base_dir }}/mood-containers/config.json
+      TimeoutStartSec=15min
+
+- name: Its timer, every minute
+  copy:
+    dest: /etc/systemd/system/hunter-mood-containers.timer
+    mode: '0644'
+    content: |
+      [Unit]
+      Description=Look for Mood containers to bring up or down, every minute
+
+      [Timer]
+      OnBootSec=2min
+      OnUnitActiveSec=1min
+
+      [Install]
+      WantedBy=timers.target
+
+- name: Start it
+  systemd:
+    name: hunter-mood-containers.timer
+    enabled: yes
+    state: started
+    daemon_reload: yes

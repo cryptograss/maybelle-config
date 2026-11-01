@@ -26,6 +26,10 @@ arthel.{{ user.name }}.{{ base_domain }} {
 
 {% endfor %}
 
+# Each Mood's own container (mood-<id>), brought up on demand: its previews and code-server, written by
+# hunter-mood-containers, by the Mood's slug (hunter's mood-containers role).
+import /etc/caddy/moods.d/*.caddy
+
 # faces: whose faces are in a picture (memory-lane faces/), for Moods and PickiPedia
 faces.{{ base_domain }} {
     reverse_proxy localhost:8090

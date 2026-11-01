@@ -49,6 +49,14 @@
       include_role:
         name: build-image
 
+    # Mood containers' Caddy files (the mood-containers role, below): the Caddyfile imports them, so the
+    # directory is there before Caddy reads it.
+    - name: Where Mood containers' Caddy files go
+      file:
+        path: /etc/caddy/moods.d
+        state: directory
+        mode: '0755'
+
     - name: Include Caddy role for reverse proxy
       include_role:
         name: caddy
@@ -108,6 +116,11 @@
         loop_var: entry
       vars:
         user: "{{ (people | selectattr('name', 'equalto', entry.name) | first | default({})) | combine(entry) }}"
+
+    # A Mood's own container, on demand (mood-<id>): no entry above, no redeploy; magenta asks, this brings it up.
+    - name: Include mood-containers role
+      include_role:
+        name: mood-containers
 
     - name: Display deployment summary
       debug:

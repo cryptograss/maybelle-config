@@ -250,6 +250,21 @@ class MagentInstructionsTest(unittest.TestCase):
         self.assertNotIn('--instructions', self.started({'MAGENT_INSTRUCTIONS': ''}))
 
 
+class MagentPollerWhereTest(MagentInstructionsTest):
+    """Which Moods magent's poller answers: a Mood's own container (on demand) its Mood and threads, a
+    hand-made Mood container its Mood, and everywhere else leaves the containers' Moods to them."""
+
+    def test_each_container_its_part(self):
+        clear = {'MOOD_SLUG': '', 'MOOD_CONTAINER': '', 'MOOD_FULL_TOOLS_FOR': ''}
+        on_demand = self.started({**clear, 'MOOD_SLUG': 'm26', 'MOOD_CONTAINER': 'mood-7',
+                                  'MOOD_FULL_TOOLS_FOR': 'justin,skyler'})
+        self.assertIn('--container mood-7 --only-poller yes --full-tools-for justin,skyler', on_demand)
+        self.assertNotIn('--moods', on_demand)
+        self.assertIn('--moods docs-tests-qa', self.started({**clear, 'MOOD_SLUG': 'docs-tests-qa'}))
+        self.assertIn('--leave-containers yes', self.started(clear))
+        self.assertEqual(self.started({**clear, 'MOOD_CONTAINER': 'mood-7; rm -rf /'}), '')
+
+
 class AgentInstructionsTest(unittest.TestCase):
     """An agent with instructions: true gets --instructions; one with neither them nor a rules file isn't started."""
 
