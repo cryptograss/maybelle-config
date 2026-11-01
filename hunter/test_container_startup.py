@@ -118,6 +118,21 @@ class PollerSignInTest(unittest.TestCase):
         self.assertNotIn('poller.env', poller_command('--agent magent', False))
         self.assertNotIn("'", signed)  # run_command wraps it in single quotes for su
 
+    def test_the_containers_git_identity_reaches_the_poller_through_su(self):
+        environ = {'GIT_AUTHOR_NAME': 'magent-cryptograss', 'GIT_AUTHOR_EMAIL': 'magent@cryptograss.live',
+                   'GIT_COMMITTER_NAME': 'magent-cryptograss', 'GIT_COMMITTER_EMAIL': 'magent@cryptograss.live'}
+        line = poller_command('--agent magent', True, environ)
+        self.assertTrue(line.startswith('set -a; . ~/.config/magenta/poller.env; set +a; export GIT_AUTHOR_NAME='))
+        self.assertIn('export GIT_COMMITTER_EMAIL="magent@cryptograss.live"; nohup ', line)
+        self.assertNotIn("'", line)
+
+    def test_no_identity_in_the_container_none_in_the_line(self):
+        self.assertNotIn('GIT_', poller_command('--agent magent', False, {}))
+
+    def test_a_value_that_would_need_quoting_is_left_out(self):
+        line = poller_command('--agent magent', False, {'GIT_AUTHOR_NAME': "o'brien", 'GIT_AUTHOR_EMAIL': '$(x)@y'})
+        self.assertNotIn('GIT_', line)
+
 
 if __name__ == '__main__':
     unittest.main()

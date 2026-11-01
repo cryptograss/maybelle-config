@@ -726,11 +726,25 @@ def setup_magent_pi(home=Path('/home/magent')):
     logger.info(f"✓ magent on Pi too: rules linked, {len(servers)} MCP servers")
 
 
-def poller_command(args, signed_in):
+GIT_IDENTITY = ('GIT_AUTHOR_NAME', 'GIT_AUTHOR_EMAIL', 'GIT_COMMITTER_NAME', 'GIT_COMMITTER_EMAIL')
+
+
+def identity_exports(environ=None):
+    """The container's git identity, for the poller's shell. Compose sets it on
+    a container whose home is another's (emergent-magent in Justin's), but
+    `su -` starts a clean environment, and .bashrc and poller.env are in that
+    shared home, so it is handed over here. A value with anything but plain
+    name-and-address characters is left out rather than quoted."""
+    environ = os.environ if environ is None else environ
+    return ''.join(f'export {var}="{environ[var]}"; ' for var in GIT_IDENTITY
+                   if re.fullmatch(r'[\w .@+-]+', environ.get(var, '')))
+
+
+def poller_command(args, signed_in, environ=None):
     """The shell line that starts magent's poller, as magent. (Plain words
     only: run_command wraps it in single quotes for su.)"""
     env = 'set -a; . ~/.config/magenta/poller.env; set +a; ' if signed_in else ''
-    return f"{env}nohup /usr/bin/python3 /opt/mood-poller/mood_poller.py {args} >> /tmp/mood-poller.log 2>&1 &"
+    return f"{env}{identity_exports(environ)}nohup /usr/bin/python3 /opt/mood-poller/mood_poller.py {args} >> /tmp/mood-poller.log 2>&1 &"
 
 
 def start_mood_poller():
