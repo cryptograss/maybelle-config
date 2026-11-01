@@ -15,6 +15,7 @@ on:
     paths:
       - '**/ansible/**'
       - 'shared/**'
+      - 'hunter/**'
       - 'scripts/**'
       - 'delivery-kid/pinning-service/**'
       - 'maybelle/scripts/**'
@@ -23,6 +24,7 @@ on:
     paths:
       - '**/ansible/**'
       - 'shared/**'
+      - 'hunter/**'
       - 'scripts/**'
       - 'delivery-kid/pinning-service/**'
       - 'maybelle/scripts/**'
@@ -101,6 +103,28 @@ jobs:
       # node:test, so this runs the whole suite.
       - name: Run tests
         run: npx --yes jiti@2 hunter/ansible/roles/recovery/test_recovery_gate.mjs
+
+  # hunter's own tests: container_startup.py, the agent homes, the hourly
+  # unpushed-work backup, and the ssh router. Written alongside each of them
+  # and, until Moods as Directories (step 3), run only by whoever typed
+  # pytest: the same gap as the rest of this file.
+  hunter:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: python -m pip install --upgrade pip pytest PyYAML jinja2
+
+      - name: Run tests
+        run: >
+          pytest -v hunter/test_container_startup.py hunter/scripts
+          hunter/ansible/roles/housekeeping hunter/ansible/roles/ssh-router
 
   # What a change to the deploy logic renders differently from production,
   # in the run's summary (scripts/render_diff.py): every template and every

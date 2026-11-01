@@ -152,6 +152,25 @@ all:
         mood_poller: true
         magent_instructions: true
 
+      # workbench: the people's box (Cryptograss:Moods as Directories, Justin,
+      # emergence, 1 Nov 2026). Every Mood's directory is in it, at /moods,
+      # as in every agent's container: people work there beside the agents.
+      # A terminal, code-server and the previews; no poller, and no
+      # docker.sock (a Mood-kind entry). Reached through the router:
+      # `ssh sshrouter@hunter chartifacts` is a shell in /moods/chartifacts,
+      # `ssh sshrouter@hunter workbench` one in its home; or on its own port.
+      - name: workbench
+        mood: workbench
+        people: [justin, skyler, rj, fibonacci]
+        full_name: "magent-cryptograss"
+        email: "magent@cryptograss.live"
+        github_username: "magent-cryptograss"
+        ssh_port: 2240
+        port_range_start: 14100  # 14100-14109: workbench0-9.hunter, until previews go by Mood (step 4)
+        code_server_password: "{{ code_server_password }}"
+        github_token: "{{ magent_github_token }}"
+        mood_poller: false
+
       # emergent-<name>: each agent's own container (magent-self, 23-24 Oct 2026:
       # Justin, re, magent; first called agency-<name>). It holds the agent's
       # home, its poller and its rules bundle, and nothing else: kind: agent,

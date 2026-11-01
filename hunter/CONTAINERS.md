@@ -156,3 +156,20 @@ and every container mounts it at `/moods`:
 - **A thread** gets a worktree under `/moods/<slug>/threads/<thread>/`.
 - **The hourly backup** (`hunter-vcs-unpushed`) keeps what's only here in
   each Mood's directory too, as `moods/<slug>/...`.
+
+## workbench: the people's box
+
+One container for people (Moods as Directories, step 3): a terminal,
+code-server and previews, with every Mood's directory at `/moods`, as in each
+agent's container. No poller, no docker.sock (a Mood-kind entry, `mood:
+workbench`). Its keys are every person's in its `people`.
+
+- `ssh sshrouter@hunter chartifacts` is a shell in `/moods/chartifacts`;
+  `... chartifacts tmux` a tmux session named for the Mood, started there and
+  shared by whoever joins it. Only a slug whose directory exists counts;
+  anything else is, as before, a command in your own container.
+- `ssh sshrouter@hunter workbench` is a shell in its home.
+- Everyone with a key is routed now: to their own container while they still
+  have one, else to workbench.
+- Its own port too, 2240, for scp, rsync and VS Code Remote; previews on
+  `workbench0-9.hunter` until previews go by Mood (step 4).
