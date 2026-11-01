@@ -6,6 +6,6 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: magenta-arthel:latest
+    image: magenta:latest
     # We don't actually run this, just build the image
     command: /bin/true

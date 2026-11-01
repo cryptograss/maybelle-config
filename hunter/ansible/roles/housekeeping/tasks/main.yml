@@ -86,7 +86,7 @@
       WantedBy=timers.target
 
 # Reports, never deletes. Unused images (~25GB, including a 10.6GB
-# magenta-arthel) are deliberately left alone: several are locally built and
+# magenta) are deliberately left alone: several are locally built and
 # expensive to rebuild, and this box is shared. That is a human decision.
 - name: Disk report service
   copy:

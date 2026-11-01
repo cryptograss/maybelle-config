@@ -14,7 +14,7 @@ A Mood (a conversation in magenta, about one thing) can have a container on
 hunter. The container is named after the Mood, and it holds what work in that
 Mood needs:
 
-- a workspace and the full toolchain (the `magenta-arthel` image);
+- a workspace and the full toolchain (the `magenta` image);
 - its own web ports: `<mood>1.hunter.cryptograss.live` and so on, for preview
   servers (a PickiPedia preview, a site under development);
 - the agents who work in that Mood, as its residents (below);

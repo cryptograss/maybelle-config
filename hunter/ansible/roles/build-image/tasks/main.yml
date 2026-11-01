@@ -64,7 +64,7 @@
     state: directory
     mode: '0755'
 
-- name: Build magenta-arthel base image (step by step in /opt/magenta/logs/image-build.log)
+- name: Build magenta base image (step by step in /opt/magenta/logs/image-build.log)
   shell: >
     set -o pipefail;
     [ -f {{ base_dir }}/logs/image-build.log ] && mv -f {{ base_dir }}/logs/image-build.log {{ base_dir }}/logs/image-build.previous.log;
@@ -93,9 +93,9 @@
   failed_when: true
 
 - name: Verify image was built
-  command: docker images magenta-arthel:latest --format "{% raw %}{{.Repository}}:{{.Tag}}{% endraw %}"
+  command: docker images magenta:latest --format "{% raw %}{{.Repository}}:{{.Tag}}{% endraw %}"
   register: image_check
-  failed_when: "'magenta-arthel:latest' not in image_check.stdout"
+  failed_when: "'magenta:latest' not in image_check.stdout"
 
 # Cap BuildKit cache so repeated rebuilds (especially the periodic base-image
 # bumps) don't accumulate unbounded. -f only skips the prompt: this removes

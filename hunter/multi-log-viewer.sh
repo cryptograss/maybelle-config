@@ -24,10 +24,10 @@ if [ $? != 0 ]; then
     tmux split-window -v -t $SESSION:0.2
 
     # Pane 0 (top-left): magent's poller, in its own container (its wakes, replies, costs)
-    tmux send-keys -t $SESSION:0.0 'ssh root@hunter.cryptograss.live "docker exec emergent-magent-arthel tail -F /tmp/mood-poller.log"' C-m
+    tmux send-keys -t $SESSION:0.0 'ssh root@hunter.cryptograss.live "docker exec emergent-magent tail -F /tmp/mood-poller.log"' C-m
 
     # Pane 1 (top-right): workbench, the people's box
-    tmux send-keys -t $SESSION:0.1 'ssh root@hunter.cryptograss.live "docker logs -f workbench-arthel"' C-m
+    tmux send-keys -t $SESSION:0.1 'ssh root@hunter.cryptograss.live "docker logs -f workbench"' C-m
 
     # Pane 2 (bottom-left): Caddy on the host (previews, <slug><N>.hunter)
     tmux send-keys -t $SESSION:0.2 'ssh root@hunter.cryptograss.live "journalctl -u caddy -f"' C-m

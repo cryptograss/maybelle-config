@@ -215,8 +215,11 @@
     src: docker-compose.yml.j2
     dest: "{{ base_dir }}/{{ user.name }}/docker-compose.yml"
 
+# --remove-orphans: a container whose service was renamed (the -arthel suffix
+# went, 1 Nov 2026) is taken down, not left running beside its new self with a
+# second poller.
 - name: Start user instance (recreate to pick up new image)
-  command: docker compose up -d --force-recreate
+  command: docker compose up -d --force-recreate --remove-orphans
   args:
     chdir: "{{ base_dir }}/{{ user.name }}"
 
@@ -238,7 +241,7 @@
     mode: '0600'
 
 - name: Show container startup logs
-  shell: docker logs {{ user.name }}-arthel
+  shell: docker logs {{ user.name }}
   register: container_logs
   ignore_errors: yes
 
