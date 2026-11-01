@@ -28,7 +28,9 @@ services:
 {% endif %}
     volumes:
       # Mount entire home directory to persist workspace, .claude, bash history, etc
-      - {{ base_dir }}/{{ user.name }}/home:/home/magent
+      # (home_dir: a home another entry owns, used as it is: emergent-magent's is
+      # justin-arthel's, until that container retires.)
+      - {{ user.home_dir | default(base_dir ~ '/' ~ user.name ~ '/home') }}:/home/magent
       # SSH keys mounted separately (read-only for security)
       - {{ base_dir }}/{{ user.name }}/.ssh:/home/magent/.ssh:ro
 {% if user.mood is not defined %}

@@ -214,3 +214,23 @@ Their magent sessions stay on their homes' disk, not resumed: with the Mood
 containers gone, justin-arthel's poller is magent's only one
 (`magent_only_poller`), so a mention there starts over from the record.
 
+
+## emergent-magent: magent's own container
+
+Step 6 of Moods as Directories: magent gets a container of its own, as re and
+blu have, and its poller leaves justin-arthel.
+
+- **Its home is the one it has always had.** `home_dir:
+  /opt/magenta/justin/home` mounts it where it is, at `/home/magent`: 11G of
+  Claude Code sessions, the clones and the poller's state, not copied, so
+  every session resumes. While justin-arthel lives it mounts the same home,
+  without a poller (`mood_poller: false`), and it writes the home's files
+  (`.gitconfig`, `CLAUDE.md`, the arthel `.env`); an entry with `home_dir`
+  writes none of them. When justin-arthel retires, the home moves to
+  `/opt/magenta/emergent-magent/home` and `home_dir` goes.
+- **No `mood:`.** magent answers every Mood, and keeps docker.sock (Justin,
+  emergence, 1 Nov 2026, 05:24Z).
+- `kind: agent`: no ports, no code-server, no previews. 8g and 3 CPUs.
+  `ssh sshrouter@hunter emergent-magent` joins its tmux.
+- **The watcher** doesn't read a home twice: an entry with `home_dir` is
+  left out of its mounts.

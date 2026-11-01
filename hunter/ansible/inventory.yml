@@ -88,19 +88,9 @@ all:
         port_range_start: 14000  # 14000-14009
         code_server_password: "{{ code_server_password }}"
         github_token: "{{ magent_github_token }}"
-        mood_poller: true  # wake a turn on web-posted @magent mentions
-        # magent's only poller since the Mood containers went (Moods as Directories,
-        # step 5): a session of its not on this disk is lost, so a mention there
-        # starts over from the record rather than waiting for another container.
-        magent_only_poller: true
-        # magent's instructions from PickiPedia as each turn's system prompt (--instructions):
-        # its greeting line, General Orders, Cryptograss:Agents/Magent/Instructions, the Mood's.
-        magent_instructions: true
-        # magent's second harness here: a Mood whose model is another vendor's
-        # (openrouter/...) runs magent on Pi; Anthropic's stay on Claude Code
-        # (magenta#71). The Pi trial (magent-self, 2026-10-21) is in a Mood
-        # whose newest magent session is in this container.
-        magent_also_harness: pi
+        # magent's poller moved to emergent-magent (Moods as Directories, step 6):
+        # this container is Justin's terminal and previews until it retires.
+        mood_poller: false
 
       - name: rj  # rj's own container, the older shape (people, above)
         ssh_port: 2223
@@ -152,6 +142,34 @@ all:
       # keys are <agent>_runner_key and <agent>_pickipedia_bot_password; the
       # model vendors' are shared by all of them (model_<vendor>_api_key). Its
       # poller doesn't start until its runner key is there.
+      # emergent-magent: magent's own container, as re and blu have theirs
+      # (Moods as Directories, step 6). Its home is the one magent has always had,
+      # justin-arthel's, mounted where it is (home_dir): 11G of sessions and clones,
+      # not copied, so every session resumes. justin-arthel writes the home's files
+      # (git identity, CLAUDE.md) until it retires, and the home moves here then.
+      # No `mood:`: magent answers every Mood, and keeps docker.sock (Justin, 1 Nov
+      # 05:24Z). No ports; reached with `ssh sshrouter@hunter emergent-magent`.
+      - name: emergent-magent
+        kind: agent
+        home_dir: /opt/magenta/justin/home
+        full_name: "magent-cryptograss"
+        email: "magent@cryptograss.live"
+        github_username: "magent-cryptograss"
+        code_server_password: "{{ code_server_password }}"
+        github_token: "{{ magent_github_token }}"
+        memory_limit: 8g
+        cpus: 3
+        mood_poller: true  # wake a turn on web-posted @magent mentions
+        # magent's instructions from PickiPedia as each turn's system prompt (--instructions):
+        # its greeting line, General Orders, Cryptograss:Agents/Magent/Instructions, the Mood's.
+        magent_instructions: true
+        # magent's second harness: a Mood whose model is another vendor's runs magent
+        # on Pi (magenta#71). Its scaffolding goes once that trial is settled.
+        magent_also_harness: pi
+        # Its only poller: a session not on this disk is lost, and a mention there
+        # starts over from the record.
+        magent_only_poller: true
+
       - name: emergent-re
         mood: emergent
         kind: agent
