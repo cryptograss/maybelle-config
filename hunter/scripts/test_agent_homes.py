@@ -55,7 +55,7 @@ class AgentHomesTest(unittest.TestCase):
         return self.base / 'docs-tests-qa' / 'agents' / agent
 
     def test_a_home_lived_in_inside_the_container_is_carried_out(self):
-        docker = FakeDocker({'docs-tests-qa-arthel': {'/home/re': {
+        docker = FakeDocker({'docs-tests-qa': {'/home/re': {
             '.local/state/magenta/pi-sessions/s1.jsonl': '{}', 'workspace/red/LETTER.md': 'Dear re'}}})
         got = keep(self.base, 'docs-tests-qa', [{'name': 're', 'uid': 2001}], run=docker)
         self.assertEqual(got, {'made': ['re'], 'carried': ['re'], 'moved': []})
@@ -68,9 +68,9 @@ class AgentHomesTest(unittest.TestCase):
         self.assertFalse(self.home().with_name('re.carrying').exists())
 
     def test_the_second_time_nothing_is_copied_again(self):
-        docker = FakeDocker({'docs-tests-qa-arthel': {'/home/re': {'a': '1'}}})
+        docker = FakeDocker({'docs-tests-qa': {'/home/re': {'a': '1'}}})
         keep(self.base, 'docs-tests-qa', [{'name': 're', 'uid': 2001}], run=docker)
-        docker.homes['docs-tests-qa-arthel']['/home/re'] = {'a': 'the container is now mounting it'}
+        docker.homes['docs-tests-qa']['/home/re'] = {'a': 'the container is now mounting it'}
         with mock.patch.object(Path, 'stat', return_value=os.stat_result((0o40750, 0, 0, 0, 2001, 2001, 0, 0, 0, 0))):
             got = keep(self.base, 'docs-tests-qa', [{'name': 're', 'uid': 2001}], run=docker)
         self.assertEqual(got, {'made': [], 'carried': [], 'moved': []})
@@ -78,7 +78,7 @@ class AgentHomesTest(unittest.TestCase):
         self.assertEqual((self.home() / 'a').read_text(), '1')
 
     def test_a_new_mood_or_a_new_agent_gets_an_empty_home(self):
-        for homes in ({}, {'docs-tests-qa-arthel': {'/home/magent': {}}}):
+        for homes in ({}, {'docs-tests-qa': {'/home/magent': {}}}):
             with self.subTest(homes=homes):
                 if self.home().exists():
                     self.home().rmdir()

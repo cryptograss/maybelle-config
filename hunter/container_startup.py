@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Container startup script for magenta-arthel containers.
+Container startup script for magenta containers.
 Handles volume initialization, repository cloning, and service configuration.
 """
 

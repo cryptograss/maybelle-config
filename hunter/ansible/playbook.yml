@@ -45,7 +45,7 @@
       include_role:
         name: docker
 
-    - name: Build magenta-arthel base image
+    - name: Build magenta base image
       include_role:
         name: build-image
 

@@ -25,7 +25,7 @@ def route(tmp_path):
     (tmp_path / 'moods' / 'chartifacts').mkdir(parents=True)
     bin_dir = tmp_path / 'bin'
     bin_dir.mkdir()
-    running = '\\n'.join(f"{u['name']}-arthel" for u in users)
+    running = '\\n'.join(f"{u['name']}" for u in users)
     (bin_dir / 'docker').write_text(f'#!/bin/sh\n[ "$1" = ps ] && printf "{running}\\n" && exit 0\necho "DOCKER: $*"\n')
     (bin_dir / 'docker').chmod(0o755)
 
@@ -38,26 +38,26 @@ def route(tmp_path):
 
 def test_a_moods_slug_is_a_shell_in_its_directory_in_workbench(route):
     assert route('justin', 'chartifacts') == [
-        'exec -it workbench-arthel su - magent -c cd /moods/chartifacts && exec bash -l']
+        'exec -it workbench su - magent -c cd /moods/chartifacts && exec bash -l']
 
 
 def test_with_tmux_it_is_a_session_named_for_the_mood_there(route):
     assert route('justin', 'chartifacts tmux') == [
-        'exec -it workbench-arthel su - magent -c tmux new-session -A -s chartifacts -c /moods/chartifacts']
+        'exec -it workbench su - magent -c tmux new-session -A -s chartifacts -c /moods/chartifacts']
 
 
 def test_workbench_by_name(route):
-    assert route('justin', 'workbench') == ['exec -it workbench-arthel su - magent']
+    assert route('justin', 'workbench') == ['exec -it workbench su - magent']
 
 
 def test_a_person_whose_own_container_retired_lands_in_workbench(route):
-    assert route('justin') == ['exec -it workbench-arthel su - magent']
+    assert route('justin') == ['exec -it workbench su - magent']
 
 
 def test_a_person_without_one_lands_in_workbench(route):
-    assert route('someone-new') == ['exec -it workbench-arthel su - magent']
+    assert route('someone-new') == ['exec -it workbench su - magent']
 
 
 def test_what_isnt_a_moods_directory_is_a_command_in_workbench(route):
     for command in ('nosuchmood', '../etc', 'chartifacts; rm -rf /'):
-        assert route('justin', command) == [f'exec -it workbench-arthel su - magent -c {command}']
+        assert route('justin', command) == [f'exec -it workbench su - magent -c {command}']

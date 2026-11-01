@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """How an image build spent its time, from BuildKit's plain progress log.
 
-The hunter deploy builds magenta-arthel with `--progress plain` into a log
+The hunter deploy builds magenta with `--progress plain` into a log
 (roles/build-image); this reads it and prints each step's time, slowest
 first, and which steps came from the cache. Usage: build_timing.py LOG
 """

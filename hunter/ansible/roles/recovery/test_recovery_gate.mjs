@@ -13,7 +13,7 @@ test('the look-first commands from its rules pass without asking', () => {
     "timeout 20 docker ps -a --format 'table {{.Names}}\\t{{.Status}}'",
     'journalctl -u docker --since -3h --no-pager | tail -n 150',
     'journalctl -p err --since -3h --no-pager | tail -n 80',
-    'docker logs --tail 80 docs-tests-qa-arthel', 'docker system df', 'docker image ls',
+    'docker logs --tail 80 docs-tests-qa', 'docker system df', 'docker image ls',
     'journalctl -b -1 | grep -i reboot', 'cat /opt/magenta/maybelle-config/hunter/CONTAINERS.md',
     "curl -s 'http://10.0.0.2:3000/api/recent_messages/?limit=200'",
   ]) assert.equal(bash(c), 'allow', c);
@@ -22,7 +22,7 @@ test('the look-first commands from its rules pass without asking', () => {
 test('what crashed hunter, deletes, or reboots is refused, however it is wrapped', () => {
   for (const c of [
     'docker buildx history ls', 'docker builder prune -f', 'docker system prune -a', 'true && docker buildx du',
-    'docker rm -f justin-arthel', 'docker rmi magenta-arthel', 'docker volume rm x', 'docker container rm x',
+    'docker rm -f justin', 'docker rmi magenta', 'docker volume rm x', 'docker container rm x',
     'docker image prune', 'cd /opt/magenta/justin && docker compose down', 'docker-compose down',
     'reboot', 'sudo reboot', 'sudo shutdown -r now', 'systemctl reboot', 'echo hi; poweroff',
     'rm -rf /opt/magenta/justin', 'sudo rm -r /var/lib/docker', 'dd if=/dev/zero of=/dev/sda',
@@ -31,8 +31,8 @@ test('what crashed hunter, deletes, or reboots is refused, however it is wrapped
 
 test('anything that may change something asks Justin first', () => {
   for (const c of [
-    'docker start delivery-kid-arthel', 'sudo systemctl restart docker', 'docker restart x',
-    'docker inspect justin-arthel', 'echo x > /tmp/f', 'ls; touch /tmp/x', 'cat $(which docker)',
+    'docker start delivery-kid', 'sudo systemctl restart docker', 'docker restart x',
+    'docker inspect justin', 'echo x > /tmp/f', 'ls; touch /tmp/x', 'cat $(which docker)',
     'tail -n 5 `ls`', 'find / -delete', "awk 'BEGIN{system(\"id\")}'", 'sed -i s/a/b/ f',
     'systemctl restart caddy', 'curl -X POST http://10.0.0.2:3000/api/x', 'curl https://example.com',
     'python3 -c "print(1)"', 'git push', 'timeout 5 docker start x',

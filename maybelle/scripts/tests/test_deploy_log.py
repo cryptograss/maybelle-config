@@ -53,7 +53,7 @@ hunter.cryptograss.live    : ok=4    changed=2    unreachable=0    failed=0    s
 
 FAILED = """TASK [Gathering Facts] ******
 ok: [hunter]
-TASK [Build magenta-arthel base image] ******
+TASK [Build magenta base image] ******
 fatal: [hunter]: FAILED! => {"changed": false, "msg": "Error building </pre> image: token=ghp_0123456789abcdefghijklmnopqrstuvwxyz"}
 
 PLAY RECAP *********************************************************************
@@ -105,7 +105,7 @@ def test_a_failed_deploy_is_all_there_safely(secrets):
     log, counts = poster.redact(FAILED, secrets[0])
     text = poster.page('hunter', 'failed', 26133806, log, counts)
     assert text.startswith("'''✗ hunter redeploy failed'''")
-    assert '== Where it stopped ==\n* Build magenta-arthel base image' in text
+    assert '== Where it stopped ==\n* Build magenta base image' in text
     assert '== The whole log ==' in text and 'Gathering Facts' in text
     assert 'ghp_' not in text
     assert text.count('</pre>') == text.count('<pre>')  # a </pre> in the log can't end the block early

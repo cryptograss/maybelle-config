@@ -27,7 +27,7 @@ from pathlib import Path
 
 SLUG = re.compile(r'^[a-z0-9][a-z0-9_-]*$')
 FIRST, LAST, EACH = 15000, 19990, 10
-WORKBENCH = 'workbench-arthel'
+WORKBENCH = 'workbench'
 NETWORK = 'magenta-net'
 
 
