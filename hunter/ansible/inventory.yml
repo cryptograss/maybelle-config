@@ -179,10 +179,6 @@ all:
         cpus: 1.5
         agents:
           - name: re
-            # Its home moves here from agency-re, the first time (agent_homes.py):
-            # its sessions, its poller's state and its clones come with it. Harmless
-            # once moved; it can go after that deploy.
-            home_from: agency-re
             uid: 2001  # its unix user, in the container and on hunter's disk (its home is kept there)
             # pi, or claude-code; both are set up either way. Anthropic's models run
             # on the subscription (claude_code_oauth_token in the vault, from
@@ -234,7 +230,6 @@ all:
         cpus: 1.5
         agents:
           - name: blu
-            home_from: agency-blu  # as re's: moved over whole the first time
             uid: 2002  # never reused: its home is kept on hunter's disk under this number
             # The blue agent, for the connectome (Justin, magent-self, 2026-10-19).
             # Set up like re: Pi for other vendors' models, Claude Code for
