@@ -46,7 +46,8 @@ it; its tests run in CI.
 
 Each Mood directory has ten preview ports in workbench, kept in its
 `.previews` file, served at `<slug><N>.hunter.cryptograss.live` through
-Caddy (roles/mood-previews, hunter-mood-previews.py). Certificates are
+Caddy (roles/mood-previews; `mood-previews.py`, installed as
+`hunter-mood-previews` on a one-minute timer). Certificates are
 issued on demand, only for listed hostnames.
 
 ## Files
@@ -125,9 +126,9 @@ ansible-playbook -i inventory.yml playbook.yml
 
 This deploys the shared directory and its ACLs, the agent containers from
 the inventory (`emergent-*`), `workbench`, the ssh router and Caddy, and
-runs the hourly unpushed-work backup (`housekeeping`). Postgres and the
-watcher are not deployed: they never ran here in this shape, and the
-watcher is retired by #254.
+runs the hourly unpushed-work backup (`housekeeping`). It also still
+deploys the watcher (`services` role, posting to maybelle) until #254
+merges, and `faces`. Postgres is not deployed: it lives on maybelle.
 
 ## Logs
 

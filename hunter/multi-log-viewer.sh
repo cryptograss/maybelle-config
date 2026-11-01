@@ -33,7 +33,7 @@ if [ $? != 0 ]; then
     tmux send-keys -t $SESSION:0.2 'ssh root@hunter.cryptograss.live "journalctl -u caddy -f"' C-m
 
     # Pane 3 (bottom-right): the other agent containers (emergent-*)
-    tmux send-keys -t $SESSION:0.3 'ssh root@hunter.cryptograss.live "watch -n5 docker ps"' C-m
+    tmux send-keys -t $SESSION:0.3 'ssh -t root@hunter.cryptograss.live "watch -n5 docker ps"' C-m
 
     # Set pane titles
     tmux select-pane -t $SESSION:0.0 -T "justin-arthel (magent)"
