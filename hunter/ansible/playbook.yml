@@ -167,7 +167,7 @@
           User instances deployed:
           {% for user in users %}
           {% if user.kind | default('') == 'agent' %}
-          - {{ user.name }} ({{ user.agents | map(attribute='name') | join(', ') }}'s own container): no ports; docker exec from recovery
+          - {{ user.name }} ({{ (user.agents | default([{'name': 'magent'}])) | map(attribute='name') | join(', ') }}'s own container): no ports; docker exec from recovery
           {% elif user.mood is defined %}
           - {{ user.name }} (a Mood's container, for {{ user.people | join(', ') }}): ssh -p {{ user.ssh_port }} magent@hunter.cryptograss.live
           {% else %}
