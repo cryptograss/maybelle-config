@@ -825,6 +825,17 @@
         - /mnt/persist/magenta
         - /mnt/persist/magenta/backups
 
+    # Memory Lane's cache (FileBasedCache), kept across deploys: a new container serves the Moods list it had,
+    # rather than every page waiting on one rebuilt from nothing (Justin, 1 Nov: ~90 s after a redeploy).
+    # Owned by the container's user (magent, uid 1000 in Dockerfile.services).
+    - name: Create Memory Lane cache directory
+      file:
+        path: /mnt/persist/magenta/memory-lane-cache
+        state: directory
+        owner: '1000'
+        group: '1000'
+        mode: '0755'
+
     # Registered because Dockerfile.services ends with `COPY . .` — the source
     # is baked into the image, so new code only reaches the running services if
     # the containers are recreated. See the recreate: line on the compose task
@@ -1027,6 +1038,7 @@
               env_file: .env
               environment:
                 - DJANGO_SETTINGS_MODULE=memory_viewer.settings
+                - MEMORY_LANE_CACHE_DIR=/var/cache/memory-lane
               ports:
                 - "127.0.0.1:3000:3000"
                 - "10.0.0.2:3000:3000"
@@ -1034,6 +1046,7 @@
                 - /mnt/persist/magenta/allowed_signers:/etc/magenta/allowed_signers:ro
                 - /mnt/persist/magenta/wiki_names:/etc/magenta/wiki_names:ro
                 - /mnt/persist/magenta/backups:/mnt/persist/magenta/backups:ro
+                - /mnt/persist/magenta/memory-lane-cache:/var/cache/memory-lane
               networks:
                 - memory-lane-net
               restart: unless-stopped
