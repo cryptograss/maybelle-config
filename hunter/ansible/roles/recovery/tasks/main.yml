@@ -224,6 +224,6 @@
     content: |
       {
         "mcpServers": {
-          "magenta-memory-v2": {"url": "http://10.0.0.2:8000", "description": "The record: what was said in the Moods and sessions."}
+          "magenta-memory-v2": {"url": "http://10.0.0.2:8000", "description": "The record: what was said in the Moods and sessions.", "timeout": 120}
         }
       }

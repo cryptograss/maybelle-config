@@ -330,6 +330,9 @@ echo "password=$(gh auth token)"
     logger.info("✓ GitHub CLI authenticated")
 
 
+MEMORY_TIMEOUT = 120  # seconds Pi waits on one memory call (memory_server)
+
+
 def memory_server(key=''):
     """The memory record's MCP server, as an mcpServers entry. It runs on
     maybelle: the public URL for local dev, the private network on hunter.
@@ -337,9 +340,15 @@ def memory_server(key=''):
     With the agent's runner key the server knows who is calling (memory-lane
     conversations/mcp/server.caller), so remember, bootstrap_memory and the
     rest are that agent's own memory; with none, magent's, as before keys.
+
+    timeout is Pi's, in seconds (Claude Code's entry drops it, for_claude_code).
+    Pi's default is 60, and a ranked search or bootstrap_memory runs 30-40s on a
+    healthy day (re, #tools, 2 Nov 2026); at 60 Pi hung up before Postgres could
+    say its disk was full, and re lost a day to a timeout with no cause in it.
     """
     server = {'url': os.environ.get('MCP_MEMORY_URL', 'https://mcp.maybelle.cryptograss.live'),
-              'description': 'The record: what was said in the Moods and sessions.'}
+              'description': 'The record: what was said in the Moods and sessions.',
+              'timeout': MEMORY_TIMEOUT}
     if key:
         server['headers'] = {'Authorization': f'Bearer {key}'}
     return server

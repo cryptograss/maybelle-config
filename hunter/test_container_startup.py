@@ -158,6 +158,8 @@ class MemoryKeyTest(unittest.TestCase):
         with mock.patch.dict(os.environ, {'MCP_MEMORY_URL': 'http://10.0.0.2:8000'}):
             self.assertEqual(memory_server('k3y')['headers'], {'Authorization': 'Bearer k3y'})
             self.assertNotIn('headers', memory_server(''))  # no key: magent's memory, as before keys
+            self.assertEqual(memory_server('')['timeout'], 120)  # Pi's wait; its default 60 hid a full disk
+            self.assertNotIn('timeout', container_startup.for_claude_code(memory_server('k3y')))  # Claude Code's entry doesn't take it
 
     def test_claude_code_gets_the_header_and_keeps_what_else_it_had(self):
         import json
