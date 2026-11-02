@@ -121,7 +121,9 @@ all:
       # container retired (home_moved_from; a rename on the same disk, done once),
       # so every session resumes. It writes its own .gitconfig, so it commits as
       # magent-cryptograss. No `mood:`: magent answers every Mood, and keeps docker.sock (Justin, 1 Nov
-      # 05:24Z). No ports; reached with `ssh sshrouter@hunter emergent-magent`.
+      # 05:24Z). No ports, and no `people:`: the router lets nobody in, since
+      # docker.sock is root on hunter. Only root on hunter opens it (Justin,
+      # emergence, 2 Nov 2026).
       - name: emergent-magent
         kind: agent
         home_moved_from: /opt/magenta/justin/home

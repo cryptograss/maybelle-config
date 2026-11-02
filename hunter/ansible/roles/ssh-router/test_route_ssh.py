@@ -54,8 +54,27 @@ def test_a_person_whose_own_container_retired_lands_in_workbench(route):
     assert route('justin') == ['exec -it workbench su - magent']
 
 
-def test_a_person_without_one_lands_in_workbench(route):
-    assert route('someone-new') == ['exec -it workbench su - magent']
+def test_a_person_workbench_doesnt_name_is_let_in_nowhere(route):
+    assert route('someone-new') == []
+    assert route('someone-new', 'chartifacts') == []
+
+
+def test_nobody_is_let_into_emergent_magent_not_even_justin(route):
+    # It holds docker.sock, root on hunter: only root on hunter opens it (Justin, 2 Nov 2026).
+    for person in ('justin', 'skyler', 'rj', 'fibonacci'):
+        assert route(person, 'emergent-magent') == []
+
+
+def test_an_agents_container_lets_in_only_its_people(route):
+    assert route('skyler', 'emergent-re') == ['exec -it emergent-re su - magent -c tmux new-session -A -s magenta']
+    assert route('rj', 'emergent-re') == []
+    assert route('fibonacci', 'emergent-blu') == []
+
+
+def test_everyone_workbench_names_reaches_a_mood(route):
+    for person in ('justin', 'skyler', 'rj', 'fibonacci'):
+        assert route(person, 'chartifacts') == [
+            'exec -it workbench su - magent -c cd /moods/chartifacts && exec bash -l']
 
 
 def test_what_isnt_a_moods_directory_is_a_command_in_workbench(route):
