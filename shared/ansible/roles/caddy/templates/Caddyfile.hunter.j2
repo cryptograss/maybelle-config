@@ -19,8 +19,8 @@ http://localhost:5555 {
     file_server
 }
 
-{# An agent's own container (emergent-<name>) publishes nothing. #}
-{% for user in users if user.kind | default('') != 'agent' %}
+{# An emergent's own container (emergent-<name>; kind: agent before the rename) publishes nothing. #}
+{% for user in users if user.kind | default('') not in ('emergent', 'agent') %}
 # {{ user.name }} - Port range {{ user.port_range_start }}-{{ user.port_range_start + 9 }}
 {% for i in range(10) %}
 {{ user.name }}{{ i }}.{{ base_domain }} {
