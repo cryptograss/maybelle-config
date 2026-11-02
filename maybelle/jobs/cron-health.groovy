@@ -175,6 +175,27 @@ pipelineJob('cron-health') {
                             }
                         }
 
+                        // Free space where the backups, postgres, ipfs and glitchtip all live.
+                        // 2 Nov 2026 it reached 100% with no warning and took memory search down.
+                        stage('maybelle disk') {
+                            steps {
+                                catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
+                                    sh """
+                                        ALARM=90
+                                        echo "=== maybelle disk ==="
+                                        PCT=\\$(df -P /mnt/persist | awk 'NR==2 {gsub("%",""); print \\$5}')
+                                        df -h /mnt/persist | tail -1
+                                        if [ "\\$PCT" -ge "\\$ALARM" ]; then
+                                            echo "FAIL: /mnt/persist at \\${PCT}% (alarm at \\${ALARM}%)"
+                                            du -xhd1 /mnt/persist 2>/dev/null | sort -rh | head -6
+                                            exit 1
+                                        fi
+                                        echo "OK"
+                                    """
+                                }
+                            }
+                        }
+
                         stage('memory-lane backup') {
                             steps {
                                 catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
