@@ -70,6 +70,19 @@ is_mood() {
     [[ "$1" =~ ^[a-z0-9][a-z0-9_-]*$ ]] && [ -d "$MOODS_DIR/$1" ]
 }
 
+# Who may come into which container: its entry's `people:` in the inventory.
+# An entry without one lets nobody in. emergent-magent has none on purpose: it
+# holds docker.sock, root on hunter, so only root on hunter opens it (Justin,
+# emergence, 2 Nov 2026). A Mood's directory is in workbench, so its people.
+may_enter() {
+    case "$2" in
+{% for user in users %}
+        "{{ user.name }}") in_list "$1" {% for person in user.people | default([]) %}"{{ person }}" {% endfor %};;
+{% endfor %}
+        *) return 1 ;;
+    esac
+}
+
 TARGET_USER="$USER"
 in_list "$USER" "${OWN_CONTAINERS[@]}" || TARGET_USER=workbench
 
@@ -77,8 +90,8 @@ in_list "$USER" "${OWN_CONTAINERS[@]}" || TARGET_USER=workbench
 # Usage:
 #   ssh sshrouter@hunter                  → plain shell in your container (workbench, if you have none)
 #   ssh sshrouter@hunter tmux             → attach to tmux session "magenta" in your container
-#   ssh sshrouter@hunter emergent-magent  → join magent's container (tmux session "magenta")
-#   ssh sshrouter@hunter emergent-magent jam → the same, tmux session "jam"
+#   ssh sshrouter@hunter emergent-re      → join re's container (tmux session "magenta"), if its people: name you
+#   ssh sshrouter@hunter emergent-re jam  → the same, tmux session "jam"
 #   ssh sshrouter@hunter workbench        → plain shell in workbench, the people's box
 #   ssh sshrouter@hunter chartifacts      → a shell in workbench, in /moods/chartifacts
 #   ssh sshrouter@hunter chartifacts tmux → tmux session "chartifacts" there, shared by whoever joins it
@@ -115,6 +128,12 @@ if [ -n "$SSH_ORIGINAL_COMMAND" ]; then
 fi
 
 CONTAINER="${TARGET_USER}"
+
+if ! may_enter "$USER" "$CONTAINER"; then
+    echo "${CONTAINER} isn't open to ${USER}: its people: in hunter's inventory don't name you."
+    setsid /usr/local/bin/announce-ssh "$USER" "$CONTAINER" "refused" </dev/null >/dev/null 2>&1 &
+    exit 1
+fi
 
 # Said in magenta's #general: who came in, to whose container, and how -- never
 # the command itself. In the background, cut loose from this session.

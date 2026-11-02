@@ -22,11 +22,13 @@ Mood needs:
   full tools can open up to the people in it (`people:` in the inventory).
 
 People reach it by SSH on its own port with any of the people's keys
-(`ssh -p <ssh_port> magent@hunter.cryptograss.live`).
+(`ssh -p <ssh_port> magent@hunter.cryptograss.live`), or through the router
+(`ssh sshrouter@hunter <container>`), which lets in only the people its
+`people:` names; an entry without `people:` lets in nobody.
 
 **Retired 1 Nov 2026:** the containers named `justin`, `rj`, `skyler` and
 `fibonacci`, the older shape, one per person, each with `docker.sock`. People
-land in workbench now (`ssh sshrouter@hunter <name>` goes there), and
+land in workbench now (`ssh sshrouter@hunter` goes there), and
 justin's home, magent's all along, moved to emergent-magent. Their homes stay
 on hunter's disk.
 
@@ -232,5 +234,7 @@ blu have, and its poller leaves justin-arthel.
 - **No `mood:`.** magent answers every Mood, and keeps docker.sock (Justin,
   emergence, 1 Nov 2026, 05:24Z).
 - `kind: agent`: no ports, no code-server, no previews. 8g and 3 CPUs.
-  `ssh sshrouter@hunter emergent-magent` joins its tmux.
+  No `people:`, so the router lets nobody in: with docker.sock it is root on
+  hunter, and only root on hunter opens it (`docker exec`; Justin, emergence,
+  2 Nov 2026).
 - **The watcher** is retired (#254): the pollers record every turn.
