@@ -125,7 +125,7 @@ jobs:
         run: >
           pytest -v hunter/test_container_startup.py hunter/scripts
           hunter/ansible/roles/housekeeping hunter/ansible/roles/ssh-router
-          hunter/ansible/roles/mood-previews
+          hunter/ansible/roles/mood-previews hunter/ansible/roles/recovery/test_recovery_log_ship.py
 
   # What a change to the deploy logic renders differently from production,
   # in the run's summary (scripts/render_diff.py): every template and every

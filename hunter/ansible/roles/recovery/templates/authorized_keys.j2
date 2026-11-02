@@ -1,6 +1,7 @@
 # recovery@hunter: magenta.sh recovery. Each key may only open the recovery
 # session (magenta-recovery). Every person in the inventory's `people` with a
-# key may (Justin, magent-self, 2026-10-23: all SSH-tier people).
+# key may (Justin, magent-self, 2026-10-23: all SSH-tier people). Its --as says
+# whose key it was, for the alert (recovery-alert).
 {% for person in people if person.ssh_pubkey | default('') | trim is match('ssh-') %}
-command="/usr/local/bin/magenta-recovery",restrict,pty {{ person.ssh_pubkey | trim }}
+command="/usr/local/bin/magenta-recovery --as {{ person.name }}",restrict,pty {{ person.ssh_pubkey | trim }}
 {% endfor %}

@@ -10,8 +10,10 @@
  *          volumes or networks, rebooting. Asking doesn't unlock these.
  *   allow  looking: reading files, listing, searching, the memory tools, and
  *          shell commands made only of read-only programs.
- *   ask    everything else: Justin sees the call and says yes or no. With no
- *          one to ask (no terminal), it's refused.
+ *   ask    everything else: whoever is at the keyboard sees the call and says
+ *          yes or no. That is whoever opened the session, not necessarily Justin;
+ *          what they said is in the recovery log. With no one to ask (no
+ *          terminal), it's refused.
  *
  * The decision is `decide` alone, a plain function, tested by
  * ../test_recovery_gate.mjs (Node's official builds: node --experimental-strip-types
@@ -114,6 +116,6 @@ export default function (pi: ExtensionAPI) {
 		if (!ctx.hasUI) return { block: true, reason: `Refused: no one to ask (${why}).` };
 		const shown = event.toolName === "bash" ? String(input.command ?? "") : JSON.stringify(input).slice(0, 600);
 		const choice = await ctx.ui.select(`magent wants to (${why}):\n\n  ${event.toolName}: ${shown}\n\nAllow?`, ["Yes", "No"]);
-		return choice === "Yes" ? undefined : { block: true, reason: "Justin said no." };
+		return choice === "Yes" ? undefined : { block: true, reason: "The person at the keyboard said no." };
 	});
 }

@@ -31,6 +31,13 @@
       vars:
         ssh_announce_server: maybelle
 
+    - name: The recovery log, written to from recovery@hunter and only appended to
+      include_role:
+        name: recovery-log
+      vars:
+        # Read as maybelle.yml reads the people (lookup, not include_vars: see below).
+        recovery_log_public_key: "{{ (lookup('file', playbook_dir ~ '/../../hunter/ansible/inventory.yml') | from_yaml).all.vars.recovery_log_public_key | default('') }}"
+
     - name: Deploy maybelle SSH login banner
       copy:
         src: "{{ playbook_dir }}/../../ascii-art/maybelle-ascii-dark.txt"

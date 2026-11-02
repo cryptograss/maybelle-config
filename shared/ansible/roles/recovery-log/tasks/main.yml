@@ -1,0 +1,63 @@
+---
+# The recovery log: where recovery@hunter's sessions are written as they
+# happen, on a box that isn't hunter (Justin, emergence, 2 Nov 2026). Hunter's
+# recovery user is root there in all but name, so a log kept only on hunter is
+# whatever the session leaves of it. Here, hunter's key can do one thing:
+# append. It can't read the log, list it, or rewrite a line that has arrived.
+#
+# The key: recovery_log_public_key in hunter's inventory (its private half,
+# recovery_log_private_key, is in the vault, for hunter). Without it, nothing
+# is installed and nothing is lost: the sessions are still on hunter's disk.
+
+- name: The recovery log's user
+  user:
+    name: recovery-log
+    shell: /bin/sh
+    create_home: yes
+    state: present
+  when: recovery_log_public_key | default('') | trim is match('ssh-')
+
+- name: Where the log is kept
+  file:
+    path: /var/log/magenta-recovery
+    state: directory
+    owner: recovery-log
+    group: recovery-log
+    mode: '0750'
+  when: recovery_log_public_key | default('') | trim is match('ssh-')
+
+- name: The one thing hunter's key runs here
+  copy:
+    dest: /usr/local/bin/append-recovery-log
+    owner: root
+    group: root
+    mode: '0755'
+    content: |
+      #!/bin/sh
+      # The recovery log's forced command (shared/ansible/roles/recovery-log):
+      # what comes in on stdin is added to today's file, each line stamped
+      # with the time it arrived here. Takes no arguments and reads nothing back.
+      umask 027
+      now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+      exec sed "s/^/$now\t/" >> "/var/log/magenta-recovery/$(date -u +%F).log"
+  when: recovery_log_public_key | default('') | trim is match('ssh-')
+
+- name: Its .ssh
+  file:
+    path: /home/recovery-log/.ssh
+    state: directory
+    owner: recovery-log
+    group: recovery-log
+    mode: '0700'
+  when: recovery_log_public_key | default('') | trim is match('ssh-')
+
+- name: Hunter's key, which may only append
+  copy:
+    dest: /home/recovery-log/.ssh/authorized_keys
+    owner: recovery-log
+    group: recovery-log
+    mode: '0600'
+    content: |
+      # recovery@hunter's log key (shared/ansible/roles/recovery-log): append only.
+      restrict,command="/usr/local/bin/append-recovery-log" {{ recovery_log_public_key | trim }}
+  when: recovery_log_public_key | default('') | trim is match('ssh-')

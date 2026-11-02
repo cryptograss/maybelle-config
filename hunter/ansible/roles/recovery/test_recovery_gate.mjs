@@ -29,7 +29,7 @@ test('what crashed hunter, deletes, or reboots is refused, however it is wrapped
   ]) assert.equal(bash(c), 'deny', c);
 });
 
-test('anything that may change something asks Justin first', () => {
+test('anything that may change something asks whoever is at the keyboard first', () => {
   for (const c of [
     'docker start delivery-kid', 'sudo systemctl restart docker', 'docker restart x',
     'docker inspect justin', 'echo x > /tmp/f', 'ls; touch /tmp/x', 'cat $(which docker)',
