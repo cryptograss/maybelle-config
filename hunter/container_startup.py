@@ -1035,10 +1035,11 @@ def start_agent_poller(agent):
 
 
 def agent_container():
-    """Whether this is an agent's own container (emergent-<name>, CONTAINER_KIND=agent): it runs its
-    agents' pollers and nothing for people -- no code-server, no Godot workspace, no previews,
-    and no ports to reach them by."""
-    return os.environ.get('CONTAINER_KIND', '') == 'agent'
+    """Whether this is an emergent's own container (emergent-<name>, CONTAINER_KIND=emergent): it runs
+    its emergents' pollers and nothing for people -- no code-server, no Godot workspace, no previews,
+    and no ports to reach them by. CONTAINER_KIND=agent, the name before the emergent rename, counts
+    too, for a container made by an earlier deploy; the rename's last step drops it."""
+    return os.environ.get('CONTAINER_KIND', '') in ('emergent', 'agent')
 
 
 def start_services():
