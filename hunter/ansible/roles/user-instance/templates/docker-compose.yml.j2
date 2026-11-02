@@ -58,32 +58,43 @@ services:
       - POSTGRES_HOST=magenta-postgres
       - POSTGRES_DB={{ postgres_db }}
       - POSTGRES_USER=magent
-{% if user.mood is not defined %}
-      - POSTGRES_PASSWORD={{ postgres_password }}
-{% endif %}
-{% if memory_lane_preview_db_password is defined %}
+      # Secrets ship only to the containers that read them (Justin, emergence,
+      # 1 Nov 2026). Gone everywhere: POSTGRES_PASSWORD (memory-lane previews
+      # use the memory_lane_preview role below; the magent role's password was
+      # only their fallback), DJANGO_SECRET_KEY (never set), the Blue Railroad
+      # bot (read on maybelle and delivery-kid, not here), and
+      # DELIVERY_KID_API_KEY and PICKIPEDIA_DEV_SENTRY_DSN (only a PickiPedia
+      # preview read them, and none starts any more: emergent-* are agents,
+      # workbench is a Mood's kind). The magent user's own credentials
+      # (GitHub, PickiPedia as Magent) go only where the
+      # magent user works: a container without resident agents (emergent-magent,
+      # workbench). container_startup.py takes back what an earlier deploy
+      # left in a home (.bashrc, gh, the wiki's MCP config).
+{% set magent_works_here = user.agents is not defined %}
+{# memory-lane previews are served from workbench (Moods' previews), so only there; an agent's container has no ports to serve one #}
+{% if magent_works_here and user.kind | default('') != 'agent' and memory_lane_preview_db_password is defined %}
       # memory-lane previews (tools/preview.sh) connect to the live record as
       # the restricted memory_lane_preview role, not as magent
       - MEMORY_LANE_PREVIEW_DB_PASSWORD={{ memory_lane_preview_db_password }}
 {% endif %}
+{% if user.kind | default('') != 'agent' %}
+      # code-server runs only where people work (not in an agent's own container)
       - CODE_SERVER_PASSWORD={{ user.code_server_password }}
+{% endif %}
+{% if magent_works_here %}
       - GH_TOKEN={{ user.github_token | default('') }}
-      - DJANGO_SECRET_KEY={{ user.django_secret_key | default('') }}
+{% endif %}
       - SSH_PORT={{ user.ssh_port | default('') }}
       # agent: an agent's own container (emergent-<name>), which starts only
       # what its agents need (container_startup.py)
       - CONTAINER_KIND={{ user.kind | default('') }}
       # Use private network for MCP on hunter (10.0.0.2 is maybelle)
       - MCP_MEMORY_URL=http://10.0.0.2:8000
-      # PickiPedia bot credentials for MediaWiki MCP server
+{% if magent_works_here %}
+      # PickiPedia as Magent, for the magent user's MediaWiki MCP server. A resident
+      # agent has its own bot password (AGENT_<NAME>_PICKIPEDIA_BOT_PASSWORD, below).
       - PICKIPEDIA_BOT_PASSWORD={{ PICKIPEDIA_BOT_PASSWORD }}
-      # Blue Railroad import bot credentials
-      - BLUERAILROAD_BOT_USERNAME={{ BLUERAILROAD_BOT_USERNAME | default('') }}
-      - BLUERAILROAD_BOT_PASSWORD={{ BLUERAILROAD_BOT_PASSWORD | default('') }}
-      # Sentry/GlitchTip DSN for PickiPedia dev error tracking
-      - PICKIPEDIA_DEV_SENTRY_DSN={{ pickipedia_dev_sentry_dsn | default('') }}
-      # Delivery-kid pinning service API key
-      - DELIVERY_KID_API_KEY={{ delivery_kid_api_key }}
+{% endif %}
       # Opt-in: container_startup.py starts the Mood poller when this is 1
       - MOOD_POLLER={{ '1' if user.mood_poller | default(false) else '0' }}
 {% if user.mood is defined %}
