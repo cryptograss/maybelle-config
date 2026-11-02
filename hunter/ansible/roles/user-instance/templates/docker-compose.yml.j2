@@ -13,7 +13,7 @@ services:
 {% if user.cpus is defined %}
     cpus: {{ user.cpus }}
 {% endif %}
-{% if user.kind | default('') != 'agent' %}
+{% if user.kind | default('') != 'emergent' %}
     ports:
       - "{{ user.ssh_port }}:22"
       # code-server web IDE (18080 for justin, 18081 for rj, etc.)
@@ -44,9 +44,9 @@ services:
       # Mood poller: memory-lane as deployed, in hunter's clone of magenta main
       # (build-image keeps it current), not a workspace checkout on any branch
       - {{ memory_lane_dir }}/poller:/opt/mood-poller:ro
-{% for agent in user.agents | default([]) %}
-      # {{ agent.name }}'s home, kept across recreation (hunter/scripts/agent_homes.py)
-      - {{ base_dir }}/{{ user.name }}/agents/{{ agent.name }}:/home/{{ agent.name }}
+{% for emergent in user.emergents | default([]) %}
+      # {{ emergent.name }}'s home, kept across recreation (hunter/scripts/agent_homes.py)
+      - {{ base_dir }}/{{ user.name }}/agents/{{ emergent.name }}:/home/{{ emergent.name }}
 {% endfor %}
     networks:
       - magenta-net
@@ -67,18 +67,18 @@ services:
       # preview read them, and none starts any more: emergent-* are agents,
       # workbench is a Mood's kind). The magent user's own credentials
       # (GitHub, PickiPedia as Magent) go only where the
-      # magent user works: a container without resident agents (emergent-magent,
+      # magent user works: a container without resident emergents (emergent-magent,
       # workbench). container_startup.py takes back what an earlier deploy
       # left in a home (.bashrc, gh, the wiki's MCP config).
-{% set magent_works_here = user.agents is not defined %}
-{# memory-lane previews are served from workbench (Moods' previews), so only there; an agent's container has no ports to serve one #}
-{% if magent_works_here and user.kind | default('') != 'agent' and memory_lane_preview_db_password is defined %}
+{% set magent_works_here = user.emergents is not defined %}
+{# memory-lane previews are served from workbench (Moods' previews), so only there; an emergent's container has no ports to serve one #}
+{% if magent_works_here and user.kind | default('') != 'emergent' and memory_lane_preview_db_password is defined %}
       # memory-lane previews (tools/preview.sh) connect to the live record as
       # the restricted memory_lane_preview role, not as magent
       - MEMORY_LANE_PREVIEW_DB_PASSWORD={{ memory_lane_preview_db_password }}
 {% endif %}
-{% if user.kind | default('') != 'agent' %}
-      # code-server runs only where people work (not in an agent's own container)
+{% if user.kind | default('') != 'emergent' %}
+      # code-server runs only where people work (not in an emergent's own container)
       - CODE_SERVER_PASSWORD={{ user.code_server_password }}
 {% endif %}
 {% if magent_works_here %}
@@ -135,12 +135,13 @@ services:
       # so it is not exported to shells.
       - MEMORY_LANE_RUNNER_KEY={{ magent_key }}
 {% endif %}
-{% if user.agents is defined %}
-      # Agents besides magent who live in this Mood's container, each its own
+{% if user.emergents is defined %}
+      # Emergents besides magent who live in this container, each its own
       # unix user (hunter/CONTAINERS.md). Their keys, from the vault, are
       # written into their own homes at startup, readable only by them.
-      - 'AGENTS={{ user.agents | to_json }}'
-{% for agent in user.agents %}
+      # AGENTS and AGENT_<NAME>_* keep their names until the rename's last step.
+      - 'AGENTS={{ user.emergents | to_json }}'
+{% for agent in user.emergents %}
 {% set prefix = 'AGENT_' ~ (agent.name | upper | replace('-', '_')) %}
       - {{ prefix }}_RUNNER_KEY={{ lookup('vars', agent.name ~ '_runner_key', default='') }}
       - {{ prefix }}_PICKIPEDIA_BOT_PASSWORD={{ lookup('vars', agent.name ~ '_pickipedia_bot_password', default='') }}

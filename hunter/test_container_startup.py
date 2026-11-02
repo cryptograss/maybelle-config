@@ -216,16 +216,17 @@ class BrowserTest(unittest.TestCase):
 class AgentContainerTest(unittest.TestCase):
     """An agent's own container (emergent-<name>) starts its agents and nothing for people."""
 
-    def test_only_container_kind_agent_is_one(self):
-        with mock.patch.dict(os.environ, {'CONTAINER_KIND': 'agent'}):
-            self.assertTrue(container_startup.agent_container())
-        for kind in ('', 'mood', 'Agent'):
+    def test_only_container_kind_emergent_is_one(self):
+        for kind in ('emergent', 'agent'):  # agent: the name before the emergent rename, until its last step
+            with mock.patch.dict(os.environ, {'CONTAINER_KIND': kind}):
+                self.assertTrue(container_startup.agent_container())
+        for kind in ('', 'mood', 'Agent', 'Emergent'):
             with mock.patch.dict(os.environ, {'CONTAINER_KIND': kind}):
                 self.assertFalse(container_startup.agent_container())
 
     def test_it_starts_no_code_server_and_no_preview(self):
         ran = []
-        with mock.patch.dict(os.environ, {'CONTAINER_KIND': 'agent'}), \
+        with mock.patch.dict(os.environ, {'CONTAINER_KIND': 'emergent'}), \
                 mock.patch.object(container_startup, 'run_command', side_effect=lambda cmd, **kw: ran.append(cmd)), \
                 mock.patch.object(container_startup, 'start_mood_poller'), \
                 mock.patch.object(container_startup, 'agents', return_value=[]), \
@@ -243,7 +244,7 @@ class AgentWorkspaceTest(unittest.TestCase):
         import tempfile
         home = Path(tempfile.mkdtemp())
         (home / 'workspace' / 'pickipedia').mkdir(parents=True)
-        for kind in ('agent', ''):
+        for kind in ('emergent', 'agent', ''):
             with self.subTest(kind=kind), \
                     mock.patch.dict(os.environ, {'SSH_PORT': '', 'CONTAINER_KIND': kind, 'SKIP_ARTHEL': '1'}), \
                     mock.patch.object(container_startup, 'ensure_repo_cloned'), \

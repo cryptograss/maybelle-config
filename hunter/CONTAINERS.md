@@ -114,7 +114,7 @@ Mood (Justin, magent-self, 2026-10-21). Each agent has a container of its own,
 called `agency-<name>`, renamed in emergence on 31 Oct 2026), holding its
 home, its poller and its rules bundle, and nothing for people:
 
-- **`kind: agent`:** no published ports, no code-server, no Godot workspace, no
+- **`kind: emergent`** (`kind: agent` before the emergent rename): no published ports, no code-server, no Godot workspace, no
   previews (`CONTAINER_KIND=agent`, container_startup.py). Recovery reaches it
   with `docker exec`.
 - **Its own ceiling,** `memory_limit` and `cpus` in its entry: a runaway turn
@@ -233,7 +233,7 @@ blu have, and its poller leaves justin-arthel.
   session resumes, and emergent-magent writes its own `.gitconfig`.
 - **No `mood:`.** magent answers every Mood, and keeps docker.sock (Justin,
   emergence, 1 Nov 2026, 05:24Z).
-- `kind: agent`: no ports, no code-server, no previews. 8g and 3 CPUs.
+- `kind: emergent`: no ports, no code-server, no previews. 8g and 3 CPUs.
   No `people:`, so the router lets nobody in: with docker.sock it is root on
   hunter, and only root on hunter opens it (`docker exec`; Justin, emergence,
   2 Nov 2026).

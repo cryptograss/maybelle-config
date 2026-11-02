@@ -102,17 +102,18 @@ all:
         github_token: "{{ magent_github_token }}"
         mood_poller: false
 
-      # emergent-<name>: each agent's own container (magent-self, 23-24 Oct 2026:
-      # Justin, re, magent; first called agency-<name>). It holds the agent's
-      # home, its poller and its rules bundle, and nothing else: kind: agent,
-      # so no published ports, no
-      # code-server, no previews; its own memory and CPU limit, so one agent
-      # can't starve another and a bad start takes down one agent, not all.
+      # emergent-<name>: each emergent's own container (magent-self, 23-24 Oct 2026:
+      # Justin, re, magent; first called agency-<name>). It holds the emergent's
+      # home, its poller and its rules bundle, and nothing else: kind: emergent
+      # (kind: agent before the emergent rename), so no published ports, no
+      # code-server, no previews; its own memory and CPU limit, so one emergent
+      # can't starve another and a bad start takes down one emergent, not all.
       # A Mood-kind entry (`mood: emergent`) for what that brings: no
       # docker.sock, full tools only for `people`. No Mood called emergent need
-      # exist. The agent's home is kept on hunter's disk at
-      # /opt/magenta/emergent-<name>/agents/<name> (hunter/CONTAINERS.md). Its
-      # keys are <agent>_runner_key and <agent>_pickipedia_bot_password; the
+      # exist. The emergent's home is kept on hunter's disk at
+      # /opt/magenta/emergent-<name>/agents/<name> (hunter/CONTAINERS.md; the
+      # agents/ directory keeps its name: renaming it would move every home). Its
+      # keys are <name>_runner_key and <name>_pickipedia_bot_password; the
       # model vendors' are shared by all of them (model_<vendor>_api_key). Its
       # poller doesn't start until its runner key is there.
       # emergent-magent: magent's own container, as re and blu have theirs
@@ -125,7 +126,7 @@ all:
       # docker.sock is root on hunter. Only root on hunter opens it (Justin,
       # emergence, 2 Nov 2026).
       - name: emergent-magent
-        kind: agent
+        kind: emergent
         home_moved_from: /opt/magenta/justin/home
         full_name: "magent-cryptograss"
         email: "magent@cryptograss.live"
@@ -147,7 +148,7 @@ all:
 
       - name: emergent-re
         mood: emergent
-        kind: agent
+        kind: emergent
         people: [justin, skyler]
         full_name: "magent-cryptograss"
         email: "magent@cryptograss.live"
@@ -157,7 +158,7 @@ all:
         mood_poller: false
         memory_limit: 3g
         cpus: 1.5
-        agents:
+        emergents:
           - name: re
             uid: 2001  # its unix user, in the container and on hunter's disk (its home is kept there)
             # pi, or claude-code; both are set up either way. Anthropic's models run
@@ -198,7 +199,7 @@ all:
                     cryptograss/pickipedia, cryptograss/arthel]
       - name: emergent-blu
         mood: emergent
-        kind: agent
+        kind: emergent
         people: [justin, skyler]
         full_name: "magent-cryptograss"
         email: "magent@cryptograss.live"
@@ -208,10 +209,10 @@ all:
         mood_poller: false
         memory_limit: 3g
         cpus: 1.5
-        agents:
+        emergents:
           - name: blu
             uid: 2002  # never reused: its home is kept on hunter's disk under this number
-            # The blue agent, for the connectome (Justin, magent-self, 2026-10-19).
+            # The blue emergent, for the connectome (Justin, magent-self, 2026-10-19).
             # Set up like re: Pi for other vendors' models, Claude Code for
             # Anthropic's (magenta#71).
             harness: pi
