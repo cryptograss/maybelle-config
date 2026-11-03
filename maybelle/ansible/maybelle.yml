@@ -25,6 +25,20 @@
     # Note: maybelle-config repo is managed by the chapter scripts on the persistent volume
     # No need to clone it here - we're already running from it
 
+    # Grow the filesystem to fill the Hetzner volume. Resizing the volume in Hetzner's
+    # console grows the block device only; this makes the extra space usable, online, at
+    # the next deploy, so nobody runs resize2fs by hand. A no-op when it already fills it.
+    - name: Find the persistent volume's filesystem
+      command: findmnt -n -o SOURCE,FSTYPE --target /mnt/HC_Volume_104062902
+      register: persist_fs
+      changed_when: false
+
+    - name: Grow the persistent volume's filesystem to the volume's size
+      command: resize2fs {{ persist_fs.stdout.split()[0] }}
+      register: persist_grow
+      changed_when: "'Nothing to do' not in persist_grow.stderr"
+      when: persist_fs.stdout.split() | length == 2 and persist_fs.stdout.split()[1] in ['ext4', 'ext3']
+
     - name: Say in magenta who comes in by SSH, and as which account
       include_role:
         name: ssh-announce
