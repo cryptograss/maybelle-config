@@ -53,6 +53,12 @@ if [ "${1:-}" = "--session" ]; then
     esac
 fi
 
+# Whose key opened it: authorized_keys says, never the person (--as <name>).
+who=someone
+if [ "${1:-}" = "--as" ]; then
+    who="${2:-someone}"
+fi
+
 # What `magenta.sh recovery [--fresh] [--openrouter|--subscription]` asked
 # for, through ssh: plain words, nothing else.
 fresh=no
@@ -73,7 +79,11 @@ if [ -z "$route" ]; then
     if [ -r "$KEYS/openrouter_key" ]; then route=openrouter; else route=subscription; fi
 fi
 session="recovery-$route"
+# Say it, loudly and somewhere other than hunter, before anything else happens:
+# a GitHub issue, and the recovery log on maybelle (recovery-alert). In the
+# background, cut loose: an alert that can't get out never holds up the login.
+setsid /usr/local/bin/recovery-alert "$who" "$route" "$fresh" </dev/null >/dev/null 2>&1 &
 if [ "$fresh" = yes ]; then
     tmux kill-session -t "$session" 2>/dev/null || true
 fi
-exec tmux new-session -A -s "$session" /usr/local/bin/magenta-recovery --session "$route"
+exec tmux new-session -A -s "$session" -e "MAGENTA_RECOVERY_WHO=$who" /usr/local/bin/magenta-recovery --session "$route"

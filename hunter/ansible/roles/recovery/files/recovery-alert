@@ -1,0 +1,65 @@
+#!/usr/bin/python3 -I
+"""recovery-alert <who> <route> <fresh>: someone has opened recovery@hunter.
+
+Run by magenta-recovery at each login, in the background. Says so in two
+places that aren't hunter, so that the whole team hears and it's kept where the
+session can't unsay it (Justin, emergence, 2 Nov 2026):
+
+  - a GitHub issue in recovery_alert_repo: everyone watching it gets an email
+    and a phone notification, and GitHub keeps every edit to it.
+  - a line in the recovery log's queue, which recovery-log-ship sends on to
+    the append-only log on maybelle with the session's own transcript.
+
+Each is best-effort: no token, no network, no answer, and it just ends.
+"""
+import json
+import socket
+import sys
+import time
+import urllib.request
+
+TOKEN = '/home/recovery/.config/magenta/alert_github_token'
+REPO = '/home/recovery/.config/magenta/alert_repo'
+QUEUE = '/var/lib/magenta-recovery/events.jsonl'
+
+
+def read(path):
+    try:
+        with open(path) as f:
+            return f.read().strip()
+    except OSError:
+        return ''
+
+
+def main(who='someone', route='?', fresh='no'):
+    now = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+    event = {'event': 'recovery-opened', 'who': who, 'route': route, 'fresh': fresh == 'yes',
+             'host': socket.gethostname(), 'at': now}
+    try:
+        with open(QUEUE, 'a') as f:
+            f.write(json.dumps(event) + '\n')
+    except OSError:
+        pass
+
+    token, repo = read(TOKEN), read(REPO)
+    if not (token and repo):
+        return
+    body = (f'**{who}** opened recovery@hunter at {now}, by the {route} route'
+            f'{" (a fresh session)" if fresh == "yes" else ""}.\n\n'
+            'recovery@hunter is root on hunter in all but name. Its session is being written, as it '
+            'happens, to the append-only recovery log on maybelle (/var/log/magenta-recovery), and '
+            'stays in /home/recovery on hunter.\n\n'
+            'If you know why, say so here. If nobody does, that is the alarm.')
+    request = urllib.request.Request(
+        f'https://api.github.com/repos/{repo}/issues', method='POST',
+        data=json.dumps({'title': f'recovery@hunter opened by {who} ({now})', 'body': body}).encode(),
+        headers={'Authorization': f'Bearer {token}', 'Accept': 'application/vnd.github+json',
+                 'User-Agent': 'recovery-alert'})
+    try:
+        urllib.request.urlopen(request, timeout=20).read()
+    except Exception:  # noqa: BLE001 -- best-effort, and nothing here may stop a login
+        pass
+
+
+if __name__ == '__main__':
+    main(*sys.argv[1:4])

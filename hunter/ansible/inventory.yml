@@ -17,6 +17,16 @@ all:
     # Domain for subdomains
     base_domain: hunter.cryptograss.live
 
+    # recovery@hunter's sessions go, as they happen, to an append-only log on
+    # maybelle (roles: recovery, recovery-log). The public half of its key;
+    # the private half is recovery_log_private_key in the vault. Empty: nothing
+    # is shipped, and the sessions stay on hunter's disk only.
+    recovery_log_public_key: ""
+    # A GitHub issue opens there when someone opens recovery, so everyone
+    # watching the repo hears (recovery_alert_github_token in the vault: a
+    # fine-grained token, Issues read and write on this one repo, nothing else).
+    recovery_alert_repo: cryptograss/security-and-other-private-things
+
     # The people: who each is, and the SSH key hunter knows them by. Apart
     # from containers, so that retiring a container never takes its owner's
     # key with it. Read by: magenta's allowed_signers and wiki names
