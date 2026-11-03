@@ -486,6 +486,11 @@ def configure_claude_settings():
     settings['attribution'] = {'commit': '', 'pr': '', 'sessionUrl': False}
     settings['includeCoAuthoredBy'] = False
 
+    # Thinking as summaries, so a turn's thinking is in the record and on its Mood. Claude Code's default is
+    # "omitted": the transcript and stream keep only an empty thinking block with its signature (Justin, #interfaces,
+    # 2 Nov 2026: "(the thinking itself was not recorded)" on every Anthropic turn).
+    settings['showThinkingSummaries'] = True
+
     # Write settings back
     import json
     with open(settings_file, 'w') as f:
