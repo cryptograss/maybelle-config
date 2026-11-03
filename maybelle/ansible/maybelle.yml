@@ -149,6 +149,23 @@
         owner: 1000
         group: 1000
 
+    # cron-health tells #ops when a check turns red or green (report-alarm.sh).
+    - name: Create Jenkins bin directory
+      file:
+        path: "{{ jenkins_home }}/bin"
+        state: directory
+        mode: '0755'
+        owner: 1000
+        group: 1000
+
+    - name: Copy the alarm reporter for Jenkins jobs
+      copy:
+        src: "{{ playbook_dir }}/../scripts/report-alarm.sh"
+        dest: "{{ jenkins_home }}/bin/report-alarm.sh"
+        mode: '0755'
+        owner: 1000
+        group: 1000
+
     - name: Copy Jenkins job definitions
       copy:
         src: "{{ playbook_dir }}/../jobs/"
@@ -275,6 +292,8 @@
           BLUERAILROAD_BOT_USERNAME: "{{ BLUERAILROAD_BOT_USERNAME }}"
           BLUERAILROAD_BOT_PASSWORD: "{{ BLUERAILROAD_BOT_PASSWORD }}"
           DELIVERY_KID_API_KEY: "{{ delivery_kid_api_key }}"
+          # report-alarm.sh posts a red or green check to #ops with this; it can do nothing else.
+          MOOD_ALARM_KEY: "{{ memory_lane_alarm_key | default('') }}"
         ports:
           - "8080:8080"
         networks:
@@ -920,6 +939,11 @@
           # Hunter's SSH router (hunter route-ssh, announce-ssh) says who has
           # come in by SSH, proving itself with this key; it can do nothing else.
           MOOD_ACCESS_KEY={{ memory_lane_access_key }}
+          {% endif %}
+          {% if memory_lane_alarm_key is defined %}
+          # maybelle's Jenkins jobs (scripts/report-alarm.sh) say in #ops when a check
+          # turns red or green, proving themselves with this key; it can do nothing else.
+          MOOD_ALARM_KEY={{ memory_lane_alarm_key }}
           {% endif %}
           {% if pickipedia_oauth_client_id is defined and pickipedia_oauth_client_secret is defined %}
           # "Sign in with PickiPedia": magenta's client at the wiki's OAuth
