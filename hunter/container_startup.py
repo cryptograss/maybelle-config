@@ -791,7 +791,7 @@ def start_mood_poller():
         # A Mood's own container (MOOD_SLUG) answers only that Mood, with
         # full tools for the people in it; a person's answers what it can wake.
         # (Plain words only: run_command wraps this in single quotes for su.)
-        args = '--agent magent'
+        args = '--emergent magent'
         if magent_also_harness() == 'pi':
             setup_magent_pi()
             args += ' --also-harness pi'
@@ -1017,7 +1017,7 @@ def start_agent_poller(agent):
     # And it is the agent's only poller: a session of its that isn't on this
     # disk was lost with its home, not left on another machine, so a mention
     # starts it over from the record (memory-lane#194) instead of dropping it.
-    args = f"--agent {name} --harness {harness} --new-sessions yes --only-poller yes --full-tools-for {people or ','}"
+    args = f"--emergent {name} --harness {harness} --new-sessions yes --only-poller yes --full-tools-for {people or ','}"
     if model:
         args += f" --model {model}"
     if also and also != harness:

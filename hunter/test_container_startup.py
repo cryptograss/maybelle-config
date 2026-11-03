@@ -112,10 +112,10 @@ class PollerSignInTest(unittest.TestCase):
         self.assertFalse(self.path.exists())
 
     def test_only_the_pollers_own_shell_sources_it(self):
-        signed = poller_command('--agent magent', True)
+        signed = poller_command('--emergent magent', True)
         self.assertTrue(signed.startswith('set -a; . ~/.config/magenta/poller.env; set +a; nohup '))
-        self.assertTrue(signed.endswith('--agent magent >> /tmp/mood-poller.log 2>&1 &'))
-        self.assertNotIn('poller.env', poller_command('--agent magent', False))
+        self.assertTrue(signed.endswith('--emergent magent >> /tmp/mood-poller.log 2>&1 &'))
+        self.assertNotIn('poller.env', poller_command('--emergent magent', False))
         self.assertNotIn("'", signed)  # run_command wraps it in single quotes for su
 
 
@@ -270,7 +270,7 @@ class MagentInstructionsTest(unittest.TestCase):
         return ' '.join(c for c in ran if 'mood_poller' in c)
 
     def test_only_with_magent_instructions(self):
-        self.assertIn('--agent magent --instructions', self.started({'MAGENT_INSTRUCTIONS': '1'}))
+        self.assertIn('--emergent magent --instructions', self.started({'MAGENT_INSTRUCTIONS': '1'}))
         self.assertNotIn('--instructions', self.started({'MAGENT_INSTRUCTIONS': ''}))
 
     def test_its_only_poller_once_the_mood_containers_went(self):
@@ -295,7 +295,7 @@ class AgentInstructionsTest(unittest.TestCase):
         return ' '.join(ran)
 
     def test_instructions_true_gives_the_flag(self):
-        self.assertIn('--agent blu --harness pi', self.started({'instructions': True}))
+        self.assertIn('--emergent blu --harness pi', self.started({'instructions': True}))
         self.assertIn(' --instructions', self.started({'instructions': True}))
 
     def test_with_nothing_to_reach_it_it_is_not_started(self):
