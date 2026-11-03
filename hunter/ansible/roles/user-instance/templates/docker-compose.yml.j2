@@ -92,7 +92,7 @@ services:
       - MCP_MEMORY_URL=http://10.0.0.2:8000
 {% if magent_works_here %}
       # PickiPedia as Magent, for the magent user's MediaWiki MCP server. A resident
-      # agent has its own bot password (AGENT_<NAME>_PICKIPEDIA_BOT_PASSWORD, below).
+      # emergent has its own bot password (EMERGENT_<NAME>_PICKIPEDIA_BOT_PASSWORD, below).
       - PICKIPEDIA_BOT_PASSWORD={{ PICKIPEDIA_BOT_PASSWORD }}
 {% endif %}
       # Opt-in: container_startup.py starts the Mood poller when this is 1
@@ -139,10 +139,9 @@ services:
       # Emergents besides magent who live in this container, each its own
       # unix user (hunter/CONTAINERS.md). Their keys, from the vault, are
       # written into their own homes at startup, readable only by them.
-      # AGENTS and AGENT_<NAME>_* keep their names until the rename's last step.
-      - 'AGENTS={{ user.emergents | to_json }}'
+      - 'EMERGENTS={{ user.emergents | to_json }}'
 {% for agent in user.emergents %}
-{% set prefix = 'AGENT_' ~ (agent.name | upper | replace('-', '_')) %}
+{% set prefix = 'EMERGENT_' ~ (agent.name | upper | replace('-', '_')) %}
       - {{ prefix }}_RUNNER_KEY={{ lookup('vars', agent.name ~ '_runner_key', default='') }}
       - {{ prefix }}_PICKIPEDIA_BOT_PASSWORD={{ lookup('vars', agent.name ~ '_pickipedia_bot_password', default='') }}
 {# A vendor's key is shared by every agent (model_<vendor>_api_key), unless one has its own (<agent>_<vendor>_api_key). #}

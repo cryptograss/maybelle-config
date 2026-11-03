@@ -140,8 +140,6 @@ class PruneExportsTest(unittest.TestCase):
         self.assertEqual(prune_exports(text, ['POSTGRES_PASSWORD'], {}), text)
 
 
-if __name__ == '__main__':
-    unittest.main()
 
 
 class MemoryKeyTest(unittest.TestCase):
@@ -323,3 +321,20 @@ class LinkRulesTest(unittest.TestCase):
             (home / 'CLAUDE.md').write_text("someone's own")
             container_startup.link_rules(home, None, (home / 'CLAUDE.md',))
             self.assertEqual((home / 'CLAUDE.md').read_text(), "someone's own")
+
+
+class EmergentEnvNamesTest(unittest.TestCase):
+    """Who lives here and their keys come as EMERGENTS and EMERGENT_<NAME>_* (the emergent rename's last
+    env step); the old AGENTS / AGENT_<NAME>_* names are read no more."""
+
+    def test_emergents_lists_who_lives_here(self):
+        with mock.patch.dict(os.environ, {'EMERGENTS': '[{"name": "re", "uid": 2001}]', 'AGENTS': ''}):
+            self.assertEqual([a['name'] for a in container_startup.agents()], ['re'])
+
+    def test_the_old_name_is_not_read(self):
+        with mock.patch.dict(os.environ, {'AGENTS': '[{"name": "re", "uid": 2001}]', 'EMERGENTS': ''}):
+            self.assertEqual(container_startup.agents(), [])
+
+
+if __name__ == '__main__':
+    unittest.main()
