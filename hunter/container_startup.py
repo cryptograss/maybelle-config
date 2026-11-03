@@ -833,12 +833,12 @@ PICKIPEDIA_MCP = ['node', '/opt/pickipedia-mcp/dist/index.js']
 
 
 def agents():
-    """The agents besides magent this container hosts (AGENTS, from the inventory)."""
+    """The emergents besides magent this container hosts (EMERGENTS, from the inventory)."""
     import json
     try:
-        found = json.loads(os.environ.get('AGENTS') or '[]')
+        found = json.loads(os.environ.get('EMERGENTS') or '[]')
     except ValueError:
-        logger.error("AGENTS is not JSON; no other agents set up")
+        logger.error("EMERGENTS is not JSON; no other emergents set up")
         return []
     return [a for a in found if isinstance(a, dict) and AGENT_NAME.fullmatch(str(a.get('name', '')))
             and a['name'] != 'magent']
@@ -886,7 +886,7 @@ def setup_agent(agent):
     # password and runner key are; nor magent theirs.
     os.chmod('/home/magent', 0o750)
     os.chmod(home, 0o750)
-    secret = lambda key: os.environ.get(f"AGENT_{name.upper().replace('-', '_')}_{key}", '').strip()
+    secret = lambda key: os.environ.get(f"EMERGENT_{name.upper().replace('-', '_')}_{key}", '').strip()
 
     config = home / '.config'
     runner_key = secret('RUNNER_KEY')
@@ -896,7 +896,7 @@ def setup_agent(agent):
     # the name the harness reads it by (the inventory's `model_keys`, e.g.
     # OPENROUTER_API_KEY). Only the vendors with a key in the vault are here,
     # and they're the ones the Mood's model menu shows as usable.
-    prefix = f"AGENT_{name.upper().replace('-', '_')}_KEY_"
+    prefix = f"EMERGENT_{name.upper().replace('-', '_')}_KEY_"
     keys = {var[len(prefix):]: value.strip() for var, value in os.environ.items()
             if var.startswith(prefix) and value.strip() and re.fullmatch(r'[A-Z][A-Z0-9_]*', var[len(prefix):])}
     write_private(config / 'magenta' / 'agent.env',

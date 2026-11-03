@@ -133,7 +133,7 @@ class AgentHomesTest(unittest.TestCase):
             keep(self.base, 'agency', [{'name': 're', 'uid': 2001, 'home_from': 'docs-tests-qa'}], run=FakeDocker())
         self.assertTrue((old / '.local/state/magenta/pi-sessions/s1.jsonl').exists())
         self.assertFalse((self.base / 'agency' / 'agents' / 're').exists())
-        self.assertEqual(agent_homes.main(['--base-dir', str(self.base), '--container', 'agency', '--agents',
+        self.assertEqual(agent_homes.main(['--base-dir', str(self.base), '--container', 'agency', '--emergents',
                                            '[{"name": "re", "uid": 2001, "home_from": "docs-tests-qa"}]']), 2)
 
     def test_a_retired_containers_homes_move_once_its_compose_file_is_put_aside(self):
@@ -168,9 +168,9 @@ class AgentHomesTest(unittest.TestCase):
 
     def test_main_refuses_a_strange_container_name(self):
         with self.assertRaises(SystemExit):
-            agent_homes.main(['--base-dir', str(self.base), '--container', '../x', '--agents', '[]'])
+            agent_homes.main(['--base-dir', str(self.base), '--container', '../x', '--emergents', '[]'])
         self.assertEqual(agent_homes.main(['--base-dir', str(self.base), '--container', 'x',
-                                           '--agents', '[{"name": "re"}]']), 2)
+                                           '--emergents', '[{"name": "re"}]']), 2)
 
 
 if __name__ == '__main__':

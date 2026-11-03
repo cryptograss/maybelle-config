@@ -206,7 +206,7 @@
   when: user.emergents is defined
   command:
     argv: [python3, "{{ base_dir }}/maybelle-config/hunter/scripts/agent_homes.py", --base-dir, "{{ base_dir }}",
-           --container, "{{ user.name }}", --agents, "{{ user.emergents | default([]) | to_json }}"]
+           --container, "{{ user.name }}", --emergents, "{{ user.emergents | default([]) | to_json }}"]
   register: agent_homes
   changed_when: agent_homes.rc == 0 and (agent_homes.stdout | from_json).made | length > 0
 
