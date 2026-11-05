@@ -61,6 +61,10 @@
       include_role:
         name: recovery
 
+    - name: SSH by key only
+      include_role:
+        name: ssh-keys-only
+
     - name: Say in magenta who comes in by SSH (the router says more of its own)
       include_role:
         name: ssh-announce
