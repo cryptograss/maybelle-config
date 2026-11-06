@@ -25,7 +25,7 @@ Prints one JSON line: {"made": [...], "carried": [...], "moved": [...]}
 (empty lists: no change).
 
     agent_homes.py --base-dir /opt/magenta --container docs-tests-qa \
-        --agents '[{"name": "re", "uid": 2001}]'
+        --emergents '[{"name": "re", "uid": 2001}]'
 """
 
 import argparse
@@ -126,7 +126,7 @@ def keep(base_dir, container, agents, run=docker):
             home.parent.mkdir(parents=True, exist_ok=True)
             if agent['home_from'] and move_from(base_dir, agent['home_from'], agent['name'], home):
                 moved.append(agent['name'])
-            elif carry_out(f'{container}-arthel', f'/home/{agent["name"]}', home, run):
+            elif carry_out(container, f'/home/{agent["name"]}', home, run):
                 carried.append(agent['name'])
             else:
                 home.mkdir(mode=0o750)
@@ -143,7 +143,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     parser.add_argument('--base-dir', required=True)
     parser.add_argument('--container', required=True, help="The container's inventory name (docs-tests-qa)")
-    parser.add_argument('--agents', required=True, help='JSON: [{"name": ..., "uid": ...}, ...]')
+    parser.add_argument('--emergents', dest='agents', required=True, help='JSON: [{"name": ..., "uid": ...}, ...]')
     args = parser.parse_args(argv)
     if not CONTAINER.fullmatch(args.container):
         parser.error(f'not a container name: {args.container!r}')

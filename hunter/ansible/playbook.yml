@@ -1,7 +1,7 @@
 ---
 # Hunter: Multi-user development environment
 # PostgreSQL and Memory Lane services are now on maybelle
-# Hunter runs: user containers, watcher (posting to maybelle)
+# Hunter runs: user containers (Moods', agents', people's), faces
 - name: Setup Magenta Multi-User Development Environment
   hosts: hunter
   become: yes
@@ -45,7 +45,7 @@
       include_role:
         name: docker
 
-    - name: Build magenta-arthel base image
+    - name: Build magenta base image
       include_role:
         name: build-image
 
@@ -61,6 +61,10 @@
       include_role:
         name: recovery
 
+    - name: SSH by key only
+      include_role:
+        name: ssh-keys-only
+
     - name: Say in magenta who comes in by SSH (the router says more of its own)
       include_role:
         name: ssh-announce
@@ -68,7 +72,7 @@
         ssh_announce_server: hunter
         ssh_announce_key_group: sshrouter
 
-    - name: Include services role (watcher posting to maybelle)
+    - name: Include services role (takes down what no longer runs here, the watcher among them)
       include_role:
         name: services
 
@@ -86,21 +90,56 @@
       failed_when: network_create.rc != 0 and 'already exists' not in network_create.stderr
       changed_when: network_create.rc == 0
 
-    - name: githouse, our canonical clones (before the containers that mount them)
-      include_role:
-        name: githouse
+    # /opt/magenta/moods, mounted at /moods in every container: a directory per
+    # Mood, with its clones and files (Cryptograss:Moods as Directories). The
+    # agents are each their own unix user, so it belongs to the group moods
+    # (gid 3000, as in the image), setgid, with a default ACL: whatever anyone
+    # makes in it stays the group's to write, whatever their umask.
+    - name: The group that owns every Mood's directory
+      group:
+        name: moods
+        gid: 3000
+
+    - name: setfacl, for the Mood directories' default ACL
+      apt:
+        name: acl
+        state: present
+
+    - name: Every Mood's directory lives here
+      file:
+        path: "{{ base_dir }}/moods"
+        state: directory
+        owner: root
+        group: moods
+        mode: '2775'
+
+    - name: What's made in it stays the group's to write
+      shell: >
+        getfacl -p {{ base_dir }}/moods | grep -qx 'default:group:moods:rwx'
+        || setfacl -m g:moods:rwx,d:u::rwx,d:g::rwx,d:g:moods:rwx,d:o::rx {{ base_dir }}/moods
+      changed_when: false
 
     # Taken out of the inventory (`retired`): stopped and removed, before the
     # containers that replace it are made, so an agent's home it mounted can
     # move (agent_homes.py refuses while a compose file still mounts it). Its
     # compose file is kept, renamed, and everything else under its directory
     # stays on hunter's disk. Done once: nothing to do once it's renamed.
+    # No chdir: a container retired before its directory was ever made (a rename
+    # never deployed) has nothing to do, and chdir would fail before `removes` said so.
     - name: Retire containers taken out of the inventory
-      shell: docker compose down && mv docker-compose.yml docker-compose.retired.yml
+      shell: cd {{ base_dir }}/{{ item }} && docker compose down && mv docker-compose.yml docker-compose.retired.yml
       args:
-        chdir: "{{ base_dir }}/{{ item }}"
         removes: "{{ base_dir }}/{{ item }}/docker-compose.yml"
       loop: "{{ retired | default([]) }}"
+
+    # A retired Mood container's workspace, into its Mood's directory: once, whole,
+    # its worktrees pointed at /moods/<slug> (hunter/scripts/fold_mood_homes.py).
+    - name: Fold retired Mood containers' workspaces into /moods
+      command:
+        argv: [python3, "{{ base_dir }}/maybelle-config/hunter/scripts/fold_mood_homes.py", --base-dir, "{{ base_dir }}",
+               --folds, "{{ folds | default([]) | to_json }}"]
+      register: folded
+      changed_when: folded.rc == 0 and (folded.stdout | from_json).folded | length > 0
 
     # A person's own container takes its git identity and key from that
     # person's entry (inventory `people`); a Mood's has its own.
@@ -113,6 +152,11 @@
       vars:
         user: "{{ (people | selectattr('name', 'equalto', entry.name) | first | default({})) | combine(entry) }}"
 
+    # After workbench is up: each Mood's previews by its name, from workbench.
+    - name: Include mood-previews role (each Mood's <slug>0-9 hostnames)
+      include_role:
+        name: mood-previews
+
     - name: Display deployment summary
       debug:
         msg: |
@@ -122,12 +166,12 @@
           PostgreSQL: maybelle (10.0.0.2)
           Memory Lane: https://memory-lane.maybelle.cryptograss.live
           MCP Server: http://10.0.0.2:8000
-          Watcher: posting to maybelle ingest endpoint
+          Turns reach the record from each poller's own stream (no watcher)
 
           User instances deployed:
           {% for user in users %}
-          {% if user.kind | default('') == 'agent' %}
-          - {{ user.name }} ({{ user.agents | map(attribute='name') | join(', ') }}'s own container): no ports; docker exec from recovery
+          {% if user.kind | default('') == 'emergent' %}
+          - {{ user.name }} ({{ (user.emergents | default([{'name': 'magent'}])) | map(attribute='name') | join(', ') }}'s own container): no ports; docker exec from recovery
           {% elif user.mood is defined %}
           - {{ user.name }} (a Mood's container, for {{ user.people | join(', ') }}): ssh -p {{ user.ssh_port }} magent@hunter.cryptograss.live
           {% else %}
@@ -136,6 +180,6 @@
           {% endfor %}
 
           Next steps:
-          - SSH to container: ssh justin@hunter.cryptograss.live
+          - SSH in: ssh sshrouter@hunter.cryptograss.live <mood-slug>, or workbench
           - Test MCP bootstrap on fresh Claude Code session
           ============================================

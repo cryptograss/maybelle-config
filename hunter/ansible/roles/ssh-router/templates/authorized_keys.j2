@@ -1,10 +1,10 @@
 # Auto-generated authorized_keys for SSH routing
 # Each key routes to its owner's container
 
-{# A Mood's container has no key of its own: people reach it on its own port.
-   Only a person who still has a container of their own is routed. #}
-{% set own = users | rejectattr('mood', 'defined') | map(attribute='name') | list %}
-{% for person in people if person.name in own and person.ssh_pubkey | default('') | trim is match('ssh-') %}
+{# Every person with a key is routed: to their own container while they still have one,
+   else to workbench, the people's box (route-ssh). A Mood's directory is reached by its
+   slug: `ssh sshrouter@hunter chartifacts`. #}
+{% for person in people if person.ssh_pubkey | default('') | trim is match('ssh-') %}
 # {{ person.full_name }} ({{ person.email }})
 command="/usr/local/bin/route-ssh {{ person.name }}",no-port-forwarding,no-X11-forwarding,no-agent-forwarding {{ person.ssh_pubkey | trim }}
 

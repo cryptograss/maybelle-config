@@ -1,0 +1,82 @@
+"""route-ssh, rendered from its template against hunter's inventory and run with a stand-in docker.
+
+    python3 -m pytest hunter/ansible/roles/ssh-router/test_route_ssh.py
+"""
+
+import os
+import subprocess
+from pathlib import Path
+
+import jinja2
+import pytest
+import yaml
+
+HERE = Path(__file__).parent
+INVENTORY = HERE.parents[1] / 'inventory.yml'
+
+
+@pytest.fixture
+def route(tmp_path):
+    users = yaml.safe_load(INVENTORY.read_text())['all']['vars']['users']
+    script = tmp_path / 'route-ssh'
+    script.write_text(jinja2.Template((HERE / 'templates' / 'route-ssh.sh.j2').read_text())
+                      .render(users=users, base_dir=tmp_path))
+    script.chmod(0o755)
+    (tmp_path / 'moods' / 'chartifacts').mkdir(parents=True)
+    bin_dir = tmp_path / 'bin'
+    bin_dir.mkdir()
+    running = '\\n'.join(f"{u['name']}" for u in users)
+    (bin_dir / 'docker').write_text(f'#!/bin/sh\n[ "$1" = ps ] && printf "{running}\\n" && exit 0\necho "DOCKER: $*"\n')
+    (bin_dir / 'docker').chmod(0o755)
+
+    def run(user, command=''):
+        env = dict(os.environ, PATH=f'{bin_dir}:{os.environ["PATH"]}', SSH_ORIGINAL_COMMAND=command)
+        out = subprocess.run([str(script), user], env=env, capture_output=True, text=True, timeout=30).stdout
+        return [line[len('DOCKER: '):] for line in out.splitlines() if line.startswith('DOCKER: ')]
+    return run
+
+
+def test_a_moods_slug_is_a_shell_in_its_directory_in_workbench(route):
+    assert route('justin', 'chartifacts') == [
+        'exec -it workbench su - magent -c cd /moods/chartifacts && exec bash -l']
+
+
+def test_with_tmux_it_is_a_session_named_for_the_mood_there(route):
+    assert route('justin', 'chartifacts tmux') == [
+        'exec -it workbench su - magent -c tmux new-session -A -s chartifacts -c /moods/chartifacts']
+
+
+def test_workbench_by_name(route):
+    assert route('justin', 'workbench') == ['exec -it workbench su - magent']
+
+
+def test_a_person_whose_own_container_retired_lands_in_workbench(route):
+    assert route('justin') == ['exec -it workbench su - magent']
+
+
+def test_a_person_workbench_doesnt_name_is_let_in_nowhere(route):
+    assert route('someone-new') == []
+    assert route('someone-new', 'chartifacts') == []
+
+
+def test_nobody_is_let_into_emergent_magent_not_even_justin(route):
+    # It holds docker.sock, root on hunter: only root on hunter opens it (Justin, 2 Nov 2026).
+    for person in ('justin', 'skyler', 'rj', 'fibonacci'):
+        assert route(person, 'emergent-magent') == []
+
+
+def test_an_agents_container_lets_in_only_its_people(route):
+    assert route('skyler', 'emergent-re') == ['exec -it emergent-re su - magent -c tmux new-session -A -s magenta']
+    assert route('rj', 'emergent-re') == []
+    assert route('fibonacci', 'emergent-blu') == []
+
+
+def test_everyone_workbench_names_reaches_a_mood(route):
+    for person in ('justin', 'skyler', 'rj', 'fibonacci'):
+        assert route(person, 'chartifacts') == [
+            'exec -it workbench su - magent -c cd /moods/chartifacts && exec bash -l']
+
+
+def test_what_isnt_a_moods_directory_is_a_command_in_workbench(route):
+    for command in ('nosuchmood', '../etc', 'chartifacts; rm -rf /'):
+        assert route('justin', command) == [f'exec -it workbench su - magent -c {command}']

@@ -25,11 +25,36 @@
     # Note: maybelle-config repo is managed by the chapter scripts on the persistent volume
     # No need to clone it here - we're already running from it
 
+    # Grow the filesystem to fill the Hetzner volume. Resizing the volume in Hetzner's
+    # console grows the block device only; this makes the extra space usable, online, at
+    # the next deploy, so nobody runs resize2fs by hand. A no-op when it already fills it.
+    - name: Find the persistent volume's filesystem
+      command: findmnt -n -o SOURCE,FSTYPE --target /mnt/HC_Volume_104062902
+      register: persist_fs
+      changed_when: false
+
+    - name: Grow the persistent volume's filesystem to the volume's size
+      command: resize2fs {{ persist_fs.stdout.split()[0] }}
+      register: persist_grow
+      changed_when: "'Nothing to do' not in persist_grow.stderr"
+      when: persist_fs.stdout.split() | length == 2 and persist_fs.stdout.split()[1] in ['ext4', 'ext3']
+
+    - name: SSH by key only
+      include_role:
+        name: ssh-keys-only
+
     - name: Say in magenta who comes in by SSH, and as which account
       include_role:
         name: ssh-announce
       vars:
         ssh_announce_server: maybelle
+
+    - name: The recovery log, written to from recovery@hunter and only appended to
+      include_role:
+        name: recovery-log
+      vars:
+        # Read as maybelle.yml reads the people (lookup, not include_vars: see below).
+        recovery_log_public_key: "{{ (lookup('file', playbook_dir ~ '/../../hunter/ansible/inventory.yml') | from_yaml).all.vars.recovery_log_public_key | default('') }}"
 
     - name: Deploy maybelle SSH login banner
       copy:
@@ -131,6 +156,23 @@
       file:
         path: "{{ jenkins_home }}/jobs"
         state: directory
+        mode: '0755'
+        owner: 1000
+        group: 1000
+
+    # cron-health tells #ops when a check turns red or green (report-alarm.sh).
+    - name: Create Jenkins bin directory
+      file:
+        path: "{{ jenkins_home }}/bin"
+        state: directory
+        mode: '0755'
+        owner: 1000
+        group: 1000
+
+    - name: Copy the alarm reporter for Jenkins jobs
+      copy:
+        src: "{{ playbook_dir }}/../scripts/report-alarm.sh"
+        dest: "{{ jenkins_home }}/bin/report-alarm.sh"
         mode: '0755'
         owner: 1000
         group: 1000
@@ -261,6 +303,8 @@
           BLUERAILROAD_BOT_USERNAME: "{{ BLUERAILROAD_BOT_USERNAME }}"
           BLUERAILROAD_BOT_PASSWORD: "{{ BLUERAILROAD_BOT_PASSWORD }}"
           DELIVERY_KID_API_KEY: "{{ delivery_kid_api_key }}"
+          # report-alarm.sh posts a red or green check to #ops with this; it can do nothing else.
+          MOOD_ALARM_KEY: "{{ memory_lane_alarm_key | default('') }}"
         ports:
           - "8080:8080"
         networks:
@@ -581,6 +625,31 @@
         job: "/usr/local/bin/deploy-pickipedia-to-vps.sh"
         minute: "*/2"
 
+    # ----- hunter VCS backup (host cron) -----
+    # hunter keeps, hourly, the git work that exists only there: branches on no remote and
+    # uncommitted edits, in any home (hunter housekeeping: hunter-vcs-unpushed). Pulled here
+    # with root's hunter key, so hunter can be lost without losing them (Justin, emergence,
+    # 1 Nov 2026). latest/ mirrors hunter's; one copy a day is kept for 30 days.
+    - name: Create hunter VCS backup pull script
+      copy:
+        dest: /usr/local/bin/pull-hunter-vcs.sh
+        mode: '0750'
+        content: |
+          #!/bin/bash
+          set -euo pipefail
+          DIR=/mnt/persist/hunter-vcs
+          mkdir -p "$DIR/latest" "$DIR/daily"
+          rsync -a --delete root@hunter.cryptograss.live:/opt/magenta/vcs-backup/ "$DIR/latest/"
+          today="$DIR/daily/$(date -u +%F)"
+          [ -e "$today" ] || cp -al "$DIR/latest" "$today"
+          find "$DIR/daily" -mindepth 1 -maxdepth 1 -type d -mtime +30 -exec rm -rf {} +
+
+    - name: Cronjob to pull hunter's unpushed git work
+      ansible.builtin.cron:
+        name: "pull hunter vcs backup"
+        job: "/usr/local/bin/pull-hunter-vcs.sh >> /var/log/pull-hunter-vcs.log 2>&1"
+        minute: "20"
+
     - name: Remove old rsync cron if exists
       ansible.builtin.cron:
         name: "push sites to prod"
@@ -800,6 +869,17 @@
         - /mnt/persist/magenta
         - /mnt/persist/magenta/backups
 
+    # Memory Lane's cache (FileBasedCache), kept across deploys: a new container serves the Moods list it had,
+    # rather than every page waiting on one rebuilt from nothing (Justin, 1 Nov: ~90 s after a redeploy).
+    # Owned by the container's user (magent, uid 1000 in Dockerfile.services).
+    - name: Create Memory Lane cache directory
+      file:
+        path: /mnt/persist/magenta/memory-lane-cache
+        state: directory
+        owner: '1000'
+        group: '1000'
+        mode: '0755'
+
     # Registered because Dockerfile.services ends with `COPY . .` — the source
     # is baked into the image, so new code only reaches the running services if
     # the containers are recreated. See the recreate: line on the compose task
@@ -847,16 +927,13 @@
           # Tool I/O is kept now that pattern redaction exists (jMyles/memory-lane#26);
           # this caps each stored result.
           TOOL_RESULT_CONTENT_CHARS=20000
-          {% set magent_key = magent_runner_key | default(memory_lane_runner_key | default('')) %}
+          {% set magent_key = magent_runner_key | default('') %}
           {% if magent_key %}
           # The Mood runners (memory-lane's poller, on hunter, one per agent)
           # stream the turns they wake straight into their Moods, each proving
           # itself with its agent's key: one line per agent, read by
-          # memory-lane (memory_viewer/runner_keys.py). magent's is
-          # magent_runner_key, once named memory_lane_runner_key: either works.
+          # memory-lane (memory_viewer/runner_keys.py).
           MOOD_RUNNER_KEY_MAGENT={{ magent_key }}
-          # The same, in the form memory-lane read before MOOD_RUNNER_KEY_*.
-          MOOD_RUNNER_KEYS=magent:{{ magent_key }}
           {% endif %}
           {% if re_runner_key is defined %}
           MOOD_RUNNER_KEY_RE={{ re_runner_key }}
@@ -873,6 +950,11 @@
           # Hunter's SSH router (hunter route-ssh, announce-ssh) says who has
           # come in by SSH, proving itself with this key; it can do nothing else.
           MOOD_ACCESS_KEY={{ memory_lane_access_key }}
+          {% endif %}
+          {% if memory_lane_alarm_key is defined %}
+          # maybelle's Jenkins jobs (scripts/report-alarm.sh) say in #ops when a check
+          # turns red or green, proving themselves with this key; it can do nothing else.
+          MOOD_ALARM_KEY={{ memory_lane_alarm_key }}
           {% endif %}
           {% if pickipedia_oauth_client_id is defined and pickipedia_oauth_client_secret is defined %}
           # "Sign in with PickiPedia": magenta's client at the wiki's OAuth
@@ -1005,6 +1087,7 @@
               env_file: .env
               environment:
                 - DJANGO_SETTINGS_MODULE=memory_viewer.settings
+                - MEMORY_LANE_CACHE_DIR=/var/cache/memory-lane
               ports:
                 - "127.0.0.1:3000:3000"
                 - "10.0.0.2:3000:3000"
@@ -1012,6 +1095,7 @@
                 - /mnt/persist/magenta/allowed_signers:/etc/magenta/allowed_signers:ro
                 - /mnt/persist/magenta/wiki_names:/etc/magenta/wiki_names:ro
                 - /mnt/persist/magenta/backups:/mnt/persist/magenta/backups:ro
+                - /mnt/persist/magenta/memory-lane-cache:/var/cache/memory-lane
               networks:
                 - memory-lane-net
               restart: unless-stopped
@@ -1307,8 +1391,29 @@
 
           BACKUP_FILE="$BACKUP_DIR/magenta_memory_${BLOCK_HEIGHT}.dump"
 
+          # Don't dump into a full volume (2 Nov 2026: /mnt/persist hit 100%, and a dump
+          # written then is truncated). Need room for twice the last dump, or 2G with none.
+          LAST=$(ls -t "$BACKUP_DIR"/magenta_memory_*.dump 2>/dev/null | head -1)
+          NEED_KB=2097152
+          [ -n "$LAST" ] && NEED_KB=$(( $(stat -c%s "$LAST") / 512 ))
+          FREE_KB=$(df -Pk "$BACKUP_DIR" | awk 'NR==2 {print $4}')
+          if [ "$FREE_KB" -lt "$NEED_KB" ]; then
+              echo "$(date): SKIPPED - ${FREE_KB}K free, need ${NEED_KB}K" >> "$BACKUP_DIR/backup.log"
+              exit 1
+          fi
+
           # Dump in custom format (already compressed)
           docker exec magenta-postgres pg_dump -Fc -U magent magenta_memory > "$BACKUP_FILE"
+          DUMP_STATUS=$?
+
+          # A dump that failed, or doesn't read back to the end, is truncated or broken:
+          # never keep it, so it can't become the daily or the offsite copy. Reading it
+          # through to /dev/null catches a cut-off data section, which --list alone wouldn't.
+          if [ "$DUMP_STATUS" -ne 0 ] || ! docker exec -i magenta-postgres pg_restore -f /dev/null < "$BACKUP_FILE" > /dev/null 2>&1; then
+              echo "$(date): FAILED - $BACKUP_FILE did not verify; removed" >> "$BACKUP_DIR/backup.log"
+              rm -f "$BACKUP_FILE"
+              exit 1
+          fi
 
           # Log
           echo "$(date): Backup created: $BACKUP_FILE ($(stat -c%s "$BACKUP_FILE") bytes)" >> "$BACKUP_DIR/backup.log"
@@ -1322,9 +1427,9 @@
               find "$DAILY_DIR" -name "magenta_memory_*.dump" -mtime +7 -delete
           fi
 
-          # Cleanup bi-hourly backups (keep last 24 hours only - ~12 dumps)
-          # Daily backups provide longer retention, bi-hourly is just for recent recovery
-          find "$BACKUP_DIR" -maxdepth 1 -name "magenta_memory_*.dump" -mtime +0 -delete
+          # Cleanup bi-hourly backups (keep the last 12 hours - ~6 dumps, ~6G at 1G each;
+          # 24 hours took ~12G of a 40G volume). Dailies cover the longer window.
+          find "$BACKUP_DIR" -maxdepth 1 -name "magenta_memory_*.dump" -mmin +720 -delete
           find "$BACKUP_DIR" -maxdepth 1 -name "magenta_memory_*.sql.gz" -mtime +0 -delete
 
     # Odd hours: the script keeps the 03:00 dump as the day's, and */2 (0, 2, 4...)

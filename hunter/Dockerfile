@@ -53,7 +53,7 @@ RUN npm install -g @earendil-works/pi-coding-agent@1.1.0
 # as proposed, so the wiki's verification gate takes them. Upstream's doesn't,
 # and the gate refuses its edits. Pinned: merging the fork changes nothing
 # that runs until this line does. Outside /home, so no mount hides it.
-ARG PICKIPEDIA_MCP_COMMIT=91e7e42ee83e112c25cef0fa9410154f08844997
+ARG PICKIPEDIA_MCP_COMMIT=1a7156c7bd05f55a3ecde20ec2aed38297b235de
 RUN git clone --quiet https://github.com/cryptograss/pickipedia-mcp.git /opt/pickipedia-mcp \
     && cd /opt/pickipedia-mcp && git checkout --quiet "$PICKIPEDIA_MCP_COMMIT" \
     && npm ci --ignore-scripts --no-audit --no-fund && npm run build \
@@ -94,6 +94,15 @@ RUN apt-get update && apt-get install -y \
 ARG DOCKER_GID=999
 RUN groupadd -g ${DOCKER_GID} docker \
     && usermod -aG docker magent
+
+# /moods: every Mood's directory, shared by every container on hunter
+# (Cryptograss:Moods as Directories). Owned by the group moods, gid 3000 here
+# and on hunter's disk; magent is in it, and each agent joins at startup
+# (container_startup.py setup_agent). Git trusts the clones there whoever
+# made them, since one agent's clone is another's to work in.
+RUN groupadd -g 3000 moods \
+    && usermod -aG moods magent \
+    && git config --system --add safe.directory '/moods/*'
 
 # Install GitHub CLI (following official docs)
 RUN (type -p wget >dev/null || (apt update && apt install wget -y)) \

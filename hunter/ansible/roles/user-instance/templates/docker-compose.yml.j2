@@ -1,19 +1,19 @@
 version: '3.8'
 
 services:
-  {{ user.name }}-arthel:
-    image: magenta-arthel:latest  # Uses pre-built image, no build step
-    container_name: {{ user.name }}-arthel
+  {{ user.name }}:
+    image: magenta:latest  # Uses pre-built image, no build step
+    container_name: {{ user.name }}
     hostname: {{ user.name }}@hunter
 {% if user.memory_limit is defined %}
     # Its own ceiling: a runaway here can't starve the rest of hunter, or
-    # another agent (agency-<name>).
+    # another agent (emergent-<name>).
     mem_limit: {{ user.memory_limit }}
 {% endif %}
 {% if user.cpus is defined %}
     cpus: {{ user.cpus }}
 {% endif %}
-{% if user.kind | default('') != 'agent' %}
+{% if user.kind | default('') != 'emergent' %}
     ports:
       - "{{ user.ssh_port }}:22"
       # code-server web IDE (18080 for justin, 18081 for rj, etc.)
@@ -36,16 +36,17 @@ services:
       # container never gets it, so full tools there stay inside it.
       - /var/run/docker.sock:/var/run/docker.sock
 {% endif %}
+      # Every Mood's directory, one per Mood (Cryptograss:Moods as Directories):
+      # each agent's turn in a Mood starts in its own, and people work in them too.
+      - {{ base_dir }}/moods:/moods
       # PickiPedia backups (synced from maybelle daily)
       - /opt/magenta/pickipedia-backups:/opt/magenta/pickipedia-backups:ro
       # Mood poller: memory-lane as deployed, in hunter's clone of magenta main
       # (build-image keeps it current), not a workspace checkout on any branch
       - {{ memory_lane_dir }}/poller:/opt/mood-poller:ro
-      # githouse's repositories, to clone and fetch from; pushes go over ssh (roles/githouse)
-      - {{ base_dir }}/git:/srv/git:ro
-{% for agent in user.agents | default([]) %}
-      # {{ agent.name }}'s home, kept across recreation (hunter/scripts/agent_homes.py)
-      - {{ base_dir }}/{{ user.name }}/agents/{{ agent.name }}:/home/{{ agent.name }}
+{% for emergent in user.emergents | default([]) %}
+      # {{ emergent.name }}'s home, kept across recreation (hunter/scripts/agent_homes.py)
+      - {{ base_dir }}/{{ user.name }}/agents/{{ emergent.name }}:/home/{{ emergent.name }}
 {% endfor %}
     networks:
       - magenta-net
@@ -57,32 +58,43 @@ services:
       - POSTGRES_HOST=magenta-postgres
       - POSTGRES_DB={{ postgres_db }}
       - POSTGRES_USER=magent
-{% if user.mood is not defined %}
-      - POSTGRES_PASSWORD={{ postgres_password }}
-{% endif %}
-{% if memory_lane_preview_db_password is defined %}
+      # Secrets ship only to the containers that read them (Justin, emergence,
+      # 1 Nov 2026). Gone everywhere: POSTGRES_PASSWORD (memory-lane previews
+      # use the memory_lane_preview role below; the magent role's password was
+      # only their fallback), DJANGO_SECRET_KEY (never set), the Blue Railroad
+      # bot (read on maybelle and delivery-kid, not here), and
+      # DELIVERY_KID_API_KEY and PICKIPEDIA_DEV_SENTRY_DSN (only a PickiPedia
+      # preview read them, and none starts any more: emergent-* are agents,
+      # workbench is a Mood's kind). The magent user's own credentials
+      # (GitHub, PickiPedia as Magent) go only where the
+      # magent user works: a container without resident emergents (emergent-magent,
+      # workbench). container_startup.py takes back what an earlier deploy
+      # left in a home (.bashrc, gh, the wiki's MCP config).
+{% set magent_works_here = user.emergents is not defined %}
+{# memory-lane previews are served from workbench (Moods' previews), so only there; an emergent's container has no ports to serve one #}
+{% if magent_works_here and user.kind | default('') != 'emergent' and memory_lane_preview_db_password is defined %}
       # memory-lane previews (tools/preview.sh) connect to the live record as
       # the restricted memory_lane_preview role, not as magent
       - MEMORY_LANE_PREVIEW_DB_PASSWORD={{ memory_lane_preview_db_password }}
 {% endif %}
+{% if user.kind | default('') != 'emergent' %}
+      # code-server runs only where people work (not in an emergent's own container)
       - CODE_SERVER_PASSWORD={{ user.code_server_password }}
+{% endif %}
+{% if magent_works_here %}
       - GH_TOKEN={{ user.github_token | default('') }}
-      - DJANGO_SECRET_KEY={{ user.django_secret_key | default('') }}
+{% endif %}
       - SSH_PORT={{ user.ssh_port | default('') }}
-      # agent: an agent's own container (agency-<name>), which starts only
+      # agent: an agent's own container (emergent-<name>), which starts only
       # what its agents need (container_startup.py)
       - CONTAINER_KIND={{ user.kind | default('') }}
       # Use private network for MCP on hunter (10.0.0.2 is maybelle)
       - MCP_MEMORY_URL=http://10.0.0.2:8000
-      # PickiPedia bot credentials for MediaWiki MCP server
+{% if magent_works_here %}
+      # PickiPedia as Magent, for the magent user's MediaWiki MCP server. A resident
+      # emergent has its own bot password (EMERGENT_<NAME>_PICKIPEDIA_BOT_PASSWORD, below).
       - PICKIPEDIA_BOT_PASSWORD={{ PICKIPEDIA_BOT_PASSWORD }}
-      # Blue Railroad import bot credentials
-      - BLUERAILROAD_BOT_USERNAME={{ BLUERAILROAD_BOT_USERNAME | default('') }}
-      - BLUERAILROAD_BOT_PASSWORD={{ BLUERAILROAD_BOT_PASSWORD | default('') }}
-      # Sentry/GlitchTip DSN for PickiPedia dev error tracking
-      - PICKIPEDIA_DEV_SENTRY_DSN={{ pickipedia_dev_sentry_dsn | default('') }}
-      # Delivery-kid pinning service API key
-      - DELIVERY_KID_API_KEY={{ delivery_kid_api_key }}
+{% endif %}
       # Opt-in: container_startup.py starts the Mood poller when this is 1
       - MOOD_POLLER={{ '1' if user.mood_poller | default(false) else '0' }}
 {% if user.mood is defined %}
@@ -105,30 +117,33 @@ services:
       - MAGENT_ALSO_HARNESS=pi
       - MAGENT_OPENROUTER_API_KEY={{ magent_openrouter_api_key | default(model_openrouter_api_key | default('')) }}
 {% endif %}
+{% if user.magent_only_poller | default(false) %}
+      # magent's only poller (Moods as Directories, step 5): a session not on this
+      # disk is lost, and a mention there starts over from the record.
+      - MAGENT_ONLY_POLLER=1
+{% endif %}
 {% if user.magent_instructions | default(false) %}
       # magent's instructions from PickiPedia, given to each turn as system prompt
       # (magenta poller/instructions.py, --instructions), as the agents' are.
       - MAGENT_INSTRUCTIONS=1
 {% endif %}
 {% endif %}
-{% set magent_key = magent_runner_key | default(memory_lane_runner_key | default('')) %}
+{% set magent_key = magent_runner_key | default('') %}
 {% if user.mood_poller | default(false) and magent_key %}
       # The poller streams the turns it wakes straight into their Moods with
-      # this (memory-lane's MOOD_RUNNER_KEYS). Only the poller reads it, so it
-      # is not exported to shells. magent_runner_key, once named
-      # memory_lane_runner_key: either works.
+      # this (memory-lane's MOOD_RUNNER_KEY_MAGENT). Only the poller reads it,
+      # so it is not exported to shells.
       - MEMORY_LANE_RUNNER_KEY={{ magent_key }}
 {% endif %}
-{% if user.agents is defined %}
-      # Agents besides magent who live in this Mood's container, each its own
+{% if user.emergents is defined %}
+      # Emergents besides magent who live in this container, each its own
       # unix user (hunter/CONTAINERS.md). Their keys, from the vault, are
       # written into their own homes at startup, readable only by them.
-      - 'AGENTS={{ user.agents | to_json }}'
-{% for agent in user.agents %}
-{% set prefix = 'AGENT_' ~ (agent.name | upper | replace('-', '_')) %}
+      - 'EMERGENTS={{ user.emergents | to_json }}'
+{% for agent in user.emergents %}
+{% set prefix = 'EMERGENT_' ~ (agent.name | upper | replace('-', '_')) %}
       - {{ prefix }}_RUNNER_KEY={{ lookup('vars', agent.name ~ '_runner_key', default='') }}
       - {{ prefix }}_PICKIPEDIA_BOT_PASSWORD={{ lookup('vars', agent.name ~ '_pickipedia_bot_password', default='') }}
-      - {{ prefix }}_GIT_KEY={{ lookup('vars', agent.name ~ '_git_private_key', default='') | replace('\n', '\\n') }}
 {# A vendor's key is shared by every agent (model_<vendor>_api_key), unless one has its own (<agent>_<vendor>_api_key). #}
 {% for vendor, env_name in (agent.model_keys | default({})).items() %}
       - {{ prefix }}_KEY_{{ env_name }}={{ lookup('vars', agent.name ~ '_' ~ vendor ~ '_api_key', default=lookup('vars', 'model_' ~ vendor ~ '_api_key', default='')) }}

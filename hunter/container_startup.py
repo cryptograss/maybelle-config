@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Container startup script for magenta-arthel containers.
+Container startup script for magenta containers.
 Handles volume initialization, repository cloning, and service configuration.
 """
 
@@ -303,6 +303,11 @@ def configure_github_cli():
 
     gh_token = os.environ.get('GH_TOKEN')
     if not gh_token:
+        # Not shipped here (any more): take back a login an earlier deploy left in the home.
+        for left in (Path('/home/magent/.config/gh/hosts.yml'), Path('/home/magent/.git-credential-helper.sh')):
+            if left.exists():
+                left.unlink()
+                logger.info(f"No GH_TOKEN here: removed {left}")
         logger.info("No GH_TOKEN provided, skipping GitHub CLI setup")
         return
 
@@ -325,6 +330,9 @@ echo "password=$(gh auth token)"
     logger.info("✓ GitHub CLI authenticated")
 
 
+MEMORY_TIMEOUT = 120  # seconds Pi waits on one memory call (memory_server)
+
+
 def memory_server(key=''):
     """The memory record's MCP server, as an mcpServers entry. It runs on
     maybelle: the public URL for local dev, the private network on hunter.
@@ -332,9 +340,15 @@ def memory_server(key=''):
     With the agent's runner key the server knows who is calling (memory-lane
     conversations/mcp/server.caller), so remember, bootstrap_memory and the
     rest are that agent's own memory; with none, magent's, as before keys.
+
+    timeout is Pi's, in seconds (Claude Code's entry drops it, for_claude_code).
+    Pi's default is 60, and a ranked search or bootstrap_memory runs 30-40s on a
+    healthy day (re, #tools, 2 Nov 2026); at 60 Pi hung up before Postgres could
+    say its disk was full, and re lost a day to a timeout with no cause in it.
     """
     server = {'url': os.environ.get('MCP_MEMORY_URL', 'https://mcp.maybelle.cryptograss.live'),
-              'description': 'The record: what was said in the Moods and sessions.'}
+              'description': 'The record: what was said in the Moods and sessions.',
+              'timeout': MEMORY_TIMEOUT}
     if key:
         server['headers'] = {'Authorization': f'Bearer {key}'}
     return server
@@ -441,6 +455,12 @@ def configure_mcp_server():
         )
         logger.info("✓ PickiPedia MediaWiki MCP server configured")
     else:
+        # Not shipped here (any more): take back the password an earlier deploy wrote into the home.
+        left = Path("/home/magent/.config/mediawiki-mcp/config.json")
+        if left.exists():
+            left.unlink()
+            run_command("claude mcp remove --scope user pickipedia", user='magent', check=False)
+            logger.info(f"No PICKIPEDIA_BOT_PASSWORD here: removed {left} and the MCP server")
         logger.warning("⚠ PICKIPEDIA_BOT_PASSWORD not set, skipping MediaWiki MCP server")
 
 
@@ -466,12 +486,27 @@ def configure_claude_settings():
     settings['attribution'] = {'commit': '', 'pr': '', 'sessionUrl': False}
     settings['includeCoAuthoredBy'] = False
 
+    # Thinking as summaries, so a turn's thinking is in the record and on its Mood. Claude Code's default is
+    # "omitted": the transcript and stream keep only an empty thinking block with its signature (Justin, #interfaces,
+    # 2 Nov 2026: "(the thinking itself was not recorded)" on every Anthropic turn).
+    settings['showThinkingSummaries'] = True
+
     # Write settings back
     import json
     with open(settings_file, 'w') as f:
         json.dump(settings, f, indent=2)
 
     logger.info("✓ Claude Code settings configured")
+
+
+def prune_exports(text, names, environ):
+    """A .bashrc without the `export NAME=` lines for any of `names` the environment no longer
+    has: a secret an earlier deploy exported stays in the home otherwise, after the container
+    stops being given it."""
+    gone = {n for n in names if not environ.get(n)}
+    kept = [line for line in text.splitlines(keepends=True)
+            if not any(line.startswith(f'export {n}=') for n in gone)]
+    return ''.join(kept)
 
 
 def setup_environment_variables():
@@ -495,10 +530,15 @@ def setup_environment_variables():
 
     bashrc_path = Path('/home/magent/.bashrc')
 
-    # Read current .bashrc
+    # Read current .bashrc, without what this container is no longer given
     if bashrc_path.exists():
         with open(bashrc_path, 'r') as f:
             bashrc_content = f.read()
+        pruned = prune_exports(bashrc_content, env_vars, os.environ)
+        if pruned != bashrc_content:
+            bashrc_path.write_text(pruned)
+            logger.info("✓ Removed exports of variables this container no longer has")
+            bashrc_content = pruned
     else:
         bashrc_content = ''
 
@@ -626,12 +666,12 @@ def setup_godot():
 
 
 def write_runner_key():
-    """Hand the poller its runner key (memory-lane's MOOD_RUNNER_KEYS).
+    """Hand the poller its runner key (memory-lane's MOOD_RUNNER_KEY_<AGENT>).
 
     The poller is started by `su -`, which leaves this container's
     environment behind, so the key goes in a file only magent can read --
-    never on a command line, where ps would show it. Without the key the
-    poller still works; woken turns reach Moods through the watcher.
+    never on a command line, where ps would show it. Without the key, the
+    turns it wakes have no way into the record (the watcher that once carried them is gone).
     """
     key = os.environ.get('MEMORY_LANE_RUNNER_KEY', '').strip()
     path = Path('/home/magent/.config/magenta/runner_key')
@@ -693,7 +733,7 @@ def magent_also_harness():
 def setup_magent_pi(home=Path('/home/magent')):
     """What Pi needs to be magent: the same rules and the same MCP servers as its Claude Code.
 
-    TEMPORARY, for the Pi trial (magent-self, 2026-10-21): once magent lives in agency, setup_agent
+    TEMPORARY, for the Pi trial (magent-self, 2026-10-21): once magent lives in emergent-magent, setup_agent
     does all of this, and this function, magent_also_harness and the inventory's
     magent_also_harness go (Cryptograss:Moods/magent-self/todo).
 
@@ -756,13 +796,17 @@ def start_mood_poller():
         # A Mood's own container (MOOD_SLUG) answers only that Mood, with
         # full tools for the people in it; a person's answers what it can wake.
         # (Plain words only: run_command wraps this in single quotes for su.)
-        args = '--agent magent'
+        args = '--emergent magent'
         if magent_also_harness() == 'pi':
             setup_magent_pi()
             args += ' --also-harness pi'
         # Its instructions from PickiPedia, given to each turn as system prompt, as the agents' are.
         if os.environ.get('MAGENT_INSTRUCTIONS') == '1':
             args += ' --instructions'
+        # Its only poller (Moods as Directories, step 5): a session not on this disk is lost, not another
+        # container's, so a mention there starts over from the record.
+        if os.environ.get('MAGENT_ONLY_POLLER') == '1' and not os.environ.get('MOOD_SLUG', '').strip():
+            args += ' --only-poller yes'
         slug = os.environ.get('MOOD_SLUG', '').strip()
         if slug:
             people = os.environ.get('MOOD_FULL_TOOLS_FOR', '').strip()
@@ -789,12 +833,12 @@ PICKIPEDIA_MCP = ['node', '/opt/pickipedia-mcp/dist/index.js']
 
 
 def agents():
-    """The agents besides magent this container hosts (AGENTS, from the inventory)."""
+    """The emergents besides magent this container hosts (EMERGENTS, from the inventory)."""
     import json
     try:
-        found = json.loads(os.environ.get('AGENTS') or '[]')
+        found = json.loads(os.environ.get('EMERGENTS') or '[]')
     except ValueError:
-        logger.error("AGENTS is not JSON; no other agents set up")
+        logger.error("EMERGENTS is not JSON; no other emergents set up")
         return []
     return [a for a in found if isinstance(a, dict) and AGENT_NAME.fullmatch(str(a.get('name', '')))
             and a['name'] != 'magent']
@@ -835,11 +879,14 @@ def setup_agent(agent):
                 shutil.copy2(skel, home / skel.name)
                 shutil.chown(home / skel.name, user=name, group=name)
     shutil.chown(home, user=name, group=name)
+    # Every Mood's directory is the group moods' (Cryptograss:Moods as Directories):
+    # its clones are any agent's to work in. Each start, so an agent made before it joins too.
+    run_command(f"usermod -aG moods {name}")
     # The others can't read magent's home, where its GitHub token, wiki
     # password and runner key are; nor magent theirs.
     os.chmod('/home/magent', 0o750)
     os.chmod(home, 0o750)
-    secret = lambda key: os.environ.get(f"AGENT_{name.upper().replace('-', '_')}_{key}", '').strip()
+    secret = lambda key: os.environ.get(f"EMERGENT_{name.upper().replace('-', '_')}_{key}", '').strip()
 
     config = home / '.config'
     runner_key = secret('RUNNER_KEY')
@@ -849,7 +896,7 @@ def setup_agent(agent):
     # the name the harness reads it by (the inventory's `model_keys`, e.g.
     # OPENROUTER_API_KEY). Only the vendors with a key in the vault are here,
     # and they're the ones the Mood's model menu shows as usable.
-    prefix = f"AGENT_{name.upper().replace('-', '_')}_KEY_"
+    prefix = f"EMERGENT_{name.upper().replace('-', '_')}_KEY_"
     keys = {var[len(prefix):]: value.strip() for var, value in os.environ.items()
             if var.startswith(prefix) and value.strip() and re.fullmatch(r'[A-Z][A-Z0-9_]*', var[len(prefix):])}
     write_private(config / 'magenta' / 'agent.env',
@@ -1023,7 +1070,7 @@ def start_agent_poller(agent):
     # And it is the agent's only poller: a session of its that isn't on this
     # disk was lost with its home, not left on another machine, so a mention
     # starts it over from the record (memory-lane#194) instead of dropping it.
-    args = f"--agent {name} --harness {harness} --new-sessions yes --only-poller yes --full-tools-for {people or ','}"
+    args = f"--emergent {name} --harness {harness} --new-sessions yes --only-poller yes --full-tools-for {people or ','}"
     if model:
         args += f" --model {model}"
     if also and also != harness:
@@ -1050,10 +1097,11 @@ def start_agent_poller(agent):
 
 
 def agent_container():
-    """Whether this is an agent's own container (agency-<name>, CONTAINER_KIND=agent): it runs its
-    agents' pollers and nothing for people -- no code-server, no Godot workspace, no previews,
-    and no ports to reach them by."""
-    return os.environ.get('CONTAINER_KIND', '') == 'agent'
+    """Whether this is an emergent's own container (emergent-<name>, CONTAINER_KIND=emergent): it runs
+    its emergents' pollers and nothing for people -- no code-server, no Godot workspace, no previews,
+    and no ports to reach them by. CONTAINER_KIND=agent, the name before the emergent rename, counts
+    too, for a container made by an earlier deploy; the rename's last step drops it."""
+    return os.environ.get('CONTAINER_KIND', '') in ('emergent', 'agent')
 
 
 def start_services():

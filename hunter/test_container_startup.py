@@ -11,7 +11,7 @@ from unittest import mock
 
 sys.path.insert(0, os.path.dirname(__file__))
 import container_startup  # noqa: E402
-from container_startup import (agent_uid, clone_in_background, memory_server, poller_command,  # noqa: E402
+from container_startup import (agent_uid, clone_in_background, memory_server, poller_command, prune_exports,  # noqa: E402
                                repos_by_when, retire_home_claude_md, write_claude_mcp, write_poller_env)
 
 RE = {'name': 're', 'uid': 2001, 'rules': 'workspace/red/RULES.md', 'letter': 'workspace/red/LETTER.md',
@@ -112,15 +112,34 @@ class PollerSignInTest(unittest.TestCase):
         self.assertFalse(self.path.exists())
 
     def test_only_the_pollers_own_shell_sources_it(self):
-        signed = poller_command('--agent magent', True)
+        signed = poller_command('--emergent magent', True)
         self.assertTrue(signed.startswith('set -a; . ~/.config/magenta/poller.env; set +a; nohup '))
-        self.assertTrue(signed.endswith('--agent magent >> /tmp/mood-poller.log 2>&1 &'))
-        self.assertNotIn('poller.env', poller_command('--agent magent', False))
+        self.assertTrue(signed.endswith('--emergent magent >> /tmp/mood-poller.log 2>&1 &'))
+        self.assertNotIn('poller.env', poller_command('--emergent magent', False))
         self.assertNotIn("'", signed)  # run_command wraps it in single quotes for su
 
 
-if __name__ == '__main__':
-    unittest.main()
+class PruneExportsTest(unittest.TestCase):
+    BASHRC = ('# mine\nalias ll="ls -l"\n\n# Container environment variables\n'
+              'export DEVELOPER_NAME="emergent-magent"\nexport POSTGRES_PASSWORD="old"\n'
+              'export MEMORY_LANE_PREVIEW_DB_PASSWORD="p"\n')
+
+    def test_a_secret_no_longer_given_is_taken_out_and_the_rest_stays(self):
+        out = prune_exports(self.BASHRC, ['DEVELOPER_NAME', 'POSTGRES_PASSWORD', 'MEMORY_LANE_PREVIEW_DB_PASSWORD'],
+                            {'DEVELOPER_NAME': 'emergent-magent', 'MEMORY_LANE_PREVIEW_DB_PASSWORD': 'p'})
+        self.assertNotIn('POSTGRES_PASSWORD', out)
+        self.assertIn('export MEMORY_LANE_PREVIEW_DB_PASSWORD="p"', out)
+        self.assertIn('alias ll="ls -l"', out)
+
+    def test_a_name_it_doesnt_manage_is_left_alone(self):
+        text = 'export MY_OWN_TOKEN="x"\n'
+        self.assertEqual(prune_exports(text, ['POSTGRES_PASSWORD'], {}), text)
+
+    def test_a_longer_name_sharing_the_start_is_not_taken(self):
+        text = 'export POSTGRES_PASSWORD_OLD="x"\n'
+        self.assertEqual(prune_exports(text, ['POSTGRES_PASSWORD'], {}), text)
+
+
 
 
 class MemoryKeyTest(unittest.TestCase):
@@ -137,6 +156,8 @@ class MemoryKeyTest(unittest.TestCase):
         with mock.patch.dict(os.environ, {'MCP_MEMORY_URL': 'http://10.0.0.2:8000'}):
             self.assertEqual(memory_server('k3y')['headers'], {'Authorization': 'Bearer k3y'})
             self.assertNotIn('headers', memory_server(''))  # no key: magent's memory, as before keys
+            self.assertEqual(memory_server('')['timeout'], 120)  # Pi's wait; its default 60 hid a full disk
+            self.assertNotIn('timeout', container_startup.for_claude_code(memory_server('k3y')))  # Claude Code's entry doesn't take it
 
     def test_claude_code_gets_the_header_and_keeps_what_else_it_had(self):
         import json
@@ -193,18 +214,19 @@ class BrowserTest(unittest.TestCase):
 
 
 class AgentContainerTest(unittest.TestCase):
-    """An agent's own container (agency-<name>) starts its agents and nothing for people."""
+    """An agent's own container (emergent-<name>) starts its agents and nothing for people."""
 
-    def test_only_container_kind_agent_is_one(self):
-        with mock.patch.dict(os.environ, {'CONTAINER_KIND': 'agent'}):
-            self.assertTrue(container_startup.agent_container())
-        for kind in ('', 'mood', 'Agent'):
+    def test_only_container_kind_emergent_is_one(self):
+        for kind in ('emergent', 'agent'):  # agent: the name before the emergent rename, until its last step
+            with mock.patch.dict(os.environ, {'CONTAINER_KIND': kind}):
+                self.assertTrue(container_startup.agent_container())
+        for kind in ('', 'mood', 'Agent', 'Emergent'):
             with mock.patch.dict(os.environ, {'CONTAINER_KIND': kind}):
                 self.assertFalse(container_startup.agent_container())
 
     def test_it_starts_no_code_server_and_no_preview(self):
         ran = []
-        with mock.patch.dict(os.environ, {'CONTAINER_KIND': 'agent'}), \
+        with mock.patch.dict(os.environ, {'CONTAINER_KIND': 'emergent'}), \
                 mock.patch.object(container_startup, 'run_command', side_effect=lambda cmd, **kw: ran.append(cmd)), \
                 mock.patch.object(container_startup, 'start_mood_poller'), \
                 mock.patch.object(container_startup, 'agents', return_value=[]), \
@@ -222,7 +244,7 @@ class AgentWorkspaceTest(unittest.TestCase):
         import tempfile
         home = Path(tempfile.mkdtemp())
         (home / 'workspace' / 'pickipedia').mkdir(parents=True)
-        for kind in ('agent', ''):
+        for kind in ('emergent', 'agent', ''):
             with self.subTest(kind=kind), \
                     mock.patch.dict(os.environ, {'SSH_PORT': '', 'CONTAINER_KIND': kind, 'SKIP_ARTHEL': '1'}), \
                     mock.patch.object(container_startup, 'ensure_repo_cloned'), \
@@ -246,8 +268,16 @@ class MagentInstructionsTest(unittest.TestCase):
         return ' '.join(c for c in ran if 'mood_poller' in c)
 
     def test_only_with_magent_instructions(self):
-        self.assertIn('--agent magent --instructions', self.started({'MAGENT_INSTRUCTIONS': '1'}))
+        self.assertIn('--emergent magent --instructions', self.started({'MAGENT_INSTRUCTIONS': '1'}))
         self.assertNotIn('--instructions', self.started({'MAGENT_INSTRUCTIONS': ''}))
+
+    def test_its_only_poller_once_the_mood_containers_went(self):
+        # Moods as Directories, step 5: magent has one poller (emergent-magent's since step 6).
+        self.assertIn('--only-poller yes', self.started({'MAGENT_ONLY_POLLER': '1', 'MOOD_SLUG': ''}))
+        self.assertNotIn('--only-poller', self.started({'MAGENT_ONLY_POLLER': '', 'MOOD_SLUG': ''}))
+        # A Mood's own container never says so, whatever it's given.
+        self.assertNotIn('--only-poller', self.started({'MAGENT_ONLY_POLLER': '1', 'MOOD_SLUG': 'chartifacts',
+                                                         'MOOD_FULL_TOOLS_FOR': 'justin'}))
 
 
 class AgentInstructionsTest(unittest.TestCase):
@@ -263,7 +293,7 @@ class AgentInstructionsTest(unittest.TestCase):
         return ' '.join(ran)
 
     def test_instructions_true_gives_the_flag(self):
-        self.assertIn('--agent blu --harness pi', self.started({'instructions': True}))
+        self.assertIn('--emergent blu --harness pi', self.started({'instructions': True}))
         self.assertIn(' --instructions', self.started({'instructions': True}))
 
     def test_with_nothing_to_reach_it_it_is_not_started(self):
@@ -293,29 +323,18 @@ class LinkRulesTest(unittest.TestCase):
             self.assertEqual((home / 'CLAUDE.md').read_text(), "someone's own")
 
 
-class GithouseRemoteTest(unittest.TestCase):
-    """A clone's remote `hunter`: githouse's copy, fetched from the mount, pushed to over ssh with a key."""
+class EmergentEnvNamesTest(unittest.TestCase):
+    """Who lives here and their keys come as EMERGENTS and EMERGENT_<NAME>_* (the emergent rename's last
+    env step); the old AGENTS / AGENT_<NAME>_* names are read no more."""
 
-    def setUp(self):
-        self.tmp = Path(tempfile.mkdtemp())
-        (self.tmp / 'magenta.git').mkdir()
-        (self.tmp / 'magenta.git' / 'HEAD').write_text('ref: refs/heads/main\n')
-        patcher = mock.patch.object(container_startup, 'GITHOUSE', self.tmp)
-        patcher.start()
-        self.addCleanup(patcher.stop)
+    def test_emergents_lists_who_lives_here(self):
+        with mock.patch.dict(os.environ, {'EMERGENTS': '[{"name": "re", "uid": 2001}]', 'AGENTS': ''}):
+            self.assertEqual([a['name'] for a in container_startup.agents()], ['re'])
 
-    def test_with_a_key_fetch_from_the_mount_and_push_over_ssh(self):
-        steps = container_startup.githouse_steps('re', Path('/home/re/workspace/magenta'), True)
-        self.assertEqual(steps, ['git -C /home/re/workspace/magenta remote remove hunter',
-                                 f"git -C /home/re/workspace/magenta remote add hunter {self.tmp / 'magenta.git'}",
-                                 'git -C /home/re/workspace/magenta remote set-url --push hunter git@githouse:magenta.git'])
-        self.assertTrue(all("'" not in step for step in steps))  # they go inside run_command's single quotes
+    def test_the_old_name_is_not_read(self):
+        with mock.patch.dict(os.environ, {'AGENTS': '[{"name": "re", "uid": 2001}]', 'EMERGENTS': ''}):
+            self.assertEqual(container_startup.agents(), [])
 
-    def test_without_a_key_fetch_only(self):
-        steps = container_startup.githouse_steps('blu', Path('/home/blu/workspace/magenta'), False)
-        self.assertFalse(any('--push' in step for step in steps))
 
-    def test_nothing_for_a_repository_githouse_hasnt_got(self):
-        self.assertEqual(container_startup.githouse_steps('re', Path('/home/re/workspace/red'), True), [])
-        self.assertEqual(container_startup.reference(Path('/home/re/workspace/red')), '')
-        self.assertIn('--reference-if-able', container_startup.reference(Path('/home/re/workspace/magenta')))
+if __name__ == '__main__':
+    unittest.main()

@@ -25,6 +25,7 @@ pipelineJob('cron-health') {
                             steps {
                                 catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
                                     sh """
+                                        mkdir -p "\\$WORKSPACE/.alarm"; trap 'echo \\$? > "\\$WORKSPACE/.alarm/arthel rsync (NFS deploy)"' EXIT
                                         DEPLOY_LOG="/var/log/nfs-deploy.log"
                                         STALE_MINUTES=10
 
@@ -61,6 +62,7 @@ pipelineJob('cron-health') {
                             steps {
                                 catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
                                     sh """
+                                        mkdir -p "\\$WORKSPACE/.alarm"; trap 'echo \\$? > "\\$WORKSPACE/.alarm/pickipedia rsync (VPS deploy)"' EXIT
                                         DEPLOY_LOG="/var/log/pickipedia-deploy.log"
                                         PAUSE_FILE="/var/jenkins_home/.pickipedia-deploy-paused"
                                         MARKER_FILE="/var/jenkins_home/pickipedia_stage/.deploy-ready"
@@ -129,6 +131,7 @@ pipelineJob('cron-health') {
                             steps {
                                 catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
                                     sh """
+                                        mkdir -p "\\$WORKSPACE/.alarm"; trap 'echo \\$? > "\\$WORKSPACE/.alarm/pickipedia backup"' EXIT
                                         BACKUP_LOG="/var/log/pickipedia-backup.log"
                                         BACKUP_DIR="/mnt/persist/pickipedia/backups"
                                         STALE_HOURS=25
@@ -175,10 +178,33 @@ pipelineJob('cron-health') {
                             }
                         }
 
+                        // Free space where the backups, postgres, ipfs and glitchtip all live.
+                        // 2 Nov 2026 it reached 100% with no warning and took memory search down.
+                        stage('maybelle disk') {
+                            steps {
+                                catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
+                                    sh """
+                                        mkdir -p "\\$WORKSPACE/.alarm"; trap 'echo \\$? > "\\$WORKSPACE/.alarm/maybelle disk"' EXIT
+                                        ALARM=90
+                                        echo "=== maybelle disk ==="
+                                        PCT=\\$(df -P /mnt/persist | awk 'NR==2 {gsub("%",""); print \\$5}')
+                                        df -h /mnt/persist | tail -1
+                                        if [ "\\$PCT" -ge "\\$ALARM" ]; then
+                                            echo "FAIL: /mnt/persist at \\${PCT}% (alarm at \\${ALARM}%)"
+                                            du -xhd1 /mnt/persist 2>/dev/null | sort -rh | head -6
+                                            exit 1
+                                        fi
+                                        echo "OK"
+                                    """
+                                }
+                            }
+                        }
+
                         stage('memory-lane backup') {
                             steps {
                                 catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
                                     sh """
+                                        mkdir -p "\\$WORKSPACE/.alarm"; trap 'echo \\$? > "\\$WORKSPACE/.alarm/memory-lane backup"' EXIT
                                         BACKUP_DIR="/mnt/persist/magenta/backups"
                                         STALE_HOURS=3
 
@@ -216,6 +242,7 @@ pipelineJob('cron-health') {
                             steps {
                                 catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
                                     sh """
+                                        mkdir -p "\\$WORKSPACE/.alarm"; trap 'echo \\$? > "\\$WORKSPACE/.alarm/memory-lane daily backup"' EXIT
                                         DAILY_DIR="/mnt/persist/magenta/backups/daily"
                                         STALE_HOURS=26
 
@@ -242,6 +269,7 @@ pipelineJob('cron-health') {
                             steps {
                                 catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
                                     sh """
+                                        mkdir -p "\\$WORKSPACE/.alarm"; trap 'echo \\$? > "\\$WORKSPACE/.alarm/memory-lane offsite backup"' EXIT
                                         LOG="/var/log/nfs-backup.log"
                                         STALE_HOURS=26
 
@@ -273,6 +301,7 @@ pipelineJob('cron-health') {
                             steps {
                                 catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
                                     sh """
+                                        mkdir -p "\\$WORKSPACE/.alarm"; trap 'echo \\$? > "\\$WORKSPACE/.alarm/delivery-kid audit"' EXIT
                                         AUDIT_LOG="/var/log/delivery-kid-audit.log"
                                         STALE_MINUTES=70
 
@@ -316,6 +345,7 @@ pipelineJob('cron-health') {
                             steps {
                                 catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
                                     sh """
+                                        mkdir -p "\\$WORKSPACE/.alarm"; trap 'echo \\$? > "\\$WORKSPACE/.alarm/pickipedia podcast import"' EXIT
                                         STATUS_URL="https://pickipedia.xyz/status/podcast-import.txt"
                                         STALE_HOURS=30
 
@@ -362,6 +392,8 @@ pipelineJob('cron-health') {
 
                     post {
                         always {
+                            // A stage that turned red, or green again, is said in #ops (report-alarm.sh).
+                            sh 'bash /var/jenkins_home/bin/report-alarm.sh cron-health "$WORKSPACE/.alarm"; rm -rf "$WORKSPACE/.alarm"'
                             script {
                                 if (currentBuild.result == 'FAILURE') {
                                     echo "One or more cron checks STALE — see failed stages above."

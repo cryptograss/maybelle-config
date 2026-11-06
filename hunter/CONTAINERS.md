@@ -1,16 +1,20 @@
 # What a container on hunter is
 
-Proposed in the magent-self Mood on 2026-10-11, as the shape we're moving to.
-Some of it is already true (the `delivery-kid` and `docs-tests-qa` containers);
-some is not yet (the containers still named after people).
+**Since 1 Nov 2026, Moods own directories and agents own processes**
+(Cryptograss:Moods as Directories on PickiPedia; the model is
+Cryptograss:Mood Architecture). A Mood is `/moods/<slug>`, seen by every
+container; each agent has one container and one poller (`emergent-<name>`);
+people have `workbench`. The sections at the end say how. The Mood containers
+below (uploads-and-embeds, docs-tests-qa) were retired in step 5, their
+workspaces folded into `/moods`; what follows about them is history.
 
-## A container belongs to a Mood
+## A container belongs to a Mood (until 1 Nov 2026)
 
 A Mood (a conversation in magenta, about one thing) can have a container on
 hunter. The container is named after the Mood, and it holds what work in that
 Mood needs:
 
-- a workspace and the full toolchain (the `magenta-arthel` image);
+- a workspace and the full toolchain (the `magenta` image);
 - its own web ports: `<mood>1.hunter.cryptograss.live` and so on, for preview
   servers (a PickiPedia preview, a site under development);
 - the agents who work in that Mood, as its residents (below);
@@ -18,12 +22,15 @@ Mood needs:
   full tools can open up to the people in it (`people:` in the inventory).
 
 People reach it by SSH on its own port with any of the people's keys
-(`ssh -p <ssh_port> magent@hunter.cryptograss.live`).
+(`ssh -p <ssh_port> magent@hunter.cryptograss.live`), or through the router
+(`ssh sshrouter@hunter <container>`), which lets in only the people its
+`people:` names; an entry without `people:` lets in nobody.
 
-**Not yet:** the containers named `justin`, `rj`, `skyler` and `fibonacci`
-are the older shape, one per person, each with `docker.sock`. The plan is to
-retire them in favour of Mood containers, Mood by Mood. They are left as they
-are until then.
+**Retired 1 Nov 2026:** the containers named `justin`, `rj`, `skyler` and
+`fibonacci`, the older shape, one per person, each with `docker.sock`. People
+land in workbench now (`ssh sshrouter@hunter` goes there), and
+justin's home, magent's all along, moved to emergent-magent. Their homes stay
+on hunter's disk.
 
 ## Agents in a container
 
@@ -96,27 +103,28 @@ deliberately small in what it can touch:
 - **Files on hunter:** what its own user can read in its own container.
 
 Its first container was `docs-tests-qa`, its home Mood. It moved to the
-shared `agency`, and from there to its own, `agency-re` (below), its home with
-it each time.
+shared `agency`, from there to its own, `agency-re`, and then to the same
+container renamed `emergent-re` (below), its home with it each time.
 
-## agency-<name>: each agent's own container
+## emergent-<name>: each agent's own container
 
 Agents answer in every Mood, so where their processes run isn't named after a
 Mood (Justin, magent-self, 2026-10-21). Each agent has a container of its own,
-`agency-<name>` (magent-self, 23-24 Oct 2026: Justin, re, magent), holding its
+`emergent-<name>` (magent-self, 23-24 Oct 2026: Justin, re, magent; first
+called `agency-<name>`, renamed in emergence on 31 Oct 2026), holding its
 home, its poller and its rules bundle, and nothing for people:
 
-- **`kind: agent`:** no published ports, no code-server, no Godot workspace, no
+- **`kind: emergent`** (`kind: agent` before the emergent rename): no published ports, no code-server, no Godot workspace, no
   previews (`CONTAINER_KIND=agent`, container_startup.py). Recovery reaches it
   with `docker exec`.
 - **Its own ceiling,** `memory_limit` and `cpus` in its entry: a runaway turn
   can't starve the rest of hunter, or another agent, and a bad start takes down
   one agent, not all of them. The shared `agency` before it could cap the
   agents together but not apart.
-- **A Mood-kind entry** (`mood: agency`) for what that brings: no docker.sock
-  and full tools only for its `people`. No Mood called agency need exist, and
+- **A Mood-kind entry** (`mood: emergent`) for what that brings: no docker.sock
+  and full tools only for its `people`. No Mood called emergent need exist, and
   magent's own poller isn't started in it (`mood_poller: false`).
-- **Its home** is `/opt/magenta/agency-<name>/agents/<name>` on hunter's disk.
+- **Its home** is `/opt/magenta/emergent-<name>/agents/<name>` on hunter's disk.
 
 An agent's poller starts only once its runner key is in the vault; blu's is
 held back until the poller passes its rules bundle as system prompt, since
@@ -128,4 +136,105 @@ others, and renames its compose file `docker-compose.retired.yml`; everything
 else under `/opt/magenta/<name>` stays on disk. That is also what lets an
 agent's home move out of it (`home_from`): agent_homes.py refuses while a
 compose file still mounts the home. The shared `agency` was the first retired
-this way, when re and blu moved to `agency-re` and `agency-blu`.
+this way, when re and blu moved to `agency-re` and `agency-blu`; those two
+were retired in turn when their homes moved to `emergent-re` and `emergent-blu`.
+
+**Renaming a container:** give the entry its new name and `renamed_from: <old>`,
+and put the old name in `retired:`. After the retire step, the user-instance
+role moves `/opt/magenta/<old>` to `/opt/magenta/<new>` whole, the first time,
+and refuses while the old compose file is still live. `delivery-kid` became
+`uploads-and-embeds` this way on 1 Nov 2026, taking its Mood's name.
+
+## /moods: a directory per Mood
+
+Moods own directories; agents own processes (Justin, emergence, 1 Nov 2026;
+the plan and its steps are on PickiPedia, Cryptograss:Moods as Directories).
+`/opt/magenta/moods/<slug>` on hunter's disk holds a Mood's clones and files,
+and every container mounts it at `/moods`:
+
+- **The group `moods`, gid 3000,** owns it, here and in the image. magent is
+  in it from the image; each agent joins at startup (`setup_agent`).
+- **setgid and a default ACL** (playbook.yml) keep whatever anyone makes in it
+  the group's to write, whatever their umask: one agent's clone is another's
+  to commit in. Tried with magent and re as different users, umask 022: each
+  committed in the other's clone and worktree, and `git gc` ran clean.
+- **Git trusts `/moods/*`** (`safe.directory`, system-wide in the image), so
+  a clone made by one user isn't "dubious ownership" to another.
+- **A thread** gets a worktree under `/moods/<slug>/threads/<thread>/`.
+- **The hourly backup** (`hunter-vcs-unpushed`) keeps what's only here in
+  each Mood's directory too, as `moods/<slug>/...`.
+
+## workbench: the people's box
+
+One container for people (Moods as Directories, step 3): a terminal,
+code-server and previews, with every Mood's directory at `/moods`, as in each
+agent's container. No poller, no docker.sock (a Mood-kind entry, `mood:
+workbench`). Its keys are every person's in its `people`.
+
+- `ssh sshrouter@hunter chartifacts` is a shell in `/moods/chartifacts`;
+  `... chartifacts tmux` a tmux session named for the Mood, started there and
+  shared by whoever joins it. Only a slug whose directory exists counts;
+  anything else is, as before, a command in your own container.
+- `ssh sshrouter@hunter workbench` is a shell in its home.
+- Everyone with a key is routed now: to their own container while they still
+  have one, else to workbench.
+- Its own port too, 2240, for scp, rsync and VS Code Remote; previews on
+  `workbench0-9.hunter` until previews go by Mood (step 4).
+
+## Previews by Mood: <slug>0-9.hunter
+
+Each Mood with a directory under `/moods` has ten preview ports in
+workbench, from 15000 up, given the first time it's seen and kept in its
+`.previews` file (ports beside hostnames; renaming the directory keeps
+them). A dev server started in workbench on one of them, bound to
+`0.0.0.0`, is at `https://<slug><N>.hunter.cryptograss.live`.
+
+- `hunter-mood-previews` (mood-previews role), each minute as root, writes
+  `/etc/caddy/moods.caddy` (each hostname to workbench's address on
+  magenta-net: no published ports) and `/etc/caddy/moods-ask`, and reloads
+  Caddy only when they change and `caddy validate` takes them.
+- Certificates on demand: one is asked for only when a hostname is first
+  visited, and only for a hostname in `moods-ask` (Caddy's own
+  `localhost:5555` answers). Ten names a Mood, all at once, would pass
+  Let's Encrypt's 50 new certificates a week for cryptograss.live.
+- A Mood named like a container that still has its own `<name>0-9`
+  (uploads-and-embeds, docs-tests-qa) waits until that container retires.
+
+## Step 5: the Mood containers fold into /moods
+
+uploads-and-embeds (delivery-kid before 1 Nov) and docs-tests-qa are
+`retired`. Their workspaces move, whole and once, into
+`/opt/magenta/moods/<slug>` (`hunter/scripts/fold_mood_homes.py`, the
+inventory's `folds`): clones, worktrees, uncommitted edits, branches on no
+remote. A worktree records both its ends by absolute path, so each is
+rewritten from `/home/magent/workspace/` to `/moods/<slug>/`, and the group
+`moods` is given the lot. A `.folded-from` file in the Mood's directory says
+what came from where. Tried on a copy of uploads-and-embeds' real
+workspace: all 21 worktrees resolve from `/moods`, none prunable, and every
+uncommitted edit came along.
+
+Their magent sessions stay on their homes' disk, not resumed: with the Mood
+containers gone, magent has one poller (emergent-magent's, since step 6)
+(`magent_only_poller`), so a mention there starts over from the record.
+
+
+## emergent-magent: magent's own container
+
+Step 6 of Moods as Directories: magent gets a container of its own, as re and
+blu have, and its poller leaves justin-arthel.
+
+- **Its home is the one it has always had.** For its first hours it mounted
+  justin-arthel's home where it was (`home_dir`), while justin-arthel wrote
+  the home's files, so magent committed as Justin. When the people's
+  containers retired (same day), `home_moved_from` moved the home whole to
+  `/opt/magenta/emergent-magent/home`: a rename on the same disk, done once,
+  only after justin's container is retired and never over a home already
+  there. 11G of Claude Code sessions, the clones and the poller's state; every
+  session resumes, and emergent-magent writes its own `.gitconfig`.
+- **No `mood:`.** magent answers every Mood, and keeps docker.sock (Justin,
+  emergence, 1 Nov 2026, 05:24Z).
+- `kind: emergent`: no ports, no code-server, no previews. 8g and 3 CPUs.
+  No `people:`, so the router lets nobody in: with docker.sock it is root on
+  hunter, and only root on hunter opens it (`docker exec`; Justin, emergence,
+  2 Nov 2026).
+- **The watcher** is retired (#254): the pollers record every turn.

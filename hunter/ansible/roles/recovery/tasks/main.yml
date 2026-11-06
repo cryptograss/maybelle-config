@@ -224,6 +224,109 @@
     content: |
       {
         "mcpServers": {
-          "magenta-memory-v2": {"url": "http://10.0.0.2:8000", "description": "The record: what was said in the Moods and sessions."}
+          "magenta-memory-v2": {"url": "http://10.0.0.2:8000", "description": "The record: what was said in the Moods and sessions.", "timeout": 120}
         }
       }
+
+# Saying it, loudly and not only on hunter (Justin, emergence, 2 Nov 2026).
+# When someone opens recovery, recovery-alert opens a GitHub issue in
+# recovery_alert_repo, so everyone watching it hears; and recovery-log-ship
+# sends the session, as it happens, to the append-only recovery log on maybelle
+# (shared/ansible/roles/recovery-log). Neither ever holds up a login.
+- name: Saying it when someone opens recovery
+  copy:
+    src: recovery-alert
+    dest: /usr/local/bin/recovery-alert
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: recovery-alert's queue, for the log
+  file:
+    path: /var/lib/magenta-recovery
+    state: directory
+    owner: recovery
+    group: recovery
+    mode: '0750'
+
+- name: Which repo hears
+  copy:
+    dest: /home/recovery/.config/magenta/alert_repo
+    content: "{{ recovery_alert_repo | default('') }}"
+    owner: recovery
+    group: recovery
+    mode: '0600'
+
+# Issues read and write on that one repo, nothing else: the session can read
+# it, and could at most open or edit an issue, which GitHub keeps the history of.
+- name: Its GitHub token
+  when: recovery_alert_github_token | default('') | length > 0
+  copy:
+    dest: /home/recovery/.config/magenta/alert_github_token
+    content: "{{ recovery_alert_github_token }}"
+    owner: recovery
+    group: recovery
+    mode: '0600'
+  no_log: true
+
+- name: Sending the session to maybelle
+  copy:
+    src: recovery-log-ship
+    dest: /usr/local/bin/recovery-log-ship
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Where it keeps what it has sent
+  file:
+    path: /var/lib/magenta-recovery-ship
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
+
+- name: /etc/magenta (ssh-announce makes it too, but runs after this role)
+  file:
+    path: /etc/magenta
+    state: directory
+    mode: '0755'
+
+# Root's, not recovery's: the session can't read it without first using root.
+- name: The recovery log's key (the vault's recovery_log_private_key)
+  when: recovery_log_private_key | default('') | length > 0
+  copy:
+    dest: /etc/magenta/recovery-log-key
+    content: "{{ recovery_log_private_key | trim }}\n"
+    owner: root
+    group: root
+    mode: '0600'
+  no_log: true
+
+- name: Its service
+  when: recovery_log_private_key | default('') | length > 0
+  copy:
+    dest: /etc/systemd/system/recovery-log-ship.service
+    owner: root
+    group: root
+    mode: '0644'
+    content: |
+      [Unit]
+      Description=recovery@hunter's sessions, to the append-only recovery log on maybelle
+      After=network-online.target
+      Wants=network-online.target
+
+      [Service]
+      ExecStart=/usr/local/bin/recovery-log-ship
+      Restart=always
+      RestartSec=5
+
+      [Install]
+      WantedBy=multi-user.target
+
+- name: It runs, and starts again with hunter
+  when: recovery_log_private_key | default('') | length > 0
+  systemd:
+    name: recovery-log-ship
+    enabled: yes
+    state: restarted
+    daemon_reload: yes
