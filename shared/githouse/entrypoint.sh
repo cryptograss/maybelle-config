@@ -30,5 +30,5 @@ fi
 runuser -u git -- python3 /opt/githouse/githouse.py init $GITHOUSE_REPOS
 # sshd reads /srv/git/.authorized_keys, which the loop writes from the relayed keys; an empty one until then.
 [ -f /srv/git/.authorized_keys ] || install -o git -g git -m 644 /dev/null /srv/git/.authorized_keys
-/usr/sbin/sshd
+/usr/sbin/sshd -D -e &   # -e: its log to stderr, so `docker logs githouse` says why a key was refused
 exec runuser -u git -- python3 /opt/githouse/githouse.py loop

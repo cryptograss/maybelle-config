@@ -295,9 +295,15 @@ def log(line):
         f.write(f"{time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())} {line}\n")
 
 
-def paced(step):
-    """Run step(repo) for every repository, one after another across EVERY seconds, forever."""
+def paced(step, before=None):
+    """Run step(repo) for every repository, one after another across EVERY seconds, forever;
+    before() first each round, repositories or none."""
     while True:
+        if before:
+            try:
+                before()
+            except Exception as e:
+                log(f'{e}')
         repos = sorted(ROOT.glob('*.git'))
         for repo in repos:
             started = time.monotonic()
@@ -311,11 +317,8 @@ def paced(step):
 
 
 def loop():
-    """On maybelle: GitHub's branches every minute, and the keys as relayed."""
-    def step(repo):
-        write_authorized_keys()
-        fetch(repo)
-    paced(step)
+    """On maybelle: the keys as relayed, then GitHub's branches, every minute."""
+    paced(fetch, before=write_authorized_keys)
 
 
 def mirror_init(full_names, upstream):
