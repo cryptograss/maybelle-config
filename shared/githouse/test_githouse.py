@@ -176,19 +176,69 @@ class GithouseTest(unittest.TestCase):
         self.assertIn('re/foo', githouse.refs(self.repo, 'refs/heads/'))
         self.assertIn("forwarding re's push to GitHub failed", (self.root / 'githouse.log').read_text())
 
-    def test_branches_json_served_and_nothing_else(self):
-        import urllib.error
-        import urllib.request
-        server = githouse.serve(port=0)
-        self.addCleanup(server.shutdown)
-        base = f'http://127.0.0.1:{server.server_address[1]}'
-        listed = json.loads(urllib.request.urlopen(f'{base}/branches.json').read())
-        self.assertIn('main', listed['magenta']['live'])
-        for path in ('/magenta.git/config', '/', '/../branches.json.tmp'):
-            with self.assertRaises(urllib.error.HTTPError, msg=path):
-                urllib.request.urlopen(base + path)
+    # --- the relayed keys -------------------------------------------------------------
+
+    def test_authorized_keys_from_the_relay_as_pushers_json_allows(self):
+        keys = self.tmp / 'keys'
+        pub = 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGQ6Z3lmZmJhcmJhemJhemJhemJhemJhemJhemJhemJhemJh re@emergent-re'
+        for container, name, text in (('emergent-re', 're', pub), ('emergent-re', 'magent', pub),  # re's box vouching for magent: not allowed
+                                      ('emergent-blu', 'blu', pub + '\n' + pub),                 # two keys in one file: not one key
+                                      ('hunter', 'mirror', pub), ('stranger', 'justin', pub)):    # an unlisted container: nothing
+            (keys / container).mkdir(parents=True, exist_ok=True)
+            (keys / container / f'{name}.pub').write_text(text + '\n')
+        pushers = {'emergent-re': ['re'], 'emergent-blu': ['blu'], 'emergent-magent': ['magent'],
+                   'hunter': {'names': ['mirror'], 'fetch_only': True}}
+        lines = githouse.authorized_keys(keys, pushers).splitlines()
+        self.assertEqual(len(lines), 2)
+        self.assertTrue(lines[0].startswith('command="') and ' auth re",restrict ssh-ed25519 ' in lines[0])
+        self.assertIn(' auth --fetch-only mirror",restrict ', lines[1])
+        self.assertTrue(all(',restrict ' in line and 'no-pty' not in line for line in lines))
+        self.assertIn('emergent-blu/blu.pub is not one public key', (self.root / 'githouse.log').read_text())
+
+    def test_write_authorized_keys_replaces_the_whole_file(self):
+        etc = self.tmp / 'etc'
+        (etc / 'keys' / 'emergent-re').mkdir(parents=True)
+        (etc / 'pushers.json').write_text(json.dumps({'emergent-re': ['re']}))
+        githouse.ETC = etc
+        (etc / 'keys' / 'emergent-re' / 're.pub').write_text('ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGQ6Z3lmZmJhcmJhemJhemJhemJhemJhemJhemJhemJhemJh\n')
+        githouse.write_authorized_keys()
+        self.assertIn('auth re"', (self.root / '.authorized_keys').read_text())
+        (etc / 'keys' / 'emergent-re' / 're.pub').unlink()  # the relay no longer has it: neither does sshd
+        githouse.write_authorized_keys()
+        self.assertEqual((self.root / '.authorized_keys').read_text(), '')
+
+    # --- hunter's mirror --------------------------------------------------------------
+
+    def test_the_mirror_has_everything_maybelle_has(self):
+        self.commit(self.work, 'mine')
+        self.push('re', 'HEAD:re/foo')
+        self.push('re', 'HEAD:re/gone')
+        self.push('re', ':re/gone')
+        mirror_root = self.tmp / 'mirror'
+        mirror_root.mkdir()
+        maybelle = self.root
+        githouse.ROOT = mirror_root
+        githouse.mirror_init(['cryptograss/magenta'], str(maybelle))
+        githouse.mirror(mirror_root / 'magenta.git')
+        githouse.ROOT = maybelle
+        copy = mirror_root / 'magenta.git'
+        self.assertEqual(githouse.refs(copy, 'refs/heads/'), githouse.refs(self.repo, 'refs/heads/'))
+        self.assertEqual(githouse.refs(copy, 'refs/closed/'), githouse.refs(self.repo, 'refs/closed/'))
+        self.assertEqual(githouse.git(copy, 'symbolic-ref', 'HEAD').strip(), 'refs/heads/main')
+        self.assertIn('re/foo', json.loads((mirror_root / 'branches.json').read_text())['magenta']['live'])
+        # Deleted on maybelle: gone from the mirror at the next fetch.
+        self.push('re', ':re/foo')
+        githouse.ROOT = mirror_root
+        githouse.mirror(copy)
+        githouse.ROOT = maybelle
+        self.assertNotIn('re/foo', githouse.refs(copy, 'refs/heads/'))
 
     # --- the forced command ---------------------------------------------------------
+
+    def test_auth_fetch_only(self):
+        self.assertEqual(githouse.auth('mirror', "git-upload-pack 'magenta.git'", fetch_only=True), ('git-upload-pack', self.repo))
+        with self.assertRaises(PermissionError):
+            githouse.auth('mirror', "git-receive-pack 'magenta.git'", fetch_only=True)
 
     def test_auth(self):
         self.assertEqual(githouse.auth('re', "git-receive-pack 'magenta.git'"), ('git-receive-pack', self.repo))

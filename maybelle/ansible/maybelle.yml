@@ -15,6 +15,22 @@
     github_repo_url: "https://github.com/cryptograss/justinholmes.com" # TODO: make this dynamic?  Certainly it will change with the repo rename.
     jenkins_home: "/var/jenkins_home"
     caddy_config_type: "maybelle"  # Use maybelle-specific Caddyfile template
+    # githouse, our canonical copies of the repositories (shared/ansible/roles/githouse;
+    # Cryptograss:Moods/ramp/Plan, section 3). Reached by hunter's containers on the
+    # private network only: never a public address here.
+    githouse_dir: /mnt/persist/githouse
+    githouse_bind: "10.0.0.2"
+    githouse_port: 2222
+    githouse_repos: "{{ lookup('file', playbook_dir + '/../../shared/githouse/repos.txt').splitlines() | select('match', '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$') | list }}"
+    # Who may push, and as whom: each hunter container (hunter/ansible/inventory.yml
+    # users[].name) and the names its relayed keys may vouch for. The trust anchor:
+    # a key hunter relays under any other name is ignored. hunter's own mirror
+    # key fetches only.
+    githouse_pushers:
+      emergent-magent: [magent]
+      emergent-re: [re]
+      emergent-blu: [blu]
+      hunter: {names: [mirror], fetch_only: true}
 
   pre_tasks:
     - name: Install community.docker collection
@@ -650,6 +666,10 @@
         job: "/usr/local/bin/pull-hunter-vcs.sh >> /var/log/pull-hunter-vcs.log 2>&1"
         minute: "20"
 
+    - name: githouse, our canonical copies of the repositories (pushes from hunter's containers land here)
+      include_role:
+        name: githouse
+
     - name: Remove old rsync cron if exists
       ansible.builtin.cron:
         name: "push sites to prod"
@@ -1096,6 +1116,8 @@
                 - /mnt/persist/magenta/wiki_names:/etc/magenta/wiki_names:ro
                 - /mnt/persist/magenta/backups:/mnt/persist/magenta/backups:ro
                 - /mnt/persist/magenta/memory-lane-cache:/var/cache/memory-lane
+                # githouse's branches.json (every repository's branches), served at /api/branches/
+                - {{ githouse_dir }}/git:/srv/git:ro
               networks:
                 - memory-lane-net
               restart: unless-stopped

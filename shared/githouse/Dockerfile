@@ -1,6 +1,6 @@
-# githouse: our canonical clones, at /srv/git (githouse.py). sshd for pushes,
-# as the git user, each key's forced command naming who it is; the fetch loop
-# beside it. Its tests run as it's built.
+# githouse (githouse.py): on maybelle, our canonical copies and sshd for pushes;
+# on hunter, the read-only mirror of them (GITHOUSE_MODE). Its tests run as
+# it is built.
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends git openssh-server openssh-client python3 ca-certificates \
     && rm -rf /var/lib/apt/lists/*

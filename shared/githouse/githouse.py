@@ -1,33 +1,50 @@
 #!/usr/bin/env python3
-"""githouse: our canonical clones of the repositories, on hunter, at /srv/git.
+"""githouse: our canonical copies of the repositories, on maybelle, at /srv/git.
 
-The ramp, Phase 1 (Justin, re and magent in #ramp, 31 Oct - 1 Nov 2026):
+The ramp, Phase 1 (Justin, re and magent in #ramp, 30 Oct - 6 Nov 2026;
+the plan: Cryptograss:Moods/ramp/Plan, section 3). maybelle is the
+integrator: the copy deploys come from lives there, not on hunter, which is
+meant to be cheap to lose.
 
-* A bare repository per repository we work on, /srv/git/<name>.git. Each
-  container clones from it (read-only, mounted at /srv/git), not from GitHub.
-* GitHub's branches -- main, master, production, release/* -- are GitHub's:
-  fetched every 60 seconds, the repositories staggered across the minute,
-  forced and pruned to match. Nobody pushes them here.
-* Everyone else's are their own: re pushes re/*, magent magent/*, justin
-  justin/*, over ssh as the git user, each key's forced command naming who it
-  is (`githouse auth <name>`). No other branches, and no tags. The fetch never
-  touches these, so a push can't be clobbered by a fetch in flight.
+* A bare repository per repository we work on, /srv/git/<name>.git.
+* GitHub's branches -- main, master, production, release/* -- and pull
+  requests' heads are GitHub's: fetched every 60 seconds, the repositories
+  staggered across the minute, forced and pruned to match. Nobody pushes them
+  here. Until the flip, merges still happen on GitHub, and this copy lags by
+  up to a minute.
+* Everyone else's branches are their own: re pushes re/*, magent magent/*,
+  over ssh as the git user, on maybelle's private network only. Each key's
+  forced command names who it is (`githouse auth <name>`), and the hook lets
+  that name push <name>/* and nothing else: no other branches, no tags. The
+  fetch never touches these, so a push can't be clobbered by a fetch in
+  flight, and nothing deletes them on its own.
+* Keys come from the emergents' containers on hunter, which make their own
+  (Justin, 1 Nov: not a vault secret). The public halves are pulled from
+  hunter into /etc/githouse/keys/<container>/<name>.pub; pushers.json, from
+  maybelle's inventory, says which names each container may vouch for, and
+  that is the only trust anchor: hunter is a relay. One key per name; a
+  missing file skips the name; nothing is carried forward. hunter's own
+  mirror key is fetch-only (`auth --fetch-only`): hunter can't mint itself a
+  pushable identity.
 * A branch's name is used once. A mergeable is called <repo>:<branch>
   (maybelle-config:re/fix-mtime-guard) for its whole life; when it merges its
   ref moves to refs/merged/<branch>, when its owner deletes it to
   refs/closed/<branch>, and a push creating either name again is refused,
   with the next free one offered. Merged means: its tip is in a GitHub
   branch's history but not on that branch's own line (first parents) -- a
-  merge commit brought it in. So a branch just cut from main, with nothing on
-  it yet, isn't merged.
-* What's pushed here goes on to GitHub (post-receive), with the deploy key,
-  if the vault has one; a forward that fails is logged, never retried by
-  deleting anything.
+  merge commit brought it in. A branch just cut from main, with nothing on
+  it yet, isn't merged. (Squash and rebase merges break this: merge commits
+  only, on every repository here.)
+* What's pushed here goes on to GitHub (post-receive) with the deploy key,
+  so pull requests keep working until the flip; a forward that fails is
+  logged, never retried by deleting anything.
 * branches.json, beside the repositories: every repository's branches, live,
-  merged and closed, for magenta's autocomplete.
+  merged and closed, for magenta's autocomplete (memory-lane serves it).
+* `githouse mirror`, on hunter: a read-only copy of all of it, fetched from
+  maybelle every minute and mounted into every container, so clones are
+  instant. Nothing on it needs backing up.
 
-One file, so it can be tested against real repositories (test_githouse.py):
-`githouse auth`, `pre-receive`, `post-receive`, `init`, `fetch`, `loop`.
+One file, so it can be tested against real repositories (test_githouse.py).
 """
 
 import fnmatch
@@ -40,16 +57,13 @@ import time
 from pathlib import Path
 
 ROOT = Path(os.environ.get('GITHOUSE_ROOT', '/srv/git'))
+ETC = Path(os.environ.get('GITHOUSE_ETC', '/etc/githouse'))
 OWNED = ('main', 'master', 'production', 'release/*')  # GitHub's branches
 NAME = re.compile(r'[a-z][a-z0-9-]{0,31}')
 BRANCH = re.compile(r'[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*')
+PUBKEY = re.compile(r'^(sk-)?(ssh-ed25519|ecdsa-sha2-nistp\d+|ssh-rsa)(@openssh\.com)? [A-Za-z0-9+/=]+( \S+)?$')
 ZERO = '0' * 40
 EVERY = 60  # seconds between fetches of any one repository
-# With the vault's deploy key (entrypoint.sh puts it here), GitHub is reached over ssh: the fetch,
-# and the forward a push's hook makes, whoever's session that is.
-if (ROOT / '.deploy_key').exists() and 'GIT_SSH_COMMAND' not in os.environ:
-    os.environ['GIT_SSH_COMMAND'] = (f"ssh -i {ROOT / '.deploy_key'} -o StrictHostKeyChecking=accept-new "
-                                     f"-o UserKnownHostsFile={ROOT / '.known_hosts'}")
 
 
 def git(repo, *args, check=True, env=None):
@@ -61,6 +75,12 @@ def git(repo, *args, check=True, env=None):
             raise RuntimeError(f"git {' '.join(args)}: {done.stderr.strip()}")
         return None
     return done.stdout
+
+
+def ssh_with(key):
+    """GIT_SSH_COMMAND for a key kept beside the repositories (the deploy key, or the mirror's)."""
+    return (f"ssh -i {key} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new "
+            f"-o UserKnownHostsFile={ROOT / '.known_hosts'}")
 
 
 def owned(branch):
@@ -95,13 +115,15 @@ def next_free(repo, branch):
 _COMMAND = re.compile(r"^git[ -](upload-pack|receive-pack) '?/?([A-Za-z0-9._-]+?)(?:\.git)?/?'?$")
 
 
-def auth(user, command):
+def auth(user, command, fetch_only=False):
     """The forced command: (program, repository path) for a key's ssh command, or raise."""
     if not NAME.fullmatch(user or ''):
         raise PermissionError('this key names nobody')
     found = _COMMAND.match((command or '').strip())
     if not found:
         raise PermissionError('only git fetch and git push here')
+    if fetch_only and found.group(1) != 'upload-pack':
+        raise PermissionError(f'{user} fetches only')
     repo = ROOT / f'{found.group(2)}.git'
     if repo.resolve().parent != ROOT.resolve() or not (repo / 'HEAD').exists():
         raise PermissionError(f'no repository {found.group(2)} here')
@@ -141,6 +163,43 @@ def after(repo, user, updates, forward=None):
         if done.returncode != 0:
             log(f'{repo.name}: forwarding {user}\'s push to GitHub failed: {done.stderr.strip()}')
     publish()
+
+
+def authorized_keys(keys_dir, pushers):
+    """sshd's authorized_keys from the relayed public keys: for each container pushers.json names,
+    each name it may vouch for whose <name>.pub is there and is one key. A key may only run
+    `githouse auth <name>` (fetch-only where pushers.json says so): no shell, no forwarding."""
+    lines = []
+    for container, given in sorted(pushers.items()):
+        names = given.get('names', []) if isinstance(given, dict) else given
+        fetch_only = isinstance(given, dict) and given.get('fetch_only', False)
+        for name in names:
+            if not NAME.fullmatch(str(name)):
+                continue
+            path = Path(keys_dir) / str(container) / f'{name}.pub'
+            if not path.is_file():
+                continue
+            key = path.read_text().strip()
+            if '\n' in key or not PUBKEY.match(key):
+                log(f'{container}/{name}.pub is not one public key; skipped')
+                continue
+            flag = ' --fetch-only' if fetch_only else ''
+            lines.append(f'command="{sys.executable} {Path(__file__).resolve()} auth{flag} {name}",restrict {key}')
+    return '\n'.join(lines) + ('\n' if lines else '')
+
+
+def write_authorized_keys():
+    """The keys as relayed now, to the file sshd reads. Nothing kept from before."""
+    pushers_file = ETC / 'pushers.json'
+    pushers = json.loads(pushers_file.read_text()) if pushers_file.exists() else {}
+    text = authorized_keys(ETC / 'keys', pushers)
+    path = ROOT / '.authorized_keys'
+    if not path.exists() or path.read_text() != text:
+        temp = path.with_suffix('.tmp')
+        temp.write_text(text)
+        temp.chmod(0o644)
+        temp.replace(path)
+        log(f'authorized_keys: {text.count(chr(10))} key(s)')
 
 
 # --- GitHub's branches -------------------------------------------------------------
@@ -196,7 +255,7 @@ def _ancestor(repo, a, b):
     return subprocess.run(['git', '--git-dir', str(repo), 'merge-base', '--is-ancestor', a, b]).returncode == 0
 
 
-# --- setting up, and the loop --------------------------------------------------------
+# --- setting up, and the loops --------------------------------------------------------
 
 def init(full_names, url='https://github.com/{}.git', forward=False):
     """A bare repository for each owner/name not here yet, its github remote, and its hooks."""
@@ -227,6 +286,7 @@ def publish():
     path = ROOT / 'branches.json'
     temp = path.with_suffix('.json.tmp')
     temp.write_text(json.dumps(found, indent=1, sort_keys=True))
+    temp.chmod(0o644)
     temp.replace(path)
 
 
@@ -235,56 +295,62 @@ def log(line):
         f.write(f"{time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())} {line}\n")
 
 
-def serve(port=8091):
-    """branches.json over http, and nothing else: Caddy publishes it at git.<hunter>/branches.json."""
-    import threading
-    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-
-    class Branches(BaseHTTPRequestHandler):
-        def do_GET(self):
-            path = ROOT / 'branches.json'
-            if self.path.split('?')[0] != '/branches.json' or not path.exists():
-                self.send_error(404)
-                return
-            body = path.read_bytes()
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json')
-            self.send_header('Access-Control-Allow-Origin', '*')
-            self.send_header('Content-Length', str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-
-        def log_message(self, *args):
-            pass
-
-    server = ThreadingHTTPServer(('0.0.0.0', port), Branches)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
-    return server
-
-
-def loop():
-    """Fetch every repository once a minute, one after another across the minute."""
-    serve()
+def paced(step):
+    """Run step(repo) for every repository, one after another across EVERY seconds, forever."""
     while True:
         repos = sorted(ROOT.glob('*.git'))
         for repo in repos:
             started = time.monotonic()
             try:
-                fetch(repo)
+                step(repo)
             except Exception as e:
-                log(f'{repo.name}: fetch failed: {e}')
+                log(f'{repo.name}: {e}')
             time.sleep(max(0.0, EVERY / max(len(repos), 1) - (time.monotonic() - started)))
+        if not repos:
+            time.sleep(EVERY)
+
+
+def loop():
+    """On maybelle: GitHub's branches every minute, and the keys as relayed."""
+    def step(repo):
+        write_authorized_keys()
+        fetch(repo)
+    paced(step)
+
+
+def mirror_init(full_names, upstream):
+    """On hunter: a bare repository per name, its remote the copy on maybelle."""
+    for full_name in full_names:
+        name = full_name.split('/', 1)[1]
+        repo = ROOT / f'{name}.git'
+        if not (repo / 'HEAD').exists():
+            subprocess.run(['git', 'init', '--quiet', '--bare', str(repo)], check=True)
+        git(repo, 'remote', 'remove', 'maybelle', check=False)
+        git(repo, 'remote', 'add', 'maybelle', f'{upstream.rstrip("/")}/{name}.git')
+        git(repo, 'config', 'uploadpack.allowReachableSHA1InWant', 'true')
+
+
+def mirror(repo):
+    """Everything maybelle has, as it has it: every ref forced, the gone ones pruned, HEAD the same."""
+    git(repo, 'fetch', '--quiet', '--no-tags', '--prune', 'maybelle', '+refs/*:refs/*')
+    default = re.search(r'^ref: (refs/heads/\S+)\tHEAD$', git(repo, 'ls-remote', '--symref', 'maybelle', 'HEAD'), re.M)
+    if default:
+        git(repo, 'symbolic-ref', 'HEAD', default.group(1))
+    publish()
 
 
 def main(argv):
-    command = argv[1] if len(argv) > 1 else ''
-    if command == 'auth':  # authorized_keys: command="githouse auth re"
+    args = [a for a in argv[1:] if not a.startswith('--')]
+    flags = {a for a in argv[1:] if a.startswith('--')}
+    command = args[0] if args else ''
+    if command == 'auth':  # authorized_keys: command="githouse auth re", or auth --fetch-only hunter
         try:
-            program, repo = auth(argv[2] if len(argv) > 2 else '', os.environ.get('SSH_ORIGINAL_COMMAND', ''))
+            program, repo = auth(args[1] if len(args) > 1 else '', os.environ.get('SSH_ORIGINAL_COMMAND', ''),
+                                 fetch_only='--fetch-only' in flags)
         except PermissionError as e:
             sys.stderr.write(f'githouse: {e}\n')
             return 1
-        os.environ['GITHOUSE_USER'] = argv[2]
+        os.environ['GITHOUSE_USER'] = args[1]
         os.execvp(program, [program, str(repo)])
     if command in ('pre-receive', 'post-receive'):
         repo = Path(os.environ.get('GIT_DIR', '.')).resolve()
@@ -297,9 +363,12 @@ def main(argv):
             return 1 if refused else 0
         after(repo, user, updates)
         return 0
+    key = ROOT / '.deploy_key'
+    if key.exists() and 'GIT_SSH_COMMAND' not in os.environ:
+        os.environ['GIT_SSH_COMMAND'] = ssh_with(key)
     if command == 'init':
         url = os.environ.get('GITHOUSE_URL', 'https://github.com/{}.git')
-        init(argv[2:], url=url, forward=os.environ.get('GITHOUSE_FORWARD') == 'true')
+        init(args[1:], url=url, forward=os.environ.get('GITHOUSE_FORWARD') == 'true')
         return 0
     if command == 'fetch':
         for repo in sorted(ROOT.glob('*.git')):
@@ -308,6 +377,9 @@ def main(argv):
         return 0
     if command == 'loop':
         loop()
+    if command == 'mirror':  # mirror <upstream> <owner/name>...: hunter's copy of maybelle's
+        mirror_init(args[2:], args[1])
+        paced(mirror)
     sys.stderr.write(__doc__)
     return 2
 

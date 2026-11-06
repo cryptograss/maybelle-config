@@ -45,11 +45,6 @@ arthel.{{ user.name }}.{{ base_domain }} {
 
 {% endfor %}
 
-# githouse: its branches.json (every repository's branches, live, merged and closed), for magenta's autocomplete
-git.{{ base_domain }} {
-    reverse_proxy localhost:8091
-}
-
 # faces: whose faces are in a picture (memory-lane faces/), for Moods and PickiPedia
 faces.{{ base_domain }} {
     reverse_proxy localhost:8090
