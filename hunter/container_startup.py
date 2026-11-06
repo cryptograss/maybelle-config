@@ -950,18 +950,19 @@ GITHOUSE_KEYS = Path('/srv/githouse-keys')  # where this container publishes its
 _SSH_TO = re.compile(r'[A-Za-z0-9.-]+:\d+')
 
 
-def githouse_key(name, home):
+def githouse_key(name, home, publish=True):
     """The user's key to githouse, made here the first time (not a vault secret: it means nothing
     outside hunter; Justin, #ramp, 1 Nov 2026). Its public half is published for maybelle to pick
     up, as <name>.pub: maybelle takes it only if its inventory lets this container vouch for that
-    name. Returns the private key's path."""
+    name. Not published where the container isn't the name's own (the magent user exists in every
+    container; only emergent-magent's magent is magent). Returns the private key's path."""
     key = home / '.config' / 'magenta' / 'githouse_key'
     if not key.exists():
         key.parent.mkdir(parents=True, exist_ok=True)
         subprocess.run(['ssh-keygen', '-q', '-t', 'ed25519', '-N', '', '-C', f'{name}@githouse', '-f', str(key)], check=True)
         for p in (key.parent, key, key.with_suffix('.pub')):
             shutil.chown(p, user=name, group=name)
-    if GITHOUSE_KEYS.is_dir():
+    if publish and GITHOUSE_KEYS.is_dir():
         pub = key.with_suffix('.pub').read_text()
         out = GITHOUSE_KEYS / f'{name}.pub'
         if not out.exists() or out.read_text() != pub:
@@ -987,11 +988,11 @@ def githouse_steps(name, target, key, ssh_to=None):
     return steps
 
 
-def setup_githouse(name, home):
+def setup_githouse(name, home, publish=True):
     """The user's way to githouse: its key, made and published, and `hunter` in each clone githouse has.
     A push before maybelle has picked the key up (within two minutes of a first start) is refused with
     "Permission denied (publickey)": try again."""
-    key = githouse_key(name, home)
+    key = githouse_key(name, home, publish)
     workspace = home / 'workspace'
     for target in sorted(workspace.iterdir()) if workspace.exists() else []:
         if (target / '.git').exists():
@@ -1165,7 +1166,8 @@ def main():
         setup_host_files()
         setup_workspace()
         try:
-            setup_githouse('magent', Path('/home/magent'))
+            # Its key reaches maybelle only from magent's own container: the same unix user is in all of them.
+            setup_githouse('magent', Path('/home/magent'), publish=os.environ.get('DEVELOPER_NAME', '') == 'emergent-magent')
         except Exception as e:  # githouse's mirror or the relay missing stops nothing else
             logger.error(f"githouse for magent: {e}")
         setup_claude_config()

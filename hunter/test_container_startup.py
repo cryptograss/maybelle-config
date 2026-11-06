@@ -382,3 +382,6 @@ class GithouseRemoteTest(unittest.TestCase):
             first = key.read_bytes()
             container_startup.githouse_key('re', home)  # again: the same key
             self.assertEqual(key.read_bytes(), first)
+            (relay / 're.pub').unlink()
+            container_startup.githouse_key('re', home, publish=False)  # magent in re's container: a key, not published
+            self.assertFalse((relay / 're.pub').exists())
