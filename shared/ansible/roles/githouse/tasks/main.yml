@@ -102,11 +102,16 @@
   args:
     chdir: "{{ githouse_dir }}"
 
+# `docker port githouse 22` prints one "<address>:<port>" line per binding (re's review, 6 Nov: the
+# first check here matched the line's start and failed every correct deploy). Every line must carry the
+# private address, and there must be one.
 - name: githouse's ssh is published on the private address and nowhere else
   command: docker port githouse 22
   register: githouse_port_check
   changed_when: false
-  failed_when: githouse_port_check.stdout_lines | reject('match', '^' ~ (githouse_bind | regex_escape) ~ ':') | list | length > 0
+  failed_when: >-
+    githouse_port_check.stdout_lines | length == 0
+    or githouse_port_check.stdout_lines | reject('search', (githouse_bind | regex_escape) ~ ':' ~ githouse_port ~ '$') | list | length > 0
 
 - name: githouse has the repositories (its first fetch can take a while; arthel is big)
   stat:

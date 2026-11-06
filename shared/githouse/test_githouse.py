@@ -1,5 +1,6 @@
 """githouse against real repositories: a stand-in GitHub, githouse's clone of it, and someone's working copy."""
 
+import io
 import json
 import os
 import subprocess
@@ -232,6 +233,16 @@ class GithouseTest(unittest.TestCase):
         githouse.mirror(copy)
         githouse.ROOT = maybelle
         self.assertNotIn('re/foo', githouse.refs(copy, 'refs/heads/'))
+
+    def test_the_hooks_carry_the_deploy_key(self):
+        # post-receive runs under sshd's forced command, without entrypoint.sh's exports: main() sets
+        # GIT_SSH_COMMAND from the deploy key before dispatching, so the forward to GitHub has it.
+        (self.root / '.deploy_key').write_text('not really a key\n')
+        env = {k: v for k, v in os.environ.items() if k != 'GIT_SSH_COMMAND'}
+        env.update(GIT_DIR=str(self.repo), GITHOUSE_USER='re')
+        with unittest.mock.patch.dict(os.environ, env, clear=True), unittest.mock.patch('sys.stdin', io.StringIO('')):
+            self.assertEqual(githouse.main(['githouse', 'post-receive']), 0)
+            self.assertIn(str(self.root / '.deploy_key'), os.environ.get('GIT_SSH_COMMAND', ''))
 
     # --- the forced command ---------------------------------------------------------
 

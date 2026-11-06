@@ -343,6 +343,11 @@ def main(argv):
     args = [a for a in argv[1:] if not a.startswith('--')]
     flags = {a for a in argv[1:] if a.startswith('--')}
     command = args[0] if args else ''
+    # Before anything: the hooks run under sshd's forced command, with none of entrypoint.sh's exports,
+    # and post-receive's forward to GitHub needs the deploy key too (re's review of #250, 6 Nov).
+    key = ROOT / '.deploy_key'
+    if key.exists() and 'GIT_SSH_COMMAND' not in os.environ:
+        os.environ['GIT_SSH_COMMAND'] = ssh_with(key)
     if command == 'auth':  # authorized_keys: command="githouse auth re", or auth --fetch-only hunter
         try:
             program, repo = auth(args[1] if len(args) > 1 else '', os.environ.get('SSH_ORIGINAL_COMMAND', ''),
@@ -363,9 +368,6 @@ def main(argv):
             return 1 if refused else 0
         after(repo, user, updates)
         return 0
-    key = ROOT / '.deploy_key'
-    if key.exists() and 'GIT_SSH_COMMAND' not in os.environ:
-        os.environ['GIT_SSH_COMMAND'] = ssh_with(key)
     if command == 'init':
         url = os.environ.get('GITHOUSE_URL', 'https://github.com/{}.git')
         init(args[1:], url=url, forward=os.environ.get('GITHOUSE_FORWARD') == 'true')
