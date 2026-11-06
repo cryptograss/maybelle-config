@@ -20,11 +20,11 @@ mkdir -p /srv/git/.host-keys
 [ -f /srv/git/.host-keys/ssh_host_ed25519_key ] || ssh-keygen -q -t ed25519 -N '' -f /srv/git/.host-keys/ssh_host_ed25519_key
 chown -R git:git /srv/git/.host-keys
 # The deploy key, if the vault has one: fetch over ssh, and forward pushes on to GitHub (githouse.py reads it).
-if [ -s /etc/githouse/deploy_key ]; then
-    install -o git -g git -m 600 /etc/githouse/deploy_key /srv/git/.deploy_key
+if [ -s /etc/githouse/deploy_key.b64 ] && base64 -d /etc/githouse/deploy_key.b64 > /srv/git/.deploy_key.new 2>/dev/null && [ -s /srv/git/.deploy_key.new ]; then
+    install -o git -g git -m 600 /srv/git/.deploy_key.new /srv/git/.deploy_key && rm -f /srv/git/.deploy_key.new
     export GITHOUSE_URL='git@github.com:{}.git' GITHOUSE_FORWARD=true
 else
-    rm -f /srv/git/.deploy_key
+    rm -f /srv/git/.deploy_key /srv/git/.deploy_key.new
     echo "githouse: no deploy key; fetching over https, pushes kept here, not forwarded to GitHub" >&2
 fi
 runuser -u git -- python3 /opt/githouse/githouse.py init $GITHOUSE_REPOS

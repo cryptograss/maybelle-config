@@ -45,10 +45,11 @@
     content: "{{ githouse_pushers | to_nice_json }}\n"
     mode: '0644'
 
+# As the vault holds it, base64; entrypoint.sh decodes it (so the deploy logic renders without the vault).
 - name: "GitHub's key for githouse (Jenkins's, from the vault): fetch over ssh, forward pushes"
   copy:
-    content: "{{ jenkins_github_ssh_key | b64decode }}"
-    dest: "{{ githouse_dir }}/etc/deploy_key"
+    content: "{{ jenkins_github_ssh_key | default('') }}"
+    dest: "{{ githouse_dir }}/etc/deploy_key.b64"
     mode: '0600'
   no_log: true
 
