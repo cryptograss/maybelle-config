@@ -1,9 +1,12 @@
 ---
-# Rabbithole shell — static files for the right-pane editor experience.
-# Served by Caddy at https://pickipedia.xyz/rabbithole/, same-origin
-# with the wiki so the iframe inside the shell can use the user's
-# pickipedia session (mw.Api save) without CORS or X-Frame-Options
-# friction.
+# Rabbithole: the installable player, served by Caddy at
+# https://pickipedia.xyz/rabbithole/, same-origin with the wiki so the app's
+# relative /api.php calls carry the reader's session (the editor saves with
+# it) and the pane can fetch articles without CORS friction.
+#
+# Since the Vue conversion (rabbithole, November 2026) the thing served is a
+# build: `npm ci && npm run build` writes dist/, and Caddy's root is that.
+# Node comes from NodeSource because the distro's is too old for Vite.
 
 - name: Create rabbithole web root
   file:
@@ -13,6 +16,24 @@
     group: caddy
     mode: '0755'
 
+- name: NodeSource signing key
+  get_url:
+    url: https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key
+    dest: /usr/share/keyrings/nodesource.asc
+    mode: '0644'
+
+- name: NodeSource repository (Node 22)
+  apt_repository:
+    repo: "deb [signed-by=/usr/share/keyrings/nodesource.asc] https://deb.nodesource.com/node_22.x nodistro main"
+    filename: nodesource
+    state: present
+
+- name: Node.js
+  apt:
+    name: nodejs
+    state: present
+    update_cache: yes
+
 - name: Clone or update rabbithole source
   git:
     repo: https://github.com/cryptograss/rabbithole.git
@@ -20,3 +41,29 @@
     version: main
     force: yes
   become_user: caddy
+  register: rabbithole_source
+
+- name: Is there a build already?
+  stat:
+    path: /var/www/rabbithole/dist/index.html
+  register: rabbithole_dist
+
+# npm writes its cache under $HOME; caddy's home is not writable, so point
+# it at the checkout.
+- name: Install rabbithole's dependencies
+  command: npm ci --no-audit --no-fund
+  args:
+    chdir: /var/www/rabbithole
+  environment:
+    HOME: /var/www/rabbithole
+  become_user: caddy
+  when: rabbithole_source.changed or not rabbithole_dist.stat.exists
+
+- name: Build rabbithole
+  command: npm run build
+  args:
+    chdir: /var/www/rabbithole
+  environment:
+    HOME: /var/www/rabbithole
+  become_user: caddy
+  when: rabbithole_source.changed or not rabbithole_dist.stat.exists

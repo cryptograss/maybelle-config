@@ -52,13 +52,14 @@
       # {{ domain_name }} would defeat their entire purpose: they exist for
       # readers on networks that block the canonical name outright.
       {{ domain_name }}, {{ www_domain }}{% for alias in alias_domains | default([]) %}, {{ alias }}{% endfor %} {
-          # Static files for the Rabbithole shell. Served same-origin
-          # with the wiki so the iframe right pane (loading
-          # /wiki/Release:.../Metadata) shares cookies and can call
-          # mw.Api directly.
+          # Rabbithole, the installable player: the Vite build in dist/,
+          # served same-origin with the wiki so its /api.php calls carry
+          # the reader's session. Any path inside /rabbithole/ that is not
+          # a file is the app (its service worker and manifest live here
+          # too).
           handle_path /rabbithole/* {
-              root * /var/www/rabbithole
-              try_files {path} {path}/ /shell.html
+              root * /var/www/rabbithole/dist
+              try_files {path} {path}/ /index.html
               file_server
           }
 
