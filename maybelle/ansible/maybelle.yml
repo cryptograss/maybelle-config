@@ -1016,6 +1016,15 @@
           # Unset: lists tick on their own, minutes later.
           GITHUB_WEBHOOK_SECRET={{ memory_lane_github_webhook_secret }}
           {% endif %}
+          {% if memory_lane_wiki_hook_secret is defined %}
+          # PickiPedia pushes each save, move and upload to
+          # https://magenta.cryptograss.live/api/wiki/hook/ (memory-lane
+          # services/wiki_hooks.py), signed with this: the same value is the
+          # wiki's $wgPickiPediaContentMagentaHookSecret (LocalSettings.local.php
+          # on the wiki host). Make it with `openssl rand -hex 32`. Unset: the
+          # minute sweep alone, and no push is expected.
+          WIKI_HOOK_SECRET={{ memory_lane_wiki_hook_secret }}
+          {% endif %}
           {% if pickipedia_upload_oauth_client_id is defined and pickipedia_upload_oauth_client_secret is defined %}
           # "→ PickiPedia" under a picture sent into a Mood (memory-lane
           # services/wiki_upload.py): a second OAuth 2 consumer, "magenta
