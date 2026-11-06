@@ -1,0 +1,122 @@
+---
+# githouse, on maybelle: our canonical copies of the repositories, at
+# {{ githouse_dir }}/git (shared/githouse/githouse.py says the rules;
+# Cryptograss:Moods/ramp/Plan, section 3). One container: sshd for pushes on
+# the private network only, GitHub's branches fetched every minute, pushes
+# forwarded to GitHub with Jenkins's GitHub key. Who may push comes from
+# hunter's containers (their public keys, pulled here every minute by root's
+# hunter key) as {{ githouse_pushers }} allows: that mapping, from the
+# inventory, is the trust anchor; hunter is a relay. hunter's mirror key
+# fetches only. memory-lane reads branches.json from {{ githouse_dir }}/git.
+#
+# Needs: githouse_dir, githouse_bind (a private address), githouse_port,
+# githouse_pushers ({container: [names] | {names, fetch_only}}),
+# githouse_repos (owner/name list), jenkins_github_ssh_key (vault, b64).
+
+- name: githouse listens on the private network only, never 0.0.0.0
+  assert:
+    that:
+      - githouse_bind is match('^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.)')
+      - githouse_port | int > 1024
+    fail_msg: "githouse_bind must be a private address ({{ githouse_bind }}); this is a production box"
+
+- name: Where githouse keeps the repositories, its keys and its build
+  file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0755'
+  loop:
+    - "{{ githouse_dir }}"
+    - "{{ githouse_dir }}/git"
+    - "{{ githouse_dir }}/etc"
+    - "{{ githouse_dir }}/etc/keys"
+    - "{{ githouse_dir }}/build"
+
+- name: githouse's code (its tests run against real repositories as the image is built)
+  copy:
+    src: "{{ playbook_dir }}/../../shared/githouse/{{ item }}"
+    dest: "{{ githouse_dir }}/build/{{ item }}"
+    mode: '0644'
+  loop: [Dockerfile, githouse.py, test_githouse.py, entrypoint.sh, sshd_config]
+
+- name: Who may push, and as whom (the inventory's word, not hunter's)
+  copy:
+    dest: "{{ githouse_dir }}/etc/pushers.json"
+    content: "{{ githouse_pushers | to_nice_json }}\n"
+    mode: '0644'
+
+# As the vault holds it, base64; entrypoint.sh decodes it (so the deploy logic renders without the vault).
+- name: "GitHub's key for githouse (Jenkins's, from the vault): fetch over ssh, forward pushes"
+  copy:
+    content: "{{ jenkins_github_ssh_key | default('') }}"
+    dest: "{{ githouse_dir }}/etc/deploy_key.b64"
+    mode: '0600'
+  no_log: true
+
+# The containers on hunter write their public keys to /opt/magenta/githouse/keys/<container>/<name>.pub
+# (hunter/container_startup.py, githouse_key); pulled whole, so a key gone there is gone here.
+- name: The script that pulls the relayed public keys from hunter
+  copy:
+    dest: /usr/local/bin/pull-githouse-keys.sh
+    mode: '0750'
+    content: |
+      #!/bin/bash
+      set -euo pipefail
+      rsync -a --delete --include='*/' --include='*.pub' --exclude='*' \
+        root@hunter.cryptograss.live:/opt/magenta/githouse/keys/ {{ githouse_dir }}/etc/keys/
+
+- name: Pull the relayed keys every minute
+  ansible.builtin.cron:
+    name: "pull githouse keys from hunter"
+    job: "/usr/local/bin/pull-githouse-keys.sh >> /var/log/pull-githouse-keys.log 2>&1"
+
+- name: Pull them now, so the first deploy has them
+  command: /usr/local/bin/pull-githouse-keys.sh
+  changed_when: false
+  failed_when: false
+
+- name: The githouse compose file
+  copy:
+    dest: "{{ githouse_dir }}/docker-compose.yml"
+    mode: '0644'
+    content: |
+      services:
+        githouse:
+          build: ./build
+          container_name: githouse
+          environment:
+            - GITHOUSE_MODE=server
+            - GITHOUSE_REPOS={{ githouse_repos | join(' ') }}
+          volumes:
+            - {{ githouse_dir }}/git:/srv/git
+            - {{ githouse_dir }}/etc:/etc/githouse:ro
+          # ssh on the private network only (githouse_bind is asserted private above).
+          ports:
+            - "{{ githouse_bind }}:{{ githouse_port }}:22"
+          mem_limit: 512m
+          cpus: 0.5
+          restart: unless-stopped
+
+- name: Start githouse
+  command: docker compose up -d --build --force-recreate
+  args:
+    chdir: "{{ githouse_dir }}"
+
+# `docker port githouse 22` prints one "<address>:<port>" line per binding (re's review, 6 Nov: the
+# first check here matched the line's start and failed every correct deploy). Every line must carry the
+# private address, and there must be one.
+- name: githouse's ssh is published on the private address and nowhere else
+  command: docker port githouse 22
+  register: githouse_port_check
+  changed_when: false
+  failed_when: >-
+    githouse_port_check.stdout_lines | length == 0
+    or githouse_port_check.stdout_lines | reject('search', (githouse_bind | regex_escape) ~ ':' ~ githouse_port ~ '$') | list | length > 0
+
+- name: githouse has the repositories (its first fetch can take a while; arthel is big)
+  stat:
+    path: "{{ githouse_dir }}/git/branches.json"
+  register: githouse_branches
+  retries: 30
+  delay: 10
+  until: githouse_branches.stat.exists

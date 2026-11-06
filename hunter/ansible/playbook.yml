@@ -90,6 +90,10 @@
       failed_when: network_create.rc != 0 and 'already exists' not in network_create.stderr
       changed_when: network_create.rc == 0
 
+    - name: "githouse's mirror: maybelle's repositories, copied here for the containers to clone from"
+      include_role:
+        name: githouse-mirror
+
     # /opt/magenta/moods, mounted at /moods in every container: a directory per
     # Mood, with its clones and files (Cryptograss:Moods as Directories). The
     # agents are each their own unix user, so it belongs to the group moods

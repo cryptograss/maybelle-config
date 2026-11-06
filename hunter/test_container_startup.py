@@ -338,3 +338,47 @@ class EmergentEnvNamesTest(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class GithouseRemoteTest(unittest.TestCase):
+    """A clone's remote `hunter`: githouse's mirror, fetched from the mount, pushed to on maybelle with the user's key."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        (self.tmp / 'magenta.git').mkdir()
+        (self.tmp / 'magenta.git' / 'HEAD').write_text('ref: refs/heads/main\n')
+        patcher = mock.patch.object(container_startup, 'GITHOUSE', self.tmp)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.key = Path('/home/re/.config/magenta/githouse_key')
+
+    def test_fetch_from_the_mount_and_push_to_maybelle_over_ssh(self):
+        steps = container_startup.githouse_steps('re', Path('/home/re/workspace/magenta'), self.key, ssh_to='10.0.0.2:2222')
+        self.assertEqual(steps[:3], ['git -C /home/re/workspace/magenta remote remove hunter',
+                                     f"git -C /home/re/workspace/magenta remote add hunter {self.tmp / 'magenta.git'}",
+                                     'git -C /home/re/workspace/magenta remote set-url --push hunter ssh://git@10.0.0.2:2222/magenta.git'])
+        self.assertIn(f'core.sshCommand "ssh -i {self.key} -o IdentitiesOnly=yes', steps[3])
+        self.assertTrue(all("'" not in step for step in steps))  # they go inside run_command's single quotes
+
+    def test_without_githouse_ssh_fetch_only(self):
+        steps = container_startup.githouse_steps('blu', Path('/home/blu/workspace/magenta'), self.key, ssh_to='')
+        self.assertEqual(len(steps), 2)
+        self.assertFalse(any('--push' in step for step in steps))
+        self.assertEqual(len(container_startup.githouse_steps('blu', Path('/home/blu/workspace/magenta'), self.key, ssh_to='x; rm -rf /')), 2)
+
+    def test_nothing_for_a_repository_githouse_hasnt_got(self):
+        self.assertEqual(container_startup.githouse_steps('re', Path('/home/re/workspace/red'), self.key, ssh_to='10.0.0.2:2222'), [])
+        self.assertEqual(container_startup.reference(Path('/home/re/workspace/red')), '')
+        self.assertIn('--reference-if-able', container_startup.reference(Path('/home/re/workspace/magenta')))
+
+    def test_a_key_is_made_once_and_its_public_half_published(self):
+        home, relay = self.tmp / 'home', self.tmp / 'relay'
+        relay.mkdir()
+        with mock.patch.object(container_startup, 'GITHOUSE_KEYS', relay), mock.patch.object(container_startup.shutil, 'chown'):
+            key = container_startup.githouse_key('re', home)
+            self.assertTrue(key.exists() and key.with_suffix('.pub').exists())
+            self.assertEqual((relay / 're.pub').read_text(), key.with_suffix('.pub').read_text())
+            self.assertTrue((relay / 're.pub').read_text().startswith('ssh-ed25519 '))
+            first = key.read_bytes()
+            container_startup.githouse_key('re', home)  # again: the same key
+            self.assertEqual(key.read_bytes(), first)

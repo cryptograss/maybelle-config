@@ -932,9 +932,10 @@ def setup_agent(agent):
         if target.exists():
             run_command(f"git -C {target} pull --ff-only --quiet", user=name, check=False)
         else:
-            run_command(f"git clone --quiet https://github.com/{repo}.git {target}", user=name, check=False)
+            run_command(f"git clone --quiet {reference(target)}https://github.com/{repo}.git {target}", user=name, check=False)
     run_command(f"git config --global user.name {name}", user=name, check=False)
     run_command(f"git config --global user.email {name}@cryptograss.live", user=name, check=False)
+    setup_githouse(name, home)
     claude_dir = home / '.claude'
     claude_dir.mkdir(exist_ok=True)
     link_rules(home, agent.get('rules'), (pi_dir / 'AGENTS.md', claude_dir / 'CLAUDE.md'))
@@ -942,6 +943,61 @@ def setup_agent(agent):
         if p.exists():
             shutil.chown(p, user=name, group=name)
     logger.info(f"✓ Agent {name} set up as its own user ({agent.get('harness', 'claude-code')})")
+
+
+GITHOUSE = Path('/srv/git')              # githouse's mirror of our repositories, mounted read-only
+GITHOUSE_KEYS = Path('/srv/githouse-keys')  # where this container publishes its users' public keys
+_SSH_TO = re.compile(r'[A-Za-z0-9.-]+:\d+')
+
+
+def githouse_key(name, home):
+    """The user's key to githouse, made here the first time (not a vault secret: it means nothing
+    outside hunter; Justin, #ramp, 1 Nov 2026). Its public half is published for maybelle to pick
+    up, as <name>.pub: maybelle takes it only if its inventory lets this container vouch for that
+    name. Returns the private key's path."""
+    key = home / '.config' / 'magenta' / 'githouse_key'
+    if not key.exists():
+        key.parent.mkdir(parents=True, exist_ok=True)
+        subprocess.run(['ssh-keygen', '-q', '-t', 'ed25519', '-N', '', '-C', f'{name}@githouse', '-f', str(key)], check=True)
+        for p in (key.parent, key, key.with_suffix('.pub')):
+            shutil.chown(p, user=name, group=name)
+    if GITHOUSE_KEYS.is_dir():
+        pub = key.with_suffix('.pub').read_text()
+        out = GITHOUSE_KEYS / f'{name}.pub'
+        if not out.exists() or out.read_text() != pub:
+            out.write_text(pub)
+    return key
+
+
+def githouse_steps(name, target, key, ssh_to=None):
+    """Commands giving a clone the remote `hunter`: githouse's mirror, fetched from the read-only mount,
+    and pushed to on maybelle over ssh (GITHOUSE_SSH, host:port) as `name`, with `key`. Nothing for a
+    repository githouse hasn't got. origin stays GitHub, so branches pushed there directly are still
+    fetched from it. (The words go inside run_command's single quotes: none of their own.)"""
+    repo = GITHOUSE / f'{target.name}.git'
+    if not (repo / 'HEAD').exists():
+        return []
+    ssh_to = (os.environ.get('GITHOUSE_SSH', '') if ssh_to is None else ssh_to).strip()
+    steps = [f"git -C {target} remote remove hunter", f"git -C {target} remote add hunter {repo}"]
+    if ssh_to and _SSH_TO.fullmatch(ssh_to):
+        host, port = ssh_to.rsplit(':', 1)
+        steps.append(f"git -C {target} remote set-url --push hunter ssh://git@{host}:{port}/{target.name}.git")
+        steps.append(f'git -C {target} config core.sshCommand "ssh -i {key} -o IdentitiesOnly=yes '
+                     f'-o StrictHostKeyChecking=accept-new -o UserKnownHostsFile={key.parent}/githouse_known_hosts"')
+    return steps
+
+
+def setup_githouse(name, home):
+    """The user's way to githouse: its key, made and published, and `hunter` in each clone githouse has.
+    A push before maybelle has picked the key up (within two minutes of a first start) is refused with
+    "Permission denied (publickey)": try again."""
+    key = githouse_key(name, home)
+    workspace = home / 'workspace'
+    for target in sorted(workspace.iterdir()) if workspace.exists() else []:
+        if (target / '.git').exists():
+            for step in githouse_steps(name, target, key):
+                run_command(step, user=name, check=False)
+    logger.info(f"{name}: githouse remote `hunter` in its clones; pushes to {os.environ.get('GITHOUSE_SSH', '(unset)')}")
 
 
 def link_rules(home, rules, links):
@@ -978,14 +1034,22 @@ def repos_by_when(agent):
     return first, later
 
 
+def reference(target):
+    """'--reference-if-able <githouse's copy> ' for a clone, so its objects come from hunter's disk, not GitHub."""
+    repo = GITHOUSE / f'{target.name}.git'
+    return f"--reference-if-able {repo} --dissociate " if (repo / 'HEAD').exists() else ''
+
+
 def clone_in_background(agent):
     """The agent's other clones, after its poller has started: a missing one
     is cloned, one already on its disk is fetched (its branches are its own
     business). Logged to /tmp/clones-<agent>.log."""
     name = agent['name']
     _, later = repos_by_when(agent)
+    key = Path('/home') / name / '.config' / 'magenta' / 'githouse_key'
     steps = [f"git -C {target} fetch --quiet" if target.exists()
-             else f"git clone --quiet https://github.com/{repo}.git {target}" for repo, target in later]
+             else f"git clone --quiet {reference(target)}https://github.com/{repo}.git {target}" for repo, target in later]
+    steps += [step for _, target in later if not target.exists() for step in githouse_steps(name, target, key)]
     if not steps:
         return
     # (Plain words only: run_command wraps this in single quotes for su.)
@@ -1100,6 +1164,10 @@ def main():
     try:
         setup_host_files()
         setup_workspace()
+        try:
+            setup_githouse('magent', Path('/home/magent'))
+        except Exception as e:  # githouse's mirror or the relay missing stops nothing else
+            logger.error(f"githouse for magent: {e}")
         setup_claude_config()
         setup_environment_variables()
         configure_github_cli()

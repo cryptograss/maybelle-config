@@ -1,0 +1,78 @@
+---
+# githouse's mirror, on hunter: a read-only copy of maybelle's repositories at
+# {{ base_dir }}/git, fetched every minute (shared/githouse/githouse.py, mirror
+# mode), mounted at /srv/git in every container so clones are instant. Nothing
+# here needs backing up. Its key to maybelle is made here, fetch-only there;
+# its public half goes out through the same relay as the containers' keys
+# ({{ base_dir }}/githouse/keys/<container>/<name>.pub, pulled by maybelle
+# every minute), as hunter/mirror.pub. Pushes never come here: the containers
+# push to maybelle themselves ({{ githouse_ssh }}).
+
+- name: Where the mirror keeps the repositories, its key, its build, and the relayed keys
+  file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0755'
+  loop:
+    - "{{ base_dir }}/git"
+    - "{{ base_dir }}/githouse"
+    - "{{ base_dir }}/githouse/build"
+    - "{{ base_dir }}/githouse/etc"
+    - "{{ base_dir }}/githouse/keys"
+    - "{{ base_dir }}/githouse/keys/hunter"
+
+- name: githouse's code (the same image as maybelle's; its tests run as it's built)
+  copy:
+    src: "{{ playbook_dir }}/../../shared/githouse/{{ item }}"
+    dest: "{{ base_dir }}/githouse/build/{{ item }}"
+    mode: '0644'
+  loop: [Dockerfile, githouse.py, test_githouse.py, entrypoint.sh, sshd_config]
+
+- name: The mirror's key to maybelle (made here; fetch-only there)
+  openssh_keypair:
+    path: "{{ base_dir }}/githouse/etc/mirror_key"
+    type: ed25519
+    comment: "mirror@hunter"
+    mode: '0600'
+
+- name: Its public half, out through the relay as hunter/mirror.pub
+  copy:
+    src: "{{ base_dir }}/githouse/etc/mirror_key.pub"
+    dest: "{{ base_dir }}/githouse/keys/hunter/mirror.pub"
+    remote_src: true
+    mode: '0644'
+
+# Each container writes its users' public keys into its own directory, and nowhere else.
+- name: A relay directory per container
+  file:
+    path: "{{ base_dir }}/githouse/keys/{{ item.name }}"
+    state: directory
+    mode: '0755'
+  loop: "{{ users }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: The mirror's compose file
+  copy:
+    dest: "{{ base_dir }}/githouse/docker-compose.yml"
+    mode: '0644'
+    content: |
+      services:
+        githouse-mirror:
+          build: ./build
+          container_name: githouse-mirror
+          environment:
+            - GITHOUSE_MODE=mirror
+            - GITHOUSE_UPSTREAM=ssh://git@{{ githouse_ssh }}
+            - GITHOUSE_REPOS={{ githouse_repos | join(' ') }}
+          volumes:
+            - {{ base_dir }}/git:/srv/git
+            - {{ base_dir }}/githouse/etc:/etc/githouse:ro
+          mem_limit: 512m
+          cpus: 0.5
+          restart: unless-stopped
+
+- name: Start the mirror
+  command: docker compose up -d --build --force-recreate
+  args:
+    chdir: "{{ base_dir }}/githouse"

@@ -44,6 +44,10 @@ services:
       # Mood poller: memory-lane as deployed, in hunter's clone of magenta main
       # (build-image keeps it current), not a workspace checkout on any branch
       - {{ memory_lane_dir }}/poller:/opt/mood-poller:ro
+      # githouse's mirror of our repositories, to clone and fetch from (roles/githouse-mirror);
+      # and where this container's users publish their public keys for githouse on maybelle
+      - {{ base_dir }}/git:/srv/git:ro
+      - {{ base_dir }}/githouse/keys/{{ user.name }}:/srv/githouse-keys
 {% for emergent in user.emergents | default([]) %}
       # {{ emergent.name }}'s home, kept across recreation (hunter/scripts/agent_homes.py)
       - {{ base_dir }}/{{ user.name }}/agents/{{ emergent.name }}:/home/{{ emergent.name }}
@@ -88,6 +92,8 @@ services:
       # agent: an agent's own container (emergent-<name>), which starts only
       # what its agents need (container_startup.py)
       - CONTAINER_KIND={{ user.kind | default('') }}
+      # githouse on maybelle, where this container's users push their own branches
+      - GITHOUSE_SSH={{ githouse_ssh }}
       # Use private network for MCP on hunter (10.0.0.2 is maybelle)
       - MCP_MEMORY_URL=http://10.0.0.2:8000
 {% if magent_works_here %}
