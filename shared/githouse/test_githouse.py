@@ -19,7 +19,8 @@ def run(*args, cwd=None, env=None):
     return done.returncode, done.stdout + done.stderr
 
 
-class GithouseTest(unittest.TestCase):
+class Repos(unittest.TestCase):
+    """A stand-in GitHub, githouse's clone of it, and a working copy: no tests of its own."""
 
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())
@@ -62,6 +63,9 @@ class GithouseTest(unittest.TestCase):
         run('git', 'fetch', '--quiet', str(self.repo), f'refs/heads/{branch}:refs/remotes/h/{branch}', cwd=self.upstream)
         run('git', 'merge', '--quiet', '--no-ff', '-m', f'Merge {branch}', f'h/{branch}', cwd=self.upstream)
         run('git', 'push', '--quiet', 'origin', 'HEAD:main', cwd=self.upstream)
+
+
+class GithouseTest(Repos):
 
     # --- GitHub's branches -----------------------------------------------------------
 
@@ -262,6 +266,125 @@ class GithouseTest(unittest.TestCase):
         with self.assertRaises(PermissionError):
             githouse.auth('Re Bad', "git-upload-pack 'magenta.git'")
 
+
+
+class MergeTest(Repos):
+    """githouse merge: a signed order, checked here, merged --no-ff and pushed to GitHub first (Plan, section 8)."""
+
+    def setUp(self):
+        super().setUp()
+        self.keys = self.tmp / 'keys'
+        self.keys.mkdir()
+        for who in ('justin', 'skyler'):
+            run('ssh-keygen', '-q', '-t', 'ed25519', '-N', '', '-C', who, '-f', str(self.keys / who))
+        # Only justin may merge: the file ansible writes from the inventory and githouse_mergers.
+        self.signers = self.tmp / 'merge_signers'
+        pub = (self.keys / 'justin.pub').read_text().strip()
+        self.signers.write_text(f'justin namespaces="{githouse.MERGE_NAMESPACE}" {pub}\n')
+        self.commit(self.work, 'the fix')
+        self.assertEqual(self.push('re', 'HEAD:re/foo')[0], 0)
+        self.head = githouse.refs(self.repo, 'refs/heads/')['re/foo']
+        self.now = 1_800_000_000
+
+    def order(self, **change):
+        fields = {'repo': 'magenta', 'branch': 're/foo', 'commit': self.head, 'into': 'main', 'by': 'justin',
+                  'nonce': os.urandom(16).hex(), 'expires': str(self.now + 3600), **change}
+        return githouse.ORDER_HEADER + '\n' + ''.join(f'{k}: {fields[k]}\n' for k in githouse.ORDER_FIELDS)
+
+    def sign(self, text, key='justin', namespace=None):
+        path = Path(tempfile.mkdtemp(dir=self.tmp)) / 'order.txt'  # a .sig already there would be asked about
+        path.write_text(text)
+        run('ssh-keygen', '-Y', 'sign', '-q', '-f', str(self.keys / key), '-n', namespace or githouse.MERGE_NAMESPACE, str(path))
+        return path.with_suffix('.txt.sig').read_text()
+
+    def merge(self, text, signature=None):
+        return githouse.merge(text, signature if signature is not None else self.sign(text), now=self.now,
+                              signers=self.signers)
+
+    def github_main(self):
+        return run('git', '--git-dir', str(self.github), 'rev-parse', 'main')[1].strip()
+
+    def test_a_signed_order_merges_on_github_first(self):
+        before = self.github_main()
+        text = self.order()
+        result = self.merge(text)
+        self.assertEqual(result['outcome'], 'merged', result)
+        self.assertEqual(self.github_main(), result['merge'])
+        parents = run('git', '--git-dir', str(self.github), 'rev-list', '--parents', '-n', '1', 'main')[1].split()
+        self.assertEqual(parents[1:], [before, self.head])  # --no-ff: the target first, then exactly the commit signed for
+        message = run('git', '--git-dir', str(self.github), 'log', '-1', '--format=%B%n%an', 'main')[1]
+        self.assertIn('Merge magenta:re/foo', message)
+        self.assertIn('Signed by justin', message)
+        self.assertEqual(githouse.refs(self.repo, 'refs/heads/')['main'], result['merge'])
+        self.assertIn('re/foo', githouse.refs(self.repo, 'refs/merged/'))  # the name is used, as any merge
+        nonce = githouse.parse_order(text)['nonce']
+        kept = json.loads((self.root / '.merges' / f'{nonce}.json').read_text())
+        self.assertEqual((kept['outcome'], kept['by'], kept['order']), ('merged', 'justin', text))
+
+    def test_an_order_is_good_once(self):
+        text = self.order()
+        signature = self.sign(text)
+        self.assertEqual(self.merge(text, signature)['outcome'], 'merged')
+        again = self.merge(text, signature)
+        self.assertEqual((again['outcome'], again['why']), ('refused', 'that order was used already'))
+
+    def test_a_refused_order_is_spent_too(self):
+        text = self.order(into='production', branch='re/nothing')
+        signature = self.sign(text)
+        self.assertEqual(self.merge(text, signature)['outcome'], 'refused')
+        self.assertEqual(self.merge(text, signature)['why'], 'that order was used already')
+
+    def test_only_a_merger_s_signature_in_the_merge_namespace(self):
+        as_justin, as_skyler = self.order(), self.order(by='skyler')
+        for why, text, signature in (
+                ('a sign-in signature (namespace magenta-moods)', as_justin, self.sign(as_justin, namespace='magenta-moods')),
+                ('skyler, who is not in merge_signers', as_skyler, self.sign(as_skyler, key='skyler')),
+                ("justin's key, on an order that says by: skyler", as_skyler, self.sign(as_skyler, key='justin')),
+                ('no signature', as_justin, 'nonsense')):
+            with self.subTest(why):
+                result = self.merge(text, signature)
+                self.assertEqual(result['outcome'], 'refused')
+                self.assertIn('not signed by', result['why'])
+        self.assertEqual(self.github_main(), run('git', '--git-dir', str(self.repo), 'rev-parse', 'main')[1].strip())
+
+    def test_a_changed_word_breaks_the_signature(self):
+        text = self.order()
+        signature = self.sign(text)
+        result = self.merge(text.replace('into: main', 'into: production'), signature)
+        self.assertEqual(result['outcome'], 'refused')
+
+    def test_expired_or_too_long(self):
+        for expires, why in ((self.now - 1, 'expired'), (self.now + githouse.ORDER_LIFE_MAX + 60, 'at most')):
+            result = self.merge(self.order(expires=str(expires)))
+            self.assertIn(why, result['why'])
+
+    def test_a_branch_that_moved_after_signing(self):
+        text = self.order()
+        self.commit(self.work, 'one more')
+        self.assertEqual(self.push('re', 'HEAD:re/foo')[0], 0)
+        result = self.merge(text)
+        self.assertEqual(result['outcome'], 'refused')
+        self.assertIn('has moved on githouse', result['why'])
+
+    def test_a_conflict_merges_nothing(self):
+        (self.upstream / 'the fix.txt').write_text('something else')
+        run('git', 'add', '.', cwd=self.upstream)
+        run('git', 'commit', '--quiet', '-m', 'meanwhile', cwd=self.upstream)
+        run('git', 'push', '--quiet', 'origin', 'HEAD:main', cwd=self.upstream)
+        before = self.github_main()
+        result = self.merge(self.order())
+        self.assertIn('conflicts with main', result['why'])
+        self.assertEqual(self.github_main(), before)
+
+    def test_only_into_githubs_branches_and_not_twice(self):
+        self.assertIn('a merge goes into', self.merge(self.order(into='re/other'))['why'])
+        self.assertIn("GitHub's own branches don't", self.merge(self.order(branch='main'))['why'])
+        self.assertEqual(self.merge(self.order())['outcome'], 'merged')
+        self.assertIn('no such branch', self.merge(self.order())['why'])  # merged: its name is retired here
+        self.assertIn('no repository', self.merge(self.order(repo='nonesuch'))['why'])
+
+    def test_not_an_order(self):
+        self.assertEqual(self.merge('merge everything please', 'x')['why'], 'not a merge order')
 
 if __name__ == '__main__':
     unittest.main()

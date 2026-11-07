@@ -31,6 +31,9 @@
       emergent-re: [re]
       emergent-blu: [blu]
       hunter: {names: [mirror], fetch_only: true}
+    # Who may merge a branch without a pull request: `magenta.sh merge <repo>:<branch>`,
+    # signed with their SSH key and checked by githouse (Plan, section 8). Justin's call.
+    githouse_mergers: [justin]
 
   pre_tasks:
     - name: Install community.docker collection

@@ -11,7 +11,8 @@
 #
 # Needs: githouse_dir, githouse_bind (a private address), githouse_port,
 # githouse_pushers ({container: [names] | {names, fetch_only}}),
-# githouse_repos (owner/name list), jenkins_github_ssh_key (vault, b64).
+# githouse_repos (owner/name list), jenkins_github_ssh_key (vault, b64);
+# githouse_mergers (names that may sign a merge order; none if unset).
 
 - name: githouse listens on the private network only, never 0.0.0.0
   assert:
@@ -44,6 +45,21 @@
     dest: "{{ githouse_dir }}/etc/pushers.json"
     content: "{{ githouse_pushers | to_nice_json }}\n"
     mode: '0644'
+
+# A merge without a pull request is an order signed with a person's SSH key
+# (`ssh-keygen -Y sign -n magenta-merge`), and githouse checks it against this
+# file: only githouse_mergers, by the key hunter's inventory knows them by, in
+# a namespace of its own, so a sign-in signature (magenta-moods) is never a
+# merge. Cryptograss:Moods/ramp/Plan, section 8. Read as maybelle.yml reads
+# allowed_signers: lookup('file') | from_yaml, the vault templates untouched.
+- name: Who may merge, by their keys (githouse checks merge orders against this, not memory-lane)
+  copy:
+    dest: "{{ githouse_dir }}/etc/merge_signers"
+    mode: '0644'
+    content: |
+      {% for user in (lookup('file', playbook_dir ~ '/../../hunter/ansible/inventory.yml') | from_yaml).all.vars.people if user.name in (githouse_mergers | default([])) and (user.ssh_pubkey | default('') | trim) is match('ssh-') %}
+      {{ user.name }} namespaces="magenta-merge" {{ user.ssh_pubkey | trim }}
+      {% endfor %}
 
 # As the vault holds it, base64; entrypoint.sh decodes it (so the deploy logic renders without the vault).
 - name: "GitHub's key for githouse (Jenkins's, from the vault): fetch over ssh, forward pushes"
