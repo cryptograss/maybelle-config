@@ -347,6 +347,14 @@ class MergeTest(Repos):
                 self.assertIn('not signed by', result['why'])
         self.assertEqual(self.github_main(), run('git', '--git-dir', str(self.repo), 'rev-parse', 'main')[1].strip())
 
+    def test_an_unsigned_order_can_t_take_a_signed_one_s_record(self):
+        text = self.order()
+        nonce = githouse.parse_order(text)['nonce']
+        self.assertEqual(self.merge(text, 'nonsense')['outcome'], 'refused')
+        self.assertFalse((self.root / '.merges' / f'{nonce}.json').exists())
+        self.assertEqual(self.merge(text)['outcome'], 'merged')
+        self.assertEqual(json.loads((self.root / '.merges' / f'{nonce}.json').read_text())['outcome'], 'merged')
+
     def test_a_changed_word_breaks_the_signature(self):
         text = self.order()
         signature = self.sign(text)

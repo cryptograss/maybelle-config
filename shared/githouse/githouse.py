@@ -335,11 +335,12 @@ def merge(text, signature, now=None, signers=None):
     Every order, refused or not, is kept as .merges/<nonce>.json for memory-lane to tell the Moods."""
     now = int(time.time() if now is None else now)
     signers = Path(signers or ETC / 'merge_signers')
-    order, result = {}, {}
+    order, result, signed = {}, {}, False
     try:
         order = parse_order(text)
         if not signed_by(text, signature, order['by'], signers):
             raise Refused(f"not signed by {order['by']}, or {order['by']} may not merge")
+        signed = True
         if not spend(order['nonce']):
             raise Refused('that order was used already')
         if order['expires'] < now:
@@ -355,7 +356,8 @@ def merge(text, signature, now=None, signers=None):
     except RuntimeError as e:  # git itself failed (GitHub away mid-fetch, say): nothing pushed
         result = {'outcome': 'refused', 'why': str(e)[:300]}
     record = {**{k: v for k, v in order.items()}, **result, 'at': now, 'order': text, 'signature': signature}
-    if order.get('nonce'):
+    # Only a signed order is kept: an unsigned one naming a nonce mustn't take the record its signer's will need (re).
+    if signed:
         path = ROOT / '.merges' / f"{order['nonce']}.json"
         if not path.exists():  # an order used twice keeps its first record; the second is only logged
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -388,8 +390,10 @@ def _merge(repo, order):
         raise Refused(f'{commit[:8]} is in {into} already')
     tree = subprocess.run(['git', '--git-dir', str(repo), 'merge-tree', '--write-tree', '--no-messages', tip, commit],
                           capture_output=True, text=True)
-    if tree.returncode != 0:
+    if tree.returncode == 1:
         raise Refused(f'{branch} conflicts with {into}; merge {into} into it, push, and sign again')
+    if tree.returncode != 0:  # git itself failed, not a conflict: say what it said (re)
+        raise Refused(f'merge-tree failed: {tree.stderr.strip()[:200]}')
     message = (f"Merge {order['repo']}:{branch} ({commit[:8]})\n\n"
                f"Signed by {order['by']} (githouse merge order {order['nonce'][:12]}).\n")
     who = {'GIT_AUTHOR_NAME': order['by'], 'GIT_AUTHOR_EMAIL': f"{order['by']}@githouse",
