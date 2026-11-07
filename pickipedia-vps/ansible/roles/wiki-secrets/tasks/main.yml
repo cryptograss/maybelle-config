@@ -59,6 +59,13 @@
 
       # Delivery-kid pinning service API key
       $wgDeliveryKidApiKey = '{{ delivery_kid_api_key | replace('\\', '\\\\') | replace("'", "\\'") }}';
+      {% if memory_lane_wiki_hook_secret is defined %}
+
+      # Each save, move and upload is pushed to magenta's /api/wiki/hook/, signed with this
+      # (extensions/PickiPediaContent/src/MagentaPush.php); the same value is memory-lane's
+      # WIKI_HOOK_SECRET (maybelle.yml, #279). Unset: no push; magenta's minute sweep alone serves.
+      $wgPickiPediaContentMagentaHookSecret = '{{ memory_lane_wiki_hook_secret | replace('\\', '\\\\') | replace("'", "\\'") }}';
+      {% endif %}
       {% if pickipedia_oauth2_private_key is defined and pickipedia_oauth2_public_key is defined %}
 
       # OAuth 2 signing keys: "Sign in with PickiPedia" (cryptograss/pickipedia#132).
