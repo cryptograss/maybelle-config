@@ -67,6 +67,13 @@ all:
         github_username: "fibonacci-frames"
         pickipedia: "Fibonacci"
         ssh_pubkey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILtUlbeGAoMsK5/ZhM+L2U77dVSwa8Ip2koo2/lbk5xU fibonacci@fibonacci-Zenbook-15-UM3504DA-UM3504DA"
+      
+      - name: slvrbckt
+        full_name: "Nick Jennings"
+        email: "nick@silverbucket.net"
+        github_username: "silverbucket"
+        pickipedia: slvrbckt
+        ssh_pubkey: "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDCJuBEV2u4wzjmRTiEMeDCOvBHufC86zEal8njC8hki62UUNBVJZHUZVQDTO03bThEadFCpBy/d6gEwF/mrlzzrQUGSoDWMhyBaeMnQY3D99ePNoCucu2gCwTO/N9390xS1klbyuBtyTtJwXn54eeGS7i0WauZnmV4TnHKjO1LgVyb2X4nNlkJ5eebDcvXsBJWPtDorMlU453pJWv5lwgDC0VlUybFN+G6eULhx5uVteQCBmiXsmU3kq9HbjdNfKSYjJMPM8o7WcXt9903qkaUcRePyxq8F+3Ka16iNr4oDA0LyAZaiK69OiK6AcaNQ+IltuWfkFHy7Owkfq/lyWWD"
 
     # Containers taken out of the inventory: stopped and removed before the
     # others are made (playbook.yml), their files kept on hunter's disk. The
