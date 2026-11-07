@@ -865,6 +865,12 @@
 
           // Delivery-kid pinning service API key
           $wgDeliveryKidApiKey = '{{ delivery_kid_api_key | replace('\\', '\\\\') | replace("'", "\\'") }}';
+          {% if memory_lane_wiki_hook_secret is defined %}
+          # Each save, move and upload is pushed to magenta's /api/wiki/hook/, signed with this
+          # (extensions/PickiPediaContent/src/MagentaPush.php); the same value is memory-lane's
+          # WIKI_HOOK_SECRET above. Unset: no push; magenta's minute sweep alone serves.
+          $wgPickiPediaContentMagentaHookSecret = '{{ memory_lane_wiki_hook_secret | replace('\\', '\\\\') | replace("'", "\\'") }}';
+          {% endif %}
         dest: "{{ jenkins_home }}/secrets/pickipedia/LocalSettings.local.php"
         mode: '0600'
         owner: 1000
@@ -1811,6 +1817,12 @@
 
           # Delivery-kid pinning service API key
           $wgDeliveryKidApiKey = '{{ delivery_kid_api_key | replace('\\', '\\\\') | replace("'", "\\'") }}';
+          {% if memory_lane_wiki_hook_secret is defined %}
+          # Each save, move and upload is pushed to magenta's /api/wiki/hook/, signed with this
+          # (extensions/PickiPediaContent/src/MagentaPush.php); the same value is memory-lane's
+          # WIKI_HOOK_SECRET above. Unset: no push; magenta's minute sweep alone serves.
+          $wgPickiPediaContentMagentaHookSecret = '{{ memory_lane_wiki_hook_secret | replace('\\', '\\\\') | replace("'", "\\'") }}';
+          {% endif %}
 
     # IPFS/Pinning service removed - now handled by delivery-kid
 
