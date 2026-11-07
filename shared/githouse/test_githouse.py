@@ -321,6 +321,17 @@ class MergeTest(Repos):
         kept = json.loads((self.root / '.merges' / f'{nonce}.json').read_text())
         self.assertEqual((kept['outcome'], kept['by'], kept['order']), ('merged', 'justin', text))
 
+    def test_a_merger_with_an_rsa_key(self):
+        # skyler's key in hunter's inventory is ssh-rsa; githouse_mergers gained skyler on 7 Nov.
+        run('ssh-keygen', '-q', '-t', 'rsa', '-b', '3072', '-N', '', '-C', 'skyler', '-f', str(self.keys / 'skyler-rsa'))
+        pub = (self.keys / 'skyler-rsa.pub').read_text().strip()
+        with self.signers.open('a') as f:
+            f.write(f'skyler namespaces="{githouse.MERGE_NAMESPACE}" {pub}\n')
+        text = self.order(by='skyler')
+        result = self.merge(text, self.sign(text, key='skyler-rsa'))
+        self.assertEqual(result['outcome'], 'merged', result)
+        self.assertEqual(self.github_main(), result['merge'])
+
     def test_an_order_is_good_once(self):
         text = self.order()
         signature = self.sign(text)
