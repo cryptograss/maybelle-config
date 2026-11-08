@@ -13,6 +13,7 @@
 # githouse_pushers ({container: [names] | {names, fetch_only}}),
 # githouse_repos (owner/name list), jenkins_github_ssh_key (vault, b64);
 # githouse_mergers (names that may sign a merge order; none if unset);
+# githouse_device_signer_key (memory-lane's public merge key, for the merge button; unset, no button);
 # githouse_brakes_url (memory-lane's /api/brakes/: unset, nothing merges);
 # githouse_orders_url (memory-lane's /api/merge-orders/pending/: unset, no orders by mail).
 
@@ -62,6 +63,9 @@
       {% for user in (lookup('file', playbook_dir ~ '/../../hunter/ansible/inventory.yml') | from_yaml).all.vars.people if user.name in (githouse_mergers | default([])) and (user.ssh_pubkey | default('') | trim) is match('ssh-') %}
       {{ user.name }} namespaces="magenta-merge" {{ user.ssh_pubkey | trim }}
       {% endfor %}
+      {% if githouse_device_signer_key | default('') | length > 0 %}
+      memory-lane namespaces="magenta-merge" {{ githouse_device_signer_key | trim }}
+      {% endif %}
 
 # As the vault holds it, base64; entrypoint.sh decodes it (so the deploy logic renders without the vault).
 - name: "GitHub's key for githouse (Jenkins's, from the vault): fetch over ssh, forward pushes"
