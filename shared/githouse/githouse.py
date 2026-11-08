@@ -48,7 +48,8 @@ meant to be cheap to lose.
   is never in the path. The merge is `--no-ff` of exactly that commit, pushed to GitHub first (until the
   flip GitHub's branches are GitHub's: the minute's fetch brings it back), and each order and what came
   of it are kept in /srv/git/.merges, its nonce spent whether it merged or not.
-  Brakes stop it (section 10): root's freeze (/etc/githouse/frozen), AZ5, or a ban on the signer, the
+  Orders arrive by mail: memory-lane keeps them, unread, and githouse fetches them every few seconds and
+  checks each itself (8 Nov: only Justin has ssh to maybelle). Brakes stop it (section 10): root's freeze (/etc/githouse/frozen), AZ5, or a ban on the signer, the
   last two asked of memory-lane at every order. Its answer can only stop a merge; no answer stops it too.
 * `githouse mirror`, on hunter: a read-only copy of all of it, fetched from
   maybelle every minute and mounted into every container, so clones are
@@ -63,7 +64,9 @@ import os
 import re
 import subprocess
 import sys
+import hashlib
 import tempfile
+import threading
 import time
 import urllib.parse
 import urllib.request
@@ -455,6 +458,74 @@ def _merge(repo, order):
     return {'outcome': 'merged', 'merge': merged, 'onto': tip}
 
 
+# --- orders by mail: memory-lane carries them, githouse checks them ------------------------
+# Only Justin has ssh to maybelle (as root); skyler doesn't, and no phone does. So memory-lane keeps
+# signed orders, unread, and githouse fetches them every few seconds over the private network and
+# carries each out through merge(), signature, nonce and brakes as for any other (Plan, section 8,
+# 8 Nov). The signature makes the carrier irrelevant (re): a compromised memory-lane can delay or
+# drop an order, never forge one, and a nonce can't be spent twice.
+
+ORDERS_URL = os.environ.get('GITHOUSE_ORDERS', '')   # memory-lane's /api/merge-orders/pending/
+ORDERS_EVERY = 5                                     # seconds between looks
+ORDERS_AT_ONCE = 20
+MERGING = threading.Lock()   # a merge and the minute's fetch don't touch one repository at once
+_tried = set()               # orders refused before their nonce was spent (unsigned, say): not tried again
+_unheard = None              # why memory-lane didn't answer last time, so it's logged once, not every look
+
+
+def take_orders(url=None, **given):
+    """Carry out every order memory-lane holds that hasn't been here yet: [(order text, result)]."""
+    global _unheard
+    url = url if url is not None else ORDERS_URL
+    if not url:
+        return []
+    try:
+        with urllib.request.urlopen(url, timeout=10) as answer:
+            orders = json.loads(answer.read())['orders'][:ORDERS_AT_ONCE]
+        _unheard = None
+    except Exception as e:
+        if str(e) != _unheard:
+            log(f'merge orders: memory-lane did not answer ({e})')
+        _unheard = str(e)
+        return []
+    done = []
+    for each in orders:
+        try:
+            text, signature = str(each['order']), str(each['signature'])
+        except (KeyError, TypeError):
+            continue
+        nonce = (re.search(r'^nonce: (\S+)$', text, re.M) or [None, ''])[1]
+        seen = hashlib.sha256(f'{text}\0{signature}'.encode()).hexdigest()
+        if seen in _tried or (NONCE.fullmatch(nonce) and (ROOT / '.merges' / 'nonces' / nonce).exists()):
+            continue  # been here already: merged, refused, or never signed
+        with MERGING:
+            result = merge(text, signature, **given)   # given: tests' signers and brakes
+        _tried.add(seen)
+        if not (NONCE.fullmatch(nonce) and (ROOT / '.merges' / f'{nonce}.json').exists()):
+            # Refused before it counted as signed, so merge() kept no record under its nonce: keep one under
+            # what was mailed, so memory-lane can tell the sender why instead of leaving them waiting.
+            kept = ROOT / '.merges' / 'mailed' / f'{seen}.json'
+            kept.parent.mkdir(parents=True, exist_ok=True)
+            kept.write_text(json.dumps({**result, 'order': text}, indent=1, sort_keys=True))
+            kept.chmod(0o644)
+        done.append((text, result))
+    return done
+
+
+def orders_loop():
+    while True:
+        try:
+            take_orders()
+        except Exception as e:
+            log(f'merge orders: {e}')
+        time.sleep(ORDERS_EVERY)
+
+
+def fetch_locked(repo):
+    with MERGING:
+        return fetch(repo)
+
+
 # --- setting up, and the loops --------------------------------------------------------
 
 def init(full_names, url='https://github.com/{}.git', forward=False):
@@ -517,8 +588,9 @@ def paced(step, before=None):
 
 
 def loop():
-    """On maybelle: the keys as relayed, then GitHub's branches, every minute."""
-    paced(fetch, before=write_authorized_keys)
+    """On maybelle: the keys as relayed, then GitHub's branches, every minute; merge orders by mail meanwhile."""
+    threading.Thread(target=orders_loop, daemon=True).start()
+    paced(fetch_locked, before=write_authorized_keys)
 
 
 def mirror_init(full_names, upstream):

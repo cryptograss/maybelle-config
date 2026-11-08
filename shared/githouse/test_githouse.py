@@ -1,5 +1,6 @@
 """githouse against real repositories: a stand-in GitHub, githouse's clone of it, and someone's working copy."""
 
+import hashlib
 import http.server
 import io
 import json
@@ -295,15 +296,19 @@ class MergeTest(Repos):
         patcher = unittest.mock.patch.object(githouse, 'ETC', self.etc)
         patcher.start()
         self.addCleanup(patcher.stop)
-        self.banned, self.scram, self.answer, self.asked = set(), False, None, []
+        self.banned, self.scram, self.answer, self.asked, self.mail = set(), False, None, [], None
         test = self
 
         class Brakes(http.server.BaseHTTPRequestHandler):
             def do_GET(self):
+                if self.path.startswith('/api/merge-orders/'):
+                    return self.reply(test.mail if test.mail is not None else {'orders': []})
                 names = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query).get('name', [])
                 test.asked.append(names)
-                said = test.answer if test.answer is not None else \
-                    {'scram': test.scram, 'banned': {name: name in test.banned for name in names}}
+                self.reply(test.answer if test.answer is not None else
+                           {'scram': test.scram, 'banned': {name: name in test.banned for name in names}})
+
+            def reply(self, said):
                 body = json.dumps(said).encode()
                 self.send_response(200)
                 self.send_header('Content-Type', 'application/json')
@@ -318,6 +323,8 @@ class MergeTest(Repos):
         self.addCleanup(server.server_close)
         self.addCleanup(server.shutdown)
         self.brakes = f'http://127.0.0.1:{server.server_address[1]}/api/brakes/'
+        self.mailbox = f'http://127.0.0.1:{server.server_address[1]}/api/merge-orders/pending/'
+        githouse._tried.clear()
 
     def order(self, **change):
         fields = {'repo': 'magenta', 'branch': 're/foo', 'commit': self.head, 'into': 'main', 'by': 'justin',
@@ -481,6 +488,48 @@ class MergeTest(Repos):
     def test_nowhere_to_ask(self):
         with unittest.mock.patch.object(githouse, 'BRAKES_URL', ''):
             self.assert_braked("doesn't know where", brakes='')
+
+    # --- orders by mail (Plan, section 8, 8 Nov): memory-lane carries them, githouse checks them
+
+    def mailed(self, *orders):
+        self.mail = {'orders': [{'order': text, 'signature': signature} for text, signature in orders]}
+        return [result for _, result in githouse.take_orders(self.mailbox, now=self.now, signers=self.signers,
+                                                               brakes_url=self.brakes)]
+
+    def test_a_mailed_order_merges_once(self):
+        text = self.order()
+        signature = self.sign(text)
+        self.assertEqual([r['outcome'] for r in self.mailed((text, signature))], ['merged'])
+        self.assertEqual(self.github_main(), githouse.refs(self.repo, 'refs/heads/')['main'])
+        self.assertEqual(self.mailed((text, signature)), [])  # still in the mailbox: its nonce is spent, so skipped
+
+    def test_a_forged_order_ahead_of_the_real_one(self):
+        # memory-lane, or anyone posting to it, mails an unsigned order with the real one's nonce first.
+        text = self.order()
+        results = self.mailed((text, 'nonsense'), (text.replace('re/foo', 're/evil'), self.sign(text)),
+                              (text, self.sign(text)))
+        self.assertEqual([r['outcome'] for r in results], ['refused', 'refused', 'merged'])
+        # The forgeries are kept under what was mailed (sha256 of order, NUL, signature), for memory-lane to report.
+        seen = hashlib.sha256(f'{text}\0nonsense'.encode()).hexdigest()
+        kept = json.loads((self.root / '.merges' / 'mailed' / f'{seen}.json').read_text())
+        self.assertIn('not signed by', kept['why'])
+        self.assertEqual(self.mailed((text, 'nonsense')), [])  # tried once, not every five seconds
+
+    def test_a_mailed_order_is_braked_like_any(self):
+        self.banned = {'justin'}
+        text = self.order()
+        result, = self.mailed((text, self.sign(text)))
+        self.assertIn('justin: banned', result['why'])
+
+    def test_memory_lane_not_answering_is_logged_once(self):
+        closed = 'http://127.0.0.1:9/api/merge-orders/pending/'
+        self.assertEqual(githouse.take_orders(closed), [])
+        self.assertEqual(githouse.take_orders(closed), [])
+        lines = (self.root / 'githouse.log').read_text().splitlines()
+        self.assertEqual(sum('merge orders: memory-lane did not answer' in line for line in lines), 1)
+
+    def test_nowhere_to_take_orders_from(self):
+        self.assertEqual(githouse.take_orders(''), [])
 
     def test_not_an_order(self):
         self.assertEqual(self.merge('merge everything please', 'x')['why'], 'not a merge order')
