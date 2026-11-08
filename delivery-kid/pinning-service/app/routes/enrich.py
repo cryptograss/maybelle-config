@@ -21,7 +21,7 @@ from pydantic import BaseModel
 from ..auth import require_auth
 from ..config import get_settings, Settings
 from ..services.torrent import create_torrent, DEFAULT_TRACKERS
-from ..services.seeder import get_seeder
+from ..services.seeding_store import stage_for_seeding
 
 logger = logging.getLogger(__name__)
 
@@ -54,19 +54,24 @@ async def fetch_ipfs_content(cid: str, ipfs_api_url: str) -> Path | None:
     """
     tmpdir = Path(tempfile.mkdtemp(prefix="enrich-"))
     try:
+        # Streamed to disk: a Release can be gigabytes, and held in memory it
+        # all counts against the web service (it was read whole until 8 Nov 2026).
+        tar_path = tmpdir / "archive.tar"
         async with httpx.AsyncClient(timeout=300.0) as client:
-            r = await client.post(
+            async with client.stream(
+                "POST",
                 f"{ipfs_api_url}/api/v0/get",
                 params={"arg": cid, "archive": "true"},
-            )
-            if r.status_code != 200:
-                logger.warning("IPFS get failed for %s: %s", cid, r.status_code)
-                shutil.rmtree(tmpdir)
-                return None
+            ) as r:
+                if r.status_code != 200:
+                    logger.warning("IPFS get failed for %s: %s", cid, r.status_code)
+                    shutil.rmtree(tmpdir)
+                    return None
+                with tar_path.open("wb") as f:
+                    async for chunk in r.aiter_bytes(1024 * 1024):
+                        f.write(chunk)
 
-        # Write and extract tar
-        tar_path = tmpdir / "archive.tar"
-        tar_path.write_bytes(r.content)
+        # Extract tar
         subprocess.run(
             ["tar", "xf", str(tar_path), "-C", str(tmpdir)],
             capture_output=True, check=True,
@@ -143,17 +148,16 @@ async def generate_torrent(
                 error=f"Torrent generation failed: {result.error}",
             )
 
-        # Add to BitTorrent seeder (copies content to seeding dir)
+        # Hand the files to the seeder, which runs in its own container: it
+        # lays them out and starts seeding within seconds (seeding_store).
         torrent_url = None
-        seeder = get_seeder()
-        if seeder and result.torrent_bytes:
-            infohash_added = seeder.add_torrent(cid, result.torrent_bytes, album_dir)
-            if infohash_added:
-                base_url = settings.ipfs_gateway_url.replace("ipfs.", "", 1)
-                torrent_url = f"{base_url}/torrent/{result.infohash}.torrent"
-                logger.info("Seeding torrent for %s (infohash %s)", cid, infohash_added)
-            else:
-                logger.warning("Failed to add torrent to seeder for %s", cid)
+        if result.torrent_bytes and stage_for_seeding(
+            settings.seeding_dir, cid, result.torrent_bytes, album_dir
+        ):
+            torrent_url = f"{base_url}/torrent/{result.infohash}.torrent"
+            logger.info("Handed torrent for %s to the seeder (infohash %s)", cid, result.infohash)
+        else:
+            logger.warning("Failed to hand torrent for %s to the seeder", cid)
 
         return TorrentResponse(
             success=True,

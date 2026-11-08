@@ -11,7 +11,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from .config import get_settings
 from .routes import health, albums, drafts, content, enrich, torrent, staging, peaks
 from .routes.content import log_pre_handler_failure
-from .services.seeder import init_seeder, stop_seeder
 
 # Configure logging
 logging.basicConfig(
@@ -29,10 +28,9 @@ async def lifespan(app: FastAPI):
     On startup:
     - Ensure the staging directories exist
     - Mark finalizes cut off by the last shutdown as failed
-    - Start the BitTorrent seeder
 
-    On shutdown:
-    - Stop the seeder
+    The BitTorrent seeder is not started here: it runs in its own container
+    (app/seeder_main.py), so the web service never loads libtorrent.
 
     Nothing here deletes drafts. Orphaned and stalled ones are reported by the
     nightly storage audit (maybelle/scripts/audit-storage.py) for a person to
@@ -51,14 +49,9 @@ async def lifespan(app: FastAPI):
     if stranded:
         logger.warning("Marked %d stranded finalize(s) failed: %s", len(stranded), ", ".join(stranded))
 
-    # Start BitTorrent seeder
-    init_seeder(settings.seeding_dir)
-
     logger.info("Delivery Kid pinning service started")
     yield
 
-    # Shutdown: stop seeder first
-    stop_seeder()
     logger.info("Delivery Kid pinning service stopped")
 
 

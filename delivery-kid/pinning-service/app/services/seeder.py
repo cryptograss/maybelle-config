@@ -1,11 +1,23 @@
-"""BitTorrent seeder — keeps a libtorrent session alive to seed generated torrents."""
+"""BitTorrent seeder: keeps a libtorrent session alive to seed generated torrents.
+
+Runs in its own container (``python -m app.seeder_main``), never inside the web
+service: whatever libtorrent holds, and whenever it falls over, the web service
+doesn't share it. The web service hands over new torrents through the seeding
+folder; see ``seeding_store`` for its layout.
+"""
 
 import logging
+import os
 import shutil
+import time
 from pathlib import Path
 from typing import Optional
 
 import libtorrent as lt
+
+from .seeding_store import (
+    BY_INFOHASH, FAILED_PREFIX, INCOMING, TMP_PREFIX, write_status,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +32,8 @@ class Seeder:
         self.session: Optional[lt.session] = None
         self._handles: dict[str, lt.torrent_handle] = {}  # infohash -> handle
         self._torrent_files: dict[str, bytes] = {}  # infohash -> .torrent bytes
+        (self.seeding_dir / INCOMING).mkdir(exist_ok=True)
+        (self.seeding_dir / BY_INFOHASH).mkdir(exist_ok=True)
 
     def start(self):
         """Start the libtorrent session and load existing torrents."""
@@ -53,26 +67,28 @@ class Seeder:
         """Scan seeding directory and load all saved torrents."""
         count = 0
         for cid_dir in self.seeding_dir.iterdir():
-            if not cid_dir.is_dir():
+            if not cid_dir.is_dir() or cid_dir.name.startswith("."):
                 continue
             torrent_file = cid_dir / "torrent.dat"
             data_dir = cid_dir / "data"
             if torrent_file.exists() and data_dir.exists():
                 try:
                     torrent_bytes = torrent_file.read_bytes()
-                    self._add_to_session(torrent_bytes, data_dir)
+                    self._add_to_session(cid_dir.name, torrent_bytes, data_dir)
                     count += 1
                 except Exception as e:
                     logger.error("Failed to load torrent from %s: %s", cid_dir, e)
         logger.info("Loaded %d existing torrents for seeding", count)
 
-    def _add_to_session(self, torrent_bytes: bytes, data_dir: Path) -> Optional[str]:
-        """Add a torrent to the libtorrent session. Returns infohash."""
+    def _add_to_session(self, cid: str, torrent_bytes: bytes, data_dir: Path) -> Optional[str]:
+        """Add a torrent to the libtorrent session and index it. Returns infohash."""
         if not self.session:
             return None
 
         ti = lt.torrent_info(lt.bdecode(torrent_bytes))
         infohash = str(ti.info_hash())
+        # The web service finds a .torrent by infohash through this index.
+        (self.seeding_dir / BY_INFOHASH / infohash).write_text(cid)
 
         if infohash in self._handles:
             logger.debug("Torrent %s already loaded", infohash)
@@ -92,7 +108,7 @@ class Seeder:
     def add_torrent(self, cid: str, torrent_bytes: bytes, content_dir: Path) -> Optional[str]:
         """Add a new torrent for seeding.
 
-        Copies content from content_dir to the seeding directory,
+        Moves content from content_dir into the seeding directory,
         saves the .torrent file, and loads into the session.
 
         Handles file renaming for single-file torrents: libtorrent expects the
@@ -122,14 +138,16 @@ class Seeder:
                     self.session.remove_torrent(self._handles[old_hash])
                     del self._handles[old_hash]
                     self._torrent_files.pop(old_hash, None)
+                (self.seeding_dir / BY_INFOHASH / old_hash).unlink(missing_ok=True)
                 shutil.rmtree(cid_dir, ignore_errors=True)
 
             # Set up seeding directory structure
             cid_dir.mkdir(parents=True, exist_ok=True)
 
-            # Copy content into data subdirectory
+            # Move content into data subdirectory (it comes from .incoming,
+            # on the same filesystem, so this is a rename, not a copy)
             if content_dir.exists():
-                shutil.copytree(content_dir, data_dir)
+                shutil.move(str(content_dir), str(data_dir))
 
             # Parse torrent to figure out expected file layout
             ti = lt.torrent_info(lt.bdecode(torrent_bytes))
@@ -180,7 +198,7 @@ class Seeder:
             torrent_file.write_bytes(torrent_bytes)
 
             # Load into session
-            return self._add_to_session(torrent_bytes, data_dir)
+            return self._add_to_session(cid, torrent_bytes, data_dir)
 
         except Exception as e:
             logger.error("Failed to add torrent for CID %s: %s", cid, e)
@@ -222,26 +240,71 @@ class Seeder:
         }
 
 
-# Global seeder instance
-_seeder: Optional[Seeder] = None
+    def process_incoming(self) -> int:
+        """Start seeding whatever the web service has handed over.
 
+        Each ``.incoming/<cid>.<n>/`` holds a ``torrent.dat`` and a ``data/``
+        folder. Taken ones are removed; one that fails is renamed
+        ``.failed-<cid>.<n>`` and left for a person, so it isn't retried for
+        ever. Returns how many were taken.
+        """
+        incoming = self.seeding_dir / INCOMING
+        try:
+            entries = sorted(
+                (e for e in incoming.iterdir()
+                 if e.is_dir() and not e.name.startswith(".")),
+                key=lambda e: e.stat().st_mtime,
+            )
+        except OSError as e:
+            logger.error("Can't read %s: %s", incoming, e)
+            return 0
 
-def get_seeder() -> Optional[Seeder]:
-    """Get the global seeder instance."""
-    return _seeder
+        taken = 0
+        for entry in entries:
+            cid = entry.name.split(".", 1)[0]
+            try:
+                torrent_bytes = (entry / "torrent.dat").read_bytes()
+                infohash = self.add_torrent(cid, torrent_bytes, entry / "data")
+            except Exception as e:
+                logger.error("Failed to read handed-over torrent %s: %s", entry.name, e)
+                infohash = None
+            if infohash:
+                shutil.rmtree(entry, ignore_errors=True)
+                taken += 1
+            else:
+                try:
+                    entry.rename(incoming / f"{FAILED_PREFIX}{entry.name}")
+                except OSError as e:
+                    logger.error("Couldn't set aside %s: %s", entry.name, e)
+        return taken
 
+    def sweep_stale_tmp(self, max_age_seconds: int = 24 * 3600) -> None:
+        """Remove half-written hand-overs a crashed web process left behind."""
+        cutoff = time.time() - max_age_seconds
+        for entry in (self.seeding_dir / INCOMING).glob(f"{TMP_PREFIX}*"):
+            try:
+                if entry.stat().st_mtime < cutoff:
+                    shutil.rmtree(entry, ignore_errors=True)
+                    logger.info("Removed stale hand-over %s", entry.name)
+            except OSError:
+                pass
 
-def init_seeder(seeding_dir: str) -> Seeder:
-    """Initialize and start the global seeder."""
-    global _seeder
-    _seeder = Seeder(seeding_dir)
-    _seeder.start()
-    return _seeder
+    def log_alerts(self) -> None:
+        """Drain libtorrent's alert queue into the log.
 
+        The session asks for error and status alerts; unread, they pile up in
+        a queue capped by alert_queue_size, and nobody ever sees them.
+        """
+        if not self.session:
+            return
+        for alert in self.session.pop_alerts():
+            if alert.category() & lt.alert.category_t.error_notification:
+                logger.warning("libtorrent: %s", alert.message())
+            else:
+                logger.debug("libtorrent: %s", alert.message())
 
-def stop_seeder():
-    """Stop the global seeder."""
-    global _seeder
-    if _seeder:
-        _seeder.stop()
-        _seeder = None
+    def write_status(self) -> None:
+        """Publish status where the web service can read it (GET /torrent/status)."""
+        status = self.status()
+        status["pid"] = os.getpid()
+        write_status(self.seeding_dir, status)
