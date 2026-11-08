@@ -306,11 +306,11 @@ def brake(names, url=None, etc=None):
         with urllib.request.urlopen(f'{url}?{query}', timeout=10) as answer:
             said = json.loads(answer.read())
         scram, banned = said['scram'], said['banned']
-    except Exception:  # down, slow, or an answer of the wrong shape: all the same here
+        held = [name for name in names if banned.get(name) is not False]  # a name it didn't answer for is held
+    except Exception:  # down, slow, or an answer of the wrong shape (re: a list for banned): all the same here
         return "memory-lane didn't say whether anyone is banned or AZ5 is on; nothing merges until it does"
     if scram is not False:
         return 'AZ5 is in force; nothing merges until an admin lifts it'
-    held = [name for name in names if banned.get(name) is not False]  # a name it didn't answer for is held
     if held:
         return f"{', '.join(held)}: banned (or memory-lane didn't say otherwise)"
     return None
