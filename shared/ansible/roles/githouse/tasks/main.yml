@@ -24,6 +24,14 @@
       - githouse_port | int > 1024
     fail_msg: "githouse_bind must be a private address ({{ githouse_bind }}); this is a production box"
 
+# memory-lane signs the merge button's orders under its own name (Plan, section 10); a person in the inventory
+# called that would get its line's rights in merge_signers (re, 8 Nov).
+- name: Nobody in hunter's inventory is called memory-lane
+  assert:
+    that:
+      - "'memory-lane' not in ((lookup('file', playbook_dir ~ '/../../hunter/ansible/inventory.yml') | from_yaml).all.vars.people | map(attribute='name') | list)"
+    fail_msg: "memory-lane is the merge button's signer in merge_signers; a person can't have that name"
+
 - name: Where githouse keeps the repositories, its keys and its build
   file:
     path: "{{ item }}"
