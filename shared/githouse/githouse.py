@@ -40,6 +40,16 @@ meant to be cheap to lose.
   logged, never retried by deleting anything.
 * branches.json, beside the repositories: every repository's branches, live,
   merged and closed, for magenta's autocomplete (memory-lane serves it).
+* `githouse merge`, on maybelle: a merge without a pull request, ordered by a person and signed with
+  their SSH key (Cryptograss:Moods/ramp/Plan, section 8; re's review, 7 Nov). The order names the
+  repository, the branch, its head commit and the branch it goes into, with a nonce and an expiry; it
+  is signed with `ssh-keygen -Y sign -n magenta-merge`, and githouse checks the signature itself against
+  /etc/githouse/merge_signers, which ansible writes with only the people who may merge. memory-lane
+  is never in the path. The merge is `--no-ff` of exactly that commit, pushed to GitHub first (until the
+  flip GitHub's branches are GitHub's: the minute's fetch brings it back), and each order and what came
+  of it are kept in /srv/git/.merges, its nonce spent whether it merged or not.
+  Brakes stop it (section 10): root's freeze (/etc/githouse/frozen), AZ5, or a ban on the signer, the
+  last two asked of memory-lane at every order. Its answer can only stop a merge; no answer stops it too.
 * `githouse mirror`, on hunter: a read-only copy of all of it, fetched from
   maybelle every minute and mounted into every container, so clones are
   instant. Nothing on it needs backing up.
@@ -53,7 +63,10 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import time
+import urllib.parse
+import urllib.request
 from pathlib import Path
 
 ROOT = Path(os.environ.get('GITHOUSE_ROOT', '/srv/git'))
@@ -255,6 +268,193 @@ def _ancestor(repo, a, b):
     return subprocess.run(['git', '--git-dir', str(repo), 'merge-base', '--is-ancestor', a, b]).returncode == 0
 
 
+# --- merging, on a signed order ----------------------------------------------------
+
+MERGE_NAMESPACE = 'magenta-merge'   # never the sign-in's ('magenta-moods'): a sign-in can't be replayed as a merge
+ORDER_HEADER = 'githouse merge order v1'
+ORDER_FIELDS = ('repo', 'branch', 'commit', 'into', 'by', 'nonce', 'expires')
+ORDER_LIFE_MAX = 2 * 3600   # seconds: an order can't be made to last longer than this
+SHA = re.compile(r'[0-9a-f]{40}')
+NONCE = re.compile(r'[0-9a-f]{32,64}')
+
+
+class Refused(Exception):
+    """A merge order not carried out, and why."""
+
+
+# --- the brakes: stopping takes less trust than starting (Plan, section 10) ------------
+# A merge stops if root has frozen merging, if an admin has pulled AZ5, or if an admin has banned
+# whoever is named in the order. Today, removing someone from the GitHub org stops their merging;
+# githouse pushes with its own deploy key, so the org can't stop a merge made here, and these must.
+# memory-lane keeps the bans and AZ5 (only MOOD_ADMINS set them) and is asked at every order. Its
+# answer can only stop a merge, never make one, and no answer stops it too. The freeze trusts
+# nothing but root: a file on maybelle, in githouse's read-only /etc, that nothing here can remove.
+
+BRAKES_URL = os.environ.get('GITHOUSE_BRAKES', '')   # memory-lane's /api/brakes/, on maybelle's private network
+FREEZE = 'frozen'                                    # /etc/githouse/frozen: `touch` it as root on maybelle
+
+
+def brake(names, url=None, etc=None):
+    """Why nothing may merge for these names now, or None. Fails closed: an unclear answer is a brake."""
+    if (Path(etc or ETC) / FREEZE).exists():
+        return 'merging is frozen on maybelle; root lifts it'
+    url = url if url is not None else BRAKES_URL
+    if not url:
+        return "githouse doesn't know where memory-lane's brakes are; nothing merges"
+    query = urllib.parse.urlencode([('name', name) for name in names])
+    try:
+        with urllib.request.urlopen(f'{url}?{query}', timeout=10) as answer:
+            said = json.loads(answer.read())
+        scram, banned = said['scram'], said['banned']
+        held = [name for name in names if banned.get(name) is not False]  # a name it didn't answer for is held
+    except Exception:  # down, slow, or an answer of the wrong shape (re: a list for banned): all the same here
+        return "memory-lane didn't say whether anyone is banned or AZ5 is on; nothing merges until it does"
+    if scram is not False:
+        return 'AZ5 is in force; nothing merges until an admin lifts it'
+    if held:
+        return f"{', '.join(held)}: banned (or memory-lane didn't say otherwise)"
+    return None
+
+
+def parse_order(text):
+    """{field: value} of an order's text: its header, then one 'field: value' line for each of ORDER_FIELDS."""
+    lines = text.split('\n')
+    if lines[0] != ORDER_HEADER:
+        raise Refused('not a merge order')
+    found = {}
+    for line in lines[1:]:
+        if not line:
+            continue
+        key, sep, value = line.partition(': ')
+        if not sep or key not in ORDER_FIELDS or key in found:
+            raise Refused(f'an order has one line for each of {", ".join(ORDER_FIELDS)}, and nothing else')
+        found[key] = value
+    if set(found) != set(ORDER_FIELDS):
+        raise Refused(f'missing: {", ".join(sorted(set(ORDER_FIELDS) - set(found)))}')
+    if not NAME.fullmatch(found['by']) or not NONCE.fullmatch(found['nonce']) or not SHA.fullmatch(found['commit']):
+        raise Refused('by, nonce or commit is malformed')
+    if not BRANCH.fullmatch(found['branch']) or owned(found['branch']):
+        raise Refused(f"{found['branch']}: not a branch that merges (GitHub's own branches don't)")
+    if not owned(found['into']) or not BRANCH.fullmatch(found['into']):
+        raise Refused(f"{found['into']}: a merge goes into one of {', '.join(OWNED)}")
+    try:
+        found['expires'] = int(found['expires'])
+    except ValueError:
+        raise Refused('expires is a unix time') from None
+    return found
+
+
+def signed_by(text, signature, by, signers):
+    """Whether `by` signed text, in the merge namespace, by a key the signers file lists for them."""
+    if not Path(signers).is_file():
+        return False
+    with tempfile.TemporaryDirectory() as tmp:
+        sig = Path(tmp) / 'order.sig'
+        sig.write_text(signature)
+        done = subprocess.run(['ssh-keygen', '-Y', 'verify', '-f', str(signers), '-I', by, '-n', MERGE_NAMESPACE,
+                               '-s', str(sig)], input=text, capture_output=True, text=True)
+    return done.returncode == 0
+
+
+def spend(nonce):
+    """The nonce, used now: False if it had been already. Kept with the repositories (/mnt/persist on maybelle),
+    so a redeploy can't make an unexpired order good again (re)."""
+    spent = ROOT / '.merges' / 'nonces'
+    spent.mkdir(parents=True, exist_ok=True)
+    try:
+        os.close(os.open(spent / nonce, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644))
+    except FileExistsError:
+        return False
+    return True
+
+
+def merge(text, signature, now=None, signers=None, brakes_url=None):
+    """Carry out a signed merge order: {'outcome': 'merged', 'merge': sha, ...} or {'outcome': 'refused', 'why'}.
+    Every order, refused or not, is kept as .merges/<nonce>.json for memory-lane to tell the Moods."""
+    now = int(time.time() if now is None else now)
+    signers = Path(signers or ETC / 'merge_signers')
+    order, result, signed = {}, {}, False
+    try:
+        order = parse_order(text)
+        if not signed_by(text, signature, order['by'], signers):
+            raise Refused(f"not signed by {order['by']}, or {order['by']} may not merge")
+        signed = True
+        if not spend(order['nonce']):
+            raise Refused('that order was used already')
+        held = brake([order['by']], url=brakes_url)   # after spending: a braked order isn't good again later
+        if held:
+            raise Refused(held)
+        if order['expires'] < now:
+            raise Refused('the order has expired; sign another')
+        if order['expires'] > now + ORDER_LIFE_MAX:
+            raise Refused(f'an order lasts {ORDER_LIFE_MAX // 3600} hours at most')
+        repo = ROOT / f"{order['repo']}.git"
+        if not NAME.fullmatch(order['repo']) or not (repo / 'HEAD').exists():
+            raise Refused(f"no repository {order['repo']} here")
+        result = _merge(repo, order)
+    except Refused as e:
+        result = {'outcome': 'refused', 'why': str(e)}
+    except RuntimeError as e:  # git itself failed (GitHub away mid-fetch, say): nothing pushed
+        result = {'outcome': 'refused', 'why': str(e)[:300]}
+    record = {**{k: v for k, v in order.items()}, **result, 'at': now, 'order': text, 'signature': signature}
+    # Only a signed order is kept: an unsigned one naming a nonce mustn't take the record its signer's will need (re).
+    if signed:
+        path = ROOT / '.merges' / f"{order['nonce']}.json"
+        if not path.exists():  # an order used twice keeps its first record; the second is only logged
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(record, indent=1, sort_keys=True))
+            path.chmod(0o644)
+    log(f"merge {order.get('repo', '?')}:{order.get('branch', '?')} by {order.get('by', '?')}: "
+        f"{result.get('outcome')} {result.get('merge') or result.get('why', '')}")
+    return result
+
+
+def _merge(repo, order):
+    branch, commit, into = order['branch'], order['commit'], order['into']
+    # The branch's head, as GitHub and this copy have it: it must be the commit signed for.
+    there = git(repo, 'ls-remote', 'github', f'refs/heads/{branch}', f'refs/heads/{into}', check=False)
+    if there is None:
+        raise Refused("GitHub didn't answer; nothing merged")
+    heads = {ref[len('refs/heads/'):]: sha for sha, ref in (line.split('\t', 1) for line in there.splitlines())}
+    here = refs(repo, 'refs/heads/').get(branch)
+    if into not in heads:
+        raise Refused(f'{into}: no such branch on GitHub')
+    for where, sha in (('GitHub', heads.get(branch)), ('githouse', here)):
+        if sha is not None and sha != commit:
+            raise Refused(f'{branch} has moved on {where} ({sha[:8]}); sign for what it is now')
+    if heads.get(branch) is None and here is None:
+        raise Refused(f'{branch}: no such branch')
+    wanted = [f'+refs/heads/{into}:refs/heads/{into}'] + ([f'refs/heads/{branch}'] if heads.get(branch) else [])
+    git(repo, 'fetch', '--quiet', '--no-tags', 'github', *wanted)
+    tip = heads[into]
+    if git(repo, 'merge-base', '--is-ancestor', commit, tip, check=False) is not None:
+        raise Refused(f'{commit[:8]} is in {into} already')
+    tree = subprocess.run(['git', '--git-dir', str(repo), 'merge-tree', '--write-tree', '--no-messages', tip, commit],
+                          capture_output=True, text=True)
+    if tree.returncode == 1:
+        raise Refused(f'{branch} conflicts with {into}; merge {into} into it, push, and sign again')
+    if tree.returncode != 0:  # git itself failed, not a conflict: say what it said (re)
+        raise Refused(f'merge-tree failed: {tree.stderr.strip()[:200]}')
+    message = (f"Merge {order['repo']}:{branch} ({commit[:8]})\n\n"
+               f"Signed by {order['by']} (githouse merge order {order['nonce'][:12]}).\n")
+    who = {'GIT_AUTHOR_NAME': order['by'], 'GIT_AUTHOR_EMAIL': f"{order['by']}@githouse",
+           'GIT_COMMITTER_NAME': 'githouse', 'GIT_COMMITTER_EMAIL': 'githouse@maybelle'}
+    merged = git(repo, 'commit-tree', tree.stdout.split()[0], '-p', tip, '-p', commit, '-m', message, env=who).strip()
+    # GitHub first: its branches are GitHub's until the flip, and the minute's fetch would overwrite one made here.
+    pushed = subprocess.run(['git', '--git-dir', str(repo), 'push', '--quiet', 'github', f'{merged}:refs/heads/{into}'],
+                            capture_output=True, text=True)
+    if pushed.returncode != 0:
+        raise Refused(f'GitHub refused the merge ({into} moved, or the key can\'t push): {pushed.stderr.strip()[:200]}')
+    # Merged now, on GitHub. Here it's only bookkeeping: the minute's fetch would bring it anyway.
+    try:
+        git(repo, 'update-ref', f'refs/heads/{into}', merged, tip)
+        retire(repo)
+        publish()
+    except RuntimeError as e:
+        log(f'{repo.name}: merged {merged[:8]} on GitHub; here, {e}')
+    return {'outcome': 'merged', 'merge': merged, 'onto': tip}
+
+
 # --- setting up, and the loops --------------------------------------------------------
 
 def init(full_names, url='https://github.com/{}.git', forward=False):
@@ -380,6 +580,17 @@ def main(argv):
             fetch(repo)
         publish()
         return 0
+    if command == 'merge':  # merge: {"order", "signature"} on stdin, from `magenta.sh merge` over ssh to maybelle
+        if os.geteuid() == 0:
+            sys.stderr.write('githouse: merge as git (docker exec -u git), so what it writes stays git\'s\n')
+            return 2
+        try:
+            body = json.loads(sys.stdin.read())
+            result = merge(str(body['order']), str(body['signature']))
+        except (ValueError, KeyError, TypeError):
+            result = {'outcome': 'refused', 'why': 'expected {"order", "signature"} on stdin'}
+        print(json.dumps(result))
+        return 0 if result.get('outcome') == 'merged' else 1
     if command == 'loop':
         loop()
     if command == 'mirror':  # mirror <upstream> <owner/name>...: hunter's copy of maybelle's

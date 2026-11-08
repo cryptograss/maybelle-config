@@ -11,7 +11,9 @@
 #
 # Needs: githouse_dir, githouse_bind (a private address), githouse_port,
 # githouse_pushers ({container: [names] | {names, fetch_only}}),
-# githouse_repos (owner/name list), jenkins_github_ssh_key (vault, b64).
+# githouse_repos (owner/name list), jenkins_github_ssh_key (vault, b64);
+# githouse_mergers (names that may sign a merge order; none if unset);
+# githouse_brakes_url (memory-lane's /api/brakes/: unset, nothing merges).
 
 - name: githouse listens on the private network only, never 0.0.0.0
   assert:
@@ -44,6 +46,21 @@
     dest: "{{ githouse_dir }}/etc/pushers.json"
     content: "{{ githouse_pushers | to_nice_json }}\n"
     mode: '0644'
+
+# A merge without a pull request is an order signed with a person's SSH key
+# (`ssh-keygen -Y sign -n magenta-merge`), and githouse checks it against this
+# file: only githouse_mergers, by the key hunter's inventory knows them by, in
+# a namespace of its own, so a sign-in signature (magenta-moods) is never a
+# merge. Cryptograss:Moods/ramp/Plan, section 8. Read as maybelle.yml reads
+# allowed_signers: lookup('file') | from_yaml, the vault templates untouched.
+- name: Who may merge, by their keys (githouse checks merge orders against this, not memory-lane)
+  copy:
+    dest: "{{ githouse_dir }}/etc/merge_signers"
+    mode: '0644'
+    content: |
+      {% for user in (lookup('file', playbook_dir ~ '/../../hunter/ansible/inventory.yml') | from_yaml).all.vars.people if user.name in (githouse_mergers | default([])) and (user.ssh_pubkey | default('') | trim) is match('ssh-') %}
+      {{ user.name }} namespaces="magenta-merge" {{ user.ssh_pubkey | trim }}
+      {% endfor %}
 
 # As the vault holds it, base64; entrypoint.sh decodes it (so the deploy logic renders without the vault).
 - name: "GitHub's key for githouse (Jenkins's, from the vault): fetch over ssh, forward pushes"
@@ -87,6 +104,8 @@
           environment:
             - GITHOUSE_MODE=server
             - GITHOUSE_REPOS={{ githouse_repos | join(' ') }}
+            # Asked at every merge order: is AZ5 on, is the signer banned? No answer, no merge (Plan, section 10).
+            - GITHOUSE_BRAKES={{ githouse_brakes_url | default('') }}
           volumes:
             - {{ githouse_dir }}/git:/srv/git
             - {{ githouse_dir }}/etc:/etc/githouse:ro
@@ -112,6 +131,26 @@
   failed_when: >-
     githouse_port_check.stdout_lines | length == 0
     or githouse_port_check.stdout_lines | reject('search', (githouse_bind | regex_escape) ~ ':' ~ githouse_port ~ '$') | list | length > 0
+
+# Any HTTP answer will do here (memory-lane may not serve /api/brakes/ yet): this is about the network.
+# If githouse can't reach memory-lane at all, every merge order is refused, so say so at the deploy.
+- name: githouse reaches memory-lane's brakes (no answer means no merges)
+  command:
+    argv:
+      - docker
+      - exec
+      - githouse
+      - python3
+      - -c
+      - |
+        import sys, urllib.error, urllib.request
+        try:
+            urllib.request.urlopen(sys.argv[1], timeout=10)
+        except urllib.error.HTTPError:
+            pass
+      - "{{ githouse_brakes_url }}"
+  changed_when: false
+  when: githouse_brakes_url | default('') | length > 0
 
 - name: githouse has the repositories (its first fetch can take a while; arthel is big)
   stat:

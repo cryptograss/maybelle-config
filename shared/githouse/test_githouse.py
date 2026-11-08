@@ -1,12 +1,15 @@
 """githouse against real repositories: a stand-in GitHub, githouse's clone of it, and someone's working copy."""
 
+import http.server
 import io
 import json
 import os
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
+import urllib.parse
 import unittest.mock
 from pathlib import Path
 
@@ -19,7 +22,8 @@ def run(*args, cwd=None, env=None):
     return done.returncode, done.stdout + done.stderr
 
 
-class GithouseTest(unittest.TestCase):
+class Repos(unittest.TestCase):
+    """A stand-in GitHub, githouse's clone of it, and a working copy: no tests of its own."""
 
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())
@@ -62,6 +66,9 @@ class GithouseTest(unittest.TestCase):
         run('git', 'fetch', '--quiet', str(self.repo), f'refs/heads/{branch}:refs/remotes/h/{branch}', cwd=self.upstream)
         run('git', 'merge', '--quiet', '--no-ff', '-m', f'Merge {branch}', f'h/{branch}', cwd=self.upstream)
         run('git', 'push', '--quiet', 'origin', 'HEAD:main', cwd=self.upstream)
+
+
+class GithouseTest(Repos):
 
     # --- GitHub's branches -----------------------------------------------------------
 
@@ -262,6 +269,221 @@ class GithouseTest(unittest.TestCase):
         with self.assertRaises(PermissionError):
             githouse.auth('Re Bad', "git-upload-pack 'magenta.git'")
 
+
+
+class MergeTest(Repos):
+    """githouse merge: a signed order, checked here, merged --no-ff and pushed to GitHub first (Plan, section 8)."""
+
+    def setUp(self):
+        super().setUp()
+        self.keys = self.tmp / 'keys'
+        self.keys.mkdir()
+        for who in ('justin', 'skyler'):
+            run('ssh-keygen', '-q', '-t', 'ed25519', '-N', '', '-C', who, '-f', str(self.keys / who))
+        # Only justin may merge: the file ansible writes from the inventory and githouse_mergers.
+        self.signers = self.tmp / 'merge_signers'
+        pub = (self.keys / 'justin.pub').read_text().strip()
+        self.signers.write_text(f'justin namespaces="{githouse.MERGE_NAMESPACE}" {pub}\n')
+        self.commit(self.work, 'the fix')
+        self.assertEqual(self.push('re', 'HEAD:re/foo')[0], 0)
+        self.head = githouse.refs(self.repo, 'refs/heads/')['re/foo']
+        self.now = 1_800_000_000
+        # githouse's /etc, where root's freeze would be, and memory-lane's brakes, played by a small server:
+        # it answers for every name asked about, none banned and no AZ5, unless a test says otherwise.
+        self.etc = self.tmp / 'etc'
+        self.etc.mkdir()
+        patcher = unittest.mock.patch.object(githouse, 'ETC', self.etc)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.banned, self.scram, self.answer, self.asked = set(), False, None, []
+        test = self
+
+        class Brakes(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                names = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query).get('name', [])
+                test.asked.append(names)
+                said = test.answer if test.answer is not None else \
+                    {'scram': test.scram, 'banned': {name: name in test.banned for name in names}}
+                body = json.dumps(said).encode()
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *args):
+                pass
+
+        server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Brakes)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        self.brakes = f'http://127.0.0.1:{server.server_address[1]}/api/brakes/'
+
+    def order(self, **change):
+        fields = {'repo': 'magenta', 'branch': 're/foo', 'commit': self.head, 'into': 'main', 'by': 'justin',
+                  'nonce': os.urandom(16).hex(), 'expires': str(self.now + 3600), **change}
+        return githouse.ORDER_HEADER + '\n' + ''.join(f'{k}: {fields[k]}\n' for k in githouse.ORDER_FIELDS)
+
+    def sign(self, text, key='justin', namespace=None):
+        path = Path(tempfile.mkdtemp(dir=self.tmp)) / 'order.txt'  # a .sig already there would be asked about
+        path.write_text(text)
+        run('ssh-keygen', '-Y', 'sign', '-q', '-f', str(self.keys / key), '-n', namespace or githouse.MERGE_NAMESPACE, str(path))
+        return path.with_suffix('.txt.sig').read_text()
+
+    def merge(self, text, signature=None, brakes=None):
+        return githouse.merge(text, signature if signature is not None else self.sign(text), now=self.now,
+                              signers=self.signers, brakes_url=brakes if brakes is not None else self.brakes)
+
+    def github_main(self):
+        return run('git', '--git-dir', str(self.github), 'rev-parse', 'main')[1].strip()
+
+    def test_a_signed_order_merges_on_github_first(self):
+        before = self.github_main()
+        text = self.order()
+        result = self.merge(text)
+        self.assertEqual(result['outcome'], 'merged', result)
+        self.assertEqual(self.github_main(), result['merge'])
+        parents = run('git', '--git-dir', str(self.github), 'rev-list', '--parents', '-n', '1', 'main')[1].split()
+        self.assertEqual(parents[1:], [before, self.head])  # --no-ff: the target first, then exactly the commit signed for
+        message = run('git', '--git-dir', str(self.github), 'log', '-1', '--format=%B%n%an', 'main')[1]
+        self.assertIn('Merge magenta:re/foo', message)
+        self.assertIn('Signed by justin', message)
+        self.assertEqual(githouse.refs(self.repo, 'refs/heads/')['main'], result['merge'])
+        self.assertIn('re/foo', githouse.refs(self.repo, 'refs/merged/'))  # the name is used, as any merge
+        nonce = githouse.parse_order(text)['nonce']
+        kept = json.loads((self.root / '.merges' / f'{nonce}.json').read_text())
+        self.assertEqual((kept['outcome'], kept['by'], kept['order']), ('merged', 'justin', text))
+
+    def test_a_merger_with_an_rsa_key(self):
+        # skyler's key in hunter's inventory is ssh-rsa; githouse_mergers gained skyler on 7 Nov.
+        run('ssh-keygen', '-q', '-t', 'rsa', '-b', '3072', '-N', '', '-C', 'skyler', '-f', str(self.keys / 'skyler-rsa'))
+        pub = (self.keys / 'skyler-rsa.pub').read_text().strip()
+        with self.signers.open('a') as f:
+            f.write(f'skyler namespaces="{githouse.MERGE_NAMESPACE}" {pub}\n')
+        text = self.order(by='skyler')
+        result = self.merge(text, self.sign(text, key='skyler-rsa'))
+        self.assertEqual(result['outcome'], 'merged', result)
+        self.assertEqual(self.github_main(), result['merge'])
+
+    def test_an_order_is_good_once(self):
+        text = self.order()
+        signature = self.sign(text)
+        self.assertEqual(self.merge(text, signature)['outcome'], 'merged')
+        again = self.merge(text, signature)
+        self.assertEqual((again['outcome'], again['why']), ('refused', 'that order was used already'))
+
+    def test_a_refused_order_is_spent_too(self):
+        text = self.order(into='production', branch='re/nothing')
+        signature = self.sign(text)
+        self.assertEqual(self.merge(text, signature)['outcome'], 'refused')
+        self.assertEqual(self.merge(text, signature)['why'], 'that order was used already')
+
+    def test_only_a_merger_s_signature_in_the_merge_namespace(self):
+        as_justin, as_skyler = self.order(), self.order(by='skyler')
+        for why, text, signature in (
+                ('a sign-in signature (namespace magenta-moods)', as_justin, self.sign(as_justin, namespace='magenta-moods')),
+                ('skyler, who is not in merge_signers', as_skyler, self.sign(as_skyler, key='skyler')),
+                ("justin's key, on an order that says by: skyler", as_skyler, self.sign(as_skyler, key='justin')),
+                ('no signature', as_justin, 'nonsense')):
+            with self.subTest(why):
+                result = self.merge(text, signature)
+                self.assertEqual(result['outcome'], 'refused')
+                self.assertIn('not signed by', result['why'])
+        self.assertEqual(self.github_main(), run('git', '--git-dir', str(self.repo), 'rev-parse', 'main')[1].strip())
+
+    def test_an_unsigned_order_can_t_take_a_signed_one_s_record(self):
+        text = self.order()
+        nonce = githouse.parse_order(text)['nonce']
+        self.assertEqual(self.merge(text, 'nonsense')['outcome'], 'refused')
+        self.assertFalse((self.root / '.merges' / f'{nonce}.json').exists())
+        self.assertEqual(self.merge(text)['outcome'], 'merged')
+        self.assertEqual(json.loads((self.root / '.merges' / f'{nonce}.json').read_text())['outcome'], 'merged')
+
+    def test_a_changed_word_breaks_the_signature(self):
+        text = self.order()
+        signature = self.sign(text)
+        result = self.merge(text.replace('into: main', 'into: production'), signature)
+        self.assertEqual(result['outcome'], 'refused')
+
+    def test_expired_or_too_long(self):
+        for expires, why in ((self.now - 1, 'expired'), (self.now + githouse.ORDER_LIFE_MAX + 60, 'at most')):
+            result = self.merge(self.order(expires=str(expires)))
+            self.assertIn(why, result['why'])
+
+    def test_a_branch_that_moved_after_signing(self):
+        text = self.order()
+        self.commit(self.work, 'one more')
+        self.assertEqual(self.push('re', 'HEAD:re/foo')[0], 0)
+        result = self.merge(text)
+        self.assertEqual(result['outcome'], 'refused')
+        self.assertIn('has moved on githouse', result['why'])
+
+    def test_a_conflict_merges_nothing(self):
+        (self.upstream / 'the fix.txt').write_text('something else')
+        run('git', 'add', '.', cwd=self.upstream)
+        run('git', 'commit', '--quiet', '-m', 'meanwhile', cwd=self.upstream)
+        run('git', 'push', '--quiet', 'origin', 'HEAD:main', cwd=self.upstream)
+        before = self.github_main()
+        result = self.merge(self.order())
+        self.assertIn('conflicts with main', result['why'])
+        self.assertEqual(self.github_main(), before)
+
+    def test_only_into_githubs_branches_and_not_twice(self):
+        self.assertIn('a merge goes into', self.merge(self.order(into='re/other'))['why'])
+        self.assertIn("GitHub's own branches don't", self.merge(self.order(branch='main'))['why'])
+        self.assertEqual(self.merge(self.order())['outcome'], 'merged')
+        self.assertIn('no such branch', self.merge(self.order())['why'])  # merged: its name is retired here
+        self.assertIn('no repository', self.merge(self.order(repo='nonesuch'))['why'])
+
+    # --- the brakes (Plan, section 10): any of them stops a merge, and none of them can make one
+
+    def assert_braked(self, why, **merge):
+        before = self.github_main()
+        text = self.order()
+        result = self.merge(text, **merge)
+        self.assertEqual(result['outcome'], 'refused', result)
+        self.assertIn(why, result['why'])
+        self.assertEqual(self.github_main(), before)
+        # Spent: a braked order can't be played again once the brake is off.
+        self.banned, self.scram, self.answer = set(), False, None
+        (self.etc / githouse.FREEZE).unlink(missing_ok=True)
+        self.assertEqual(self.merge(text, self.sign(text), brakes=self.brakes)['why'], 'that order was used already')
+
+    def test_memory_lane_is_asked_about_the_signer(self):
+        self.assertEqual(self.merge(self.order())['outcome'], 'merged')
+        self.assertEqual(self.asked, [['justin']])
+
+    def test_a_banned_signer(self):
+        self.banned = {'justin'}
+        self.assert_braked('justin: banned')
+
+    def test_az5(self):
+        self.scram = {'by': 'justin', 'at': '2026-11-08T00:00:00Z'}  # memory-lane says who pulled it: not False
+        self.assert_braked('AZ5 is in force')
+
+    def test_root_s_freeze_holds_whatever_memory_lane_says(self):
+        (self.etc / githouse.FREEZE).touch()
+        self.assert_braked('frozen on maybelle')
+
+    def test_memory_lane_not_answering(self):
+        closed = 'http://127.0.0.1:9/api/brakes/'  # the discard port: nothing listens
+        self.assert_braked("memory-lane didn't say", brakes=closed)
+
+    def test_an_answer_that_leaves_the_signer_out(self):
+        self.answer = {'scram': False, 'banned': {}}
+        self.assert_braked('justin: banned')
+
+    def test_an_answer_of_the_wrong_shape(self):
+        for answer in ({'ok': True}, {'scram': False, 'banned': ['justin']}, {'scram': False, 'banned': 'no'}, []):
+            self.answer = answer
+            self.assert_braked("memory-lane didn't say")
+
+    def test_nowhere_to_ask(self):
+        with unittest.mock.patch.object(githouse, 'BRAKES_URL', ''):
+            self.assert_braked("doesn't know where", brakes='')
+
+    def test_not_an_order(self):
+        self.assertEqual(self.merge('merge everything please', 'x')['why'], 'not a merge order')
 
 if __name__ == '__main__':
     unittest.main()
