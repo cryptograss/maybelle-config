@@ -7,6 +7,7 @@ Blue Railroad's responsibility.
 Requires API key auth (X-API-Key header).
 """
 
+import asyncio
 import logging
 import shutil
 import subprocess
@@ -24,6 +25,9 @@ from ..services.torrent import create_torrent, DEFAULT_TRACKERS
 from ..services.seeding_store import stage_for_seeding
 
 logger = logging.getLogger(__name__)
+
+# CIDs whose torrent is being made right now (generate_torrent).
+_in_progress: set[str] = set()
 
 router = APIRouter(prefix="/enrich", tags=["enrich"])
 
@@ -71,8 +75,10 @@ async def fetch_ipfs_content(cid: str, ipfs_api_url: str) -> Path | None:
                     async for chunk in r.aiter_bytes(1024 * 1024):
                         f.write(chunk)
 
-        # Extract tar
-        subprocess.run(
+        # Extract tar, off the event loop: a big Release takes a while, and
+        # every other request waits on a blocked loop (8 Nov 2026).
+        await asyncio.to_thread(
+            subprocess.run,
             ["tar", "xf", str(tar_path), "-C", str(tmpdir)],
             capture_output=True, check=True,
         )
@@ -117,6 +123,19 @@ async def generate_torrent(
     """
     cid = req.cid
 
+    # One at a time per CID. The Blue Railroad job asks every 2 minutes, and with
+    # the work off the event loop a slow Release could otherwise be fetched and
+    # hashed twice at once.
+    if cid in _in_progress:
+        return TorrentResponse(success=False, cid=cid, error="Already being made")
+    _in_progress.add(cid)
+    try:
+        return await _generate_torrent(req, cid, settings)
+    finally:
+        _in_progress.discard(cid)
+
+
+async def _generate_torrent(req: TorrentRequest, cid: str, settings: Settings) -> TorrentResponse:
     album_dir = await fetch_ipfs_content(cid, settings.ipfs_api_url)
     if album_dir is None:
         return TorrentResponse(
@@ -128,7 +147,10 @@ async def generate_torrent(
     try:
         torrent_name = req.name or cid
         base_url = settings.ipfs_gateway_url.replace("ipfs.", "", 1)
-        result = create_torrent(
+        # Hashing every piece of a Release: in a thread, so the web service
+        # keeps answering meanwhile.
+        result = await asyncio.to_thread(
+            create_torrent,
             directory=album_dir,
             name=torrent_name,
             # Multi-file: Caddy rewrites /webseed/{cid}/{name}/{file} → /ipfs/{cid}/{file}
@@ -151,8 +173,9 @@ async def generate_torrent(
         # Hand the files to the seeder, which runs in its own container: it
         # lays them out and starts seeding within seconds (seeding_store).
         torrent_url = None
-        if result.torrent_bytes and stage_for_seeding(
-            settings.seeding_dir, cid, result.torrent_bytes, album_dir
+        # A move onto the Storage Box is a full copy: in a thread too.
+        if result.torrent_bytes and await asyncio.to_thread(
+            stage_for_seeding, settings.seeding_dir, cid, result.torrent_bytes, album_dir
         ):
             torrent_url = f"{base_url}/torrent/{result.infohash}.torrent"
             logger.info("Handed torrent for %s to the seeder (infohash %s)", cid, result.infohash)
@@ -173,4 +196,4 @@ async def generate_torrent(
 
     finally:
         parent = album_dir.parent
-        shutil.rmtree(parent, ignore_errors=True)
+        await asyncio.to_thread(shutil.rmtree, parent, ignore_errors=True)
