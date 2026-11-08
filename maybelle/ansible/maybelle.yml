@@ -38,6 +38,8 @@
     # Asked at every merge order whether AZ5 is on or the signer is banned (Plan, section 10):
     # memory-lane on the private network, as hunter reaches it.
     githouse_brakes_url: "http://10.0.0.2:3000/api/brakes/"
+    # Where merge orders wait to be fetched: memory-lane carries them, githouse checks each.
+    githouse_orders_url: "http://10.0.0.2:3000/api/merge-orders/pending/"
 
   pre_tasks:
     - name: Install community.docker collection

@@ -13,7 +13,8 @@
 # githouse_pushers ({container: [names] | {names, fetch_only}}),
 # githouse_repos (owner/name list), jenkins_github_ssh_key (vault, b64);
 # githouse_mergers (names that may sign a merge order; none if unset);
-# githouse_brakes_url (memory-lane's /api/brakes/: unset, nothing merges).
+# githouse_brakes_url (memory-lane's /api/brakes/: unset, nothing merges);
+# githouse_orders_url (memory-lane's /api/merge-orders/pending/: unset, no orders by mail).
 
 - name: githouse listens on the private network only, never 0.0.0.0
   assert:
@@ -106,6 +107,9 @@
             - GITHOUSE_REPOS={{ githouse_repos | join(' ') }}
             # Asked at every merge order: is AZ5 on, is the signer banned? No answer, no merge (Plan, section 10).
             - GITHOUSE_BRAKES={{ githouse_brakes_url | default('') }}
+            # Merge orders by mail: memory-lane keeps them, githouse fetches them every few seconds and
+            # checks each itself (Plan, section 8, 8 Nov).
+            - GITHOUSE_ORDERS={{ githouse_orders_url | default('') }}
           volumes:
             - {{ githouse_dir }}/git:/srv/git
             - {{ githouse_dir }}/etc:/etc/githouse:ro
