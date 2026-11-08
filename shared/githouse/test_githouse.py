@@ -1,12 +1,15 @@
 """githouse against real repositories: a stand-in GitHub, githouse's clone of it, and someone's working copy."""
 
+import http.server
 import io
 import json
 import os
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
+import urllib.parse
 import unittest.mock
 from pathlib import Path
 
@@ -285,6 +288,36 @@ class MergeTest(Repos):
         self.assertEqual(self.push('re', 'HEAD:re/foo')[0], 0)
         self.head = githouse.refs(self.repo, 'refs/heads/')['re/foo']
         self.now = 1_800_000_000
+        # githouse's /etc, where root's freeze would be, and memory-lane's brakes, played by a small server:
+        # it answers for every name asked about, none banned and no AZ5, unless a test says otherwise.
+        self.etc = self.tmp / 'etc'
+        self.etc.mkdir()
+        patcher = unittest.mock.patch.object(githouse, 'ETC', self.etc)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.banned, self.scram, self.answer, self.asked = set(), False, None, []
+        test = self
+
+        class Brakes(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                names = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query).get('name', [])
+                test.asked.append(names)
+                said = test.answer if test.answer is not None else \
+                    {'scram': test.scram, 'banned': {name: name in test.banned for name in names}}
+                body = json.dumps(said).encode()
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *args):
+                pass
+
+        server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Brakes)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        self.brakes = f'http://127.0.0.1:{server.server_address[1]}/api/brakes/'
 
     def order(self, **change):
         fields = {'repo': 'magenta', 'branch': 're/foo', 'commit': self.head, 'into': 'main', 'by': 'justin',
@@ -297,9 +330,9 @@ class MergeTest(Repos):
         run('ssh-keygen', '-Y', 'sign', '-q', '-f', str(self.keys / key), '-n', namespace or githouse.MERGE_NAMESPACE, str(path))
         return path.with_suffix('.txt.sig').read_text()
 
-    def merge(self, text, signature=None):
+    def merge(self, text, signature=None, brakes=None):
         return githouse.merge(text, signature if signature is not None else self.sign(text), now=self.now,
-                              signers=self.signers)
+                              signers=self.signers, brakes_url=brakes if brakes is not None else self.brakes)
 
     def github_main(self):
         return run('git', '--git-dir', str(self.github), 'rev-parse', 'main')[1].strip()
@@ -401,6 +434,52 @@ class MergeTest(Repos):
         self.assertEqual(self.merge(self.order())['outcome'], 'merged')
         self.assertIn('no such branch', self.merge(self.order())['why'])  # merged: its name is retired here
         self.assertIn('no repository', self.merge(self.order(repo='nonesuch'))['why'])
+
+    # --- the brakes (Plan, section 10): any of them stops a merge, and none of them can make one
+
+    def assert_braked(self, why, **merge):
+        before = self.github_main()
+        text = self.order()
+        result = self.merge(text, **merge)
+        self.assertEqual(result['outcome'], 'refused', result)
+        self.assertIn(why, result['why'])
+        self.assertEqual(self.github_main(), before)
+        # Spent: a braked order can't be played again once the brake is off.
+        self.banned, self.scram, self.answer = set(), False, None
+        (self.etc / githouse.FREEZE).unlink(missing_ok=True)
+        self.assertEqual(self.merge(text, self.sign(text), brakes=self.brakes)['why'], 'that order was used already')
+
+    def test_memory_lane_is_asked_about_the_signer(self):
+        self.assertEqual(self.merge(self.order())['outcome'], 'merged')
+        self.assertEqual(self.asked, [['justin']])
+
+    def test_a_banned_signer(self):
+        self.banned = {'justin'}
+        self.assert_braked('justin: banned')
+
+    def test_az5(self):
+        self.scram = {'by': 'justin', 'at': '2026-11-08T00:00:00Z'}  # memory-lane says who pulled it: not False
+        self.assert_braked('AZ5 is in force')
+
+    def test_root_s_freeze_holds_whatever_memory_lane_says(self):
+        (self.etc / githouse.FREEZE).touch()
+        self.assert_braked('frozen on maybelle')
+
+    def test_memory_lane_not_answering(self):
+        closed = 'http://127.0.0.1:9/api/brakes/'  # the discard port: nothing listens
+        self.assert_braked("memory-lane didn't say", brakes=closed)
+
+    def test_an_answer_that_leaves_the_signer_out(self):
+        self.answer = {'scram': False, 'banned': {}}
+        self.assert_braked('justin: banned')
+
+    def test_an_answer_of_the_wrong_shape(self):
+        self.answer = {'ok': True}
+        self.assert_braked("memory-lane didn't say")
+
+    def test_nowhere_to_ask(self):
+        with unittest.mock.patch.object(githouse, 'BRAKES_URL', ''):
+            self.assert_braked("doesn't know where", brakes='')
 
     def test_not_an_order(self):
         self.assertEqual(self.merge('merge everything please', 'x')['why'], 'not a merge order')

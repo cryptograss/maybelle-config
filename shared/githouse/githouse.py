@@ -48,6 +48,8 @@ meant to be cheap to lose.
   is never in the path. The merge is `--no-ff` of exactly that commit, pushed to GitHub first (until the
   flip GitHub's branches are GitHub's: the minute's fetch brings it back), and each order and what came
   of it are kept in /srv/git/.merges, its nonce spent whether it merged or not.
+  Brakes stop it (section 10): root's freeze (/etc/githouse/frozen), AZ5, or a ban on the signer, the
+  last two asked of memory-lane at every order. Its answer can only stop a merge; no answer stops it too.
 * `githouse mirror`, on hunter: a read-only copy of all of it, fetched from
   maybelle every minute and mounted into every container, so clones are
   instant. Nothing on it needs backing up.
@@ -63,6 +65,8 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.parse
+import urllib.request
 from pathlib import Path
 
 ROOT = Path(os.environ.get('GITHOUSE_ROOT', '/srv/git'))
@@ -278,6 +282,40 @@ class Refused(Exception):
     """A merge order not carried out, and why."""
 
 
+# --- the brakes: stopping takes less trust than starting (Plan, section 10) ------------
+# A merge stops if root has frozen merging, if an admin has pulled AZ5, or if an admin has banned
+# whoever is named in the order. Today, removing someone from the GitHub org stops their merging;
+# githouse pushes with its own deploy key, so the org can't stop a merge made here, and these must.
+# memory-lane keeps the bans and AZ5 (only MOOD_ADMINS set them) and is asked at every order. Its
+# answer can only stop a merge, never make one, and no answer stops it too. The freeze trusts
+# nothing but root: a file on maybelle, in githouse's read-only /etc, that nothing here can remove.
+
+BRAKES_URL = os.environ.get('GITHOUSE_BRAKES', '')   # memory-lane's /api/brakes/, on maybelle's private network
+FREEZE = 'frozen'                                    # /etc/githouse/frozen: `touch` it as root on maybelle
+
+
+def brake(names, url=None, etc=None):
+    """Why nothing may merge for these names now, or None. Fails closed: an unclear answer is a brake."""
+    if (Path(etc or ETC) / FREEZE).exists():
+        return 'merging is frozen on maybelle; root lifts it'
+    url = url if url is not None else BRAKES_URL
+    if not url:
+        return "githouse doesn't know where memory-lane's brakes are; nothing merges"
+    query = urllib.parse.urlencode([('name', name) for name in names])
+    try:
+        with urllib.request.urlopen(f'{url}?{query}', timeout=10) as answer:
+            said = json.loads(answer.read())
+        scram, banned = said['scram'], said['banned']
+    except Exception:  # down, slow, or an answer of the wrong shape: all the same here
+        return "memory-lane didn't say whether anyone is banned or AZ5 is on; nothing merges until it does"
+    if scram is not False:
+        return 'AZ5 is in force; nothing merges until an admin lifts it'
+    held = [name for name in names if banned.get(name) is not False]  # a name it didn't answer for is held
+    if held:
+        return f"{', '.join(held)}: banned (or memory-lane didn't say otherwise)"
+    return None
+
+
 def parse_order(text):
     """{field: value} of an order's text: its header, then one 'field: value' line for each of ORDER_FIELDS."""
     lines = text.split('\n')
@@ -330,7 +368,7 @@ def spend(nonce):
     return True
 
 
-def merge(text, signature, now=None, signers=None):
+def merge(text, signature, now=None, signers=None, brakes_url=None):
     """Carry out a signed merge order: {'outcome': 'merged', 'merge': sha, ...} or {'outcome': 'refused', 'why'}.
     Every order, refused or not, is kept as .merges/<nonce>.json for memory-lane to tell the Moods."""
     now = int(time.time() if now is None else now)
@@ -343,6 +381,9 @@ def merge(text, signature, now=None, signers=None):
         signed = True
         if not spend(order['nonce']):
             raise Refused('that order was used already')
+        held = brake([order['by']], url=brakes_url)   # after spending: a braked order isn't good again later
+        if held:
+            raise Refused(held)
         if order['expires'] < now:
             raise Refused('the order has expired; sign another')
         if order['expires'] > now + ORDER_LIFE_MAX:

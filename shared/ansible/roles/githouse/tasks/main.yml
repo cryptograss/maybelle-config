@@ -12,7 +12,8 @@
 # Needs: githouse_dir, githouse_bind (a private address), githouse_port,
 # githouse_pushers ({container: [names] | {names, fetch_only}}),
 # githouse_repos (owner/name list), jenkins_github_ssh_key (vault, b64);
-# githouse_mergers (names that may sign a merge order; none if unset).
+# githouse_mergers (names that may sign a merge order; none if unset);
+# githouse_brakes_url (memory-lane's /api/brakes/: unset, nothing merges).
 
 - name: githouse listens on the private network only, never 0.0.0.0
   assert:
@@ -103,6 +104,8 @@
           environment:
             - GITHOUSE_MODE=server
             - GITHOUSE_REPOS={{ githouse_repos | join(' ') }}
+            # Asked at every merge order: is AZ5 on, is the signer banned? No answer, no merge (Plan, section 10).
+            - GITHOUSE_BRAKES={{ githouse_brakes_url | default('') }}
           volumes:
             - {{ githouse_dir }}/git:/srv/git
             - {{ githouse_dir }}/etc:/etc/githouse:ro
@@ -128,6 +131,26 @@
   failed_when: >-
     githouse_port_check.stdout_lines | length == 0
     or githouse_port_check.stdout_lines | reject('search', (githouse_bind | regex_escape) ~ ':' ~ githouse_port ~ '$') | list | length > 0
+
+# Any HTTP answer will do here (memory-lane may not serve /api/brakes/ yet): this is about the network.
+# If githouse can't reach memory-lane at all, every merge order is refused, so say so at the deploy.
+- name: githouse reaches memory-lane's brakes (no answer means no merges)
+  command:
+    argv:
+      - docker
+      - exec
+      - githouse
+      - python3
+      - -c
+      - |
+        import sys, urllib.error, urllib.request
+        try:
+            urllib.request.urlopen(sys.argv[1], timeout=10)
+        except urllib.error.HTTPError:
+            pass
+      - "{{ githouse_brakes_url }}"
+  changed_when: false
+  when: githouse_brakes_url | default('') | length > 0
 
 - name: githouse has the repositories (its first fetch can take a while; arthel is big)
   stat:

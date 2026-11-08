@@ -35,6 +35,9 @@
     # signed with their SSH key and checked by githouse (Plan, section 8). Justin added
     # skyler on 7 Nov (#ramp, #m-39e5f25f).
     githouse_mergers: [justin, skyler]
+    # Asked at every merge order whether AZ5 is on or the signer is banned (Plan, section 10):
+    # memory-lane on the private network, as hunter reaches it.
+    githouse_brakes_url: "http://10.0.0.2:3000/api/brakes/"
 
   pre_tasks:
     - name: Install community.docker collection
