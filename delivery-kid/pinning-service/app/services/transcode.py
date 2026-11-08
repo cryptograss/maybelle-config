@@ -387,10 +387,17 @@ def _scale_filter(short_side: int, portrait: bool) -> str:
     """Scale so the frame's short side is ``short_side``, keeping aspect.
 
     -2 rounds the other dimension to an even number, which the encoder needs.
+
+    out_range=tv: every rendition comes out in standard (16-235) range, whatever
+    the source. Phones often record full range (a Pixel's H.264 is yuvj420p),
+    and full-range AV1 played sound over a black picture on Skyler's iPhone 17
+    and slvrbckt's iPhone, in Safari's own player and in hls.js alike
+    (#interfaces and #general, 8 Nov 2026). Standard range is what players
+    expect; converting costs nothing a viewer can see.
     """
     if portrait:
-        return f"scale={short_side}:-2"
-    return f"scale=-2:{short_side}"
+        return f"scale={short_side}:-2:out_range=tv"
+    return f"scale=-2:{short_side}:out_range=tv"
 
 
 def _frame_rate(probe: Optional[dict]) -> float:
@@ -901,6 +908,7 @@ async def transcode_video_to_hls(
             "-preset", str(AV1_PRESET),
             "-g", str(gop),          # keyframe every segment, see above
             "-pix_fmt", "yuv420p",   # force 8-bit — 10-bit breaks some decoders
+            "-color_range", "tv",    # and say so: the scale above made it standard range
         ])
         if tone_map:
             # The pixels are BT.709 now; the file must say so, or players go
