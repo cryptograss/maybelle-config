@@ -1,5 +1,6 @@
 """githouse against real repositories: a stand-in GitHub, githouse's clone of it, and someone's working copy."""
 
+import hashlib
 import http.server
 import io
 import json
@@ -508,6 +509,10 @@ class MergeTest(Repos):
         results = self.mailed((text, 'nonsense'), (text.replace('re/foo', 're/evil'), self.sign(text)),
                               (text, self.sign(text)))
         self.assertEqual([r['outcome'] for r in results], ['refused', 'refused', 'merged'])
+        # The forgeries are kept under what was mailed (sha256 of order, NUL, signature), for memory-lane to report.
+        seen = hashlib.sha256(f'{text}\0nonsense'.encode()).hexdigest()
+        kept = json.loads((self.root / '.merges' / 'mailed' / f'{seen}.json').read_text())
+        self.assertIn('not signed by', kept['why'])
         self.assertEqual(self.mailed((text, 'nonsense')), [])  # tried once, not every five seconds
 
     def test_a_mailed_order_is_braked_like_any(self):

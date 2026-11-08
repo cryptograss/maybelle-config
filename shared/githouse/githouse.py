@@ -501,6 +501,13 @@ def take_orders(url=None, **given):
         with MERGING:
             result = merge(text, signature, **given)   # given: tests' signers and brakes
         _tried.add(seen)
+        if not (NONCE.fullmatch(nonce) and (ROOT / '.merges' / f'{nonce}.json').exists()):
+            # Refused before it counted as signed, so merge() kept no record under its nonce: keep one under
+            # what was mailed, so memory-lane can tell the sender why instead of leaving them waiting.
+            kept = ROOT / '.merges' / 'mailed' / f'{seen}.json'
+            kept.parent.mkdir(parents=True, exist_ok=True)
+            kept.write_text(json.dumps({**result, 'order': text}, indent=1, sort_keys=True))
+            kept.chmod(0o644)
         done.append((text, result))
     return done
 
