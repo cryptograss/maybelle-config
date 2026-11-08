@@ -474,8 +474,9 @@ class MergeTest(Repos):
         self.assert_braked('justin: banned')
 
     def test_an_answer_of_the_wrong_shape(self):
-        self.answer = {'ok': True}
-        self.assert_braked("memory-lane didn't say")
+        for answer in ({'ok': True}, {'scram': False, 'banned': ['justin']}, {'scram': False, 'banned': 'no'}, []):
+            self.answer = answer
+            self.assert_braked("memory-lane didn't say")
 
     def test_nowhere_to_ask(self):
         with unittest.mock.patch.object(githouse, 'BRAKES_URL', ''):
