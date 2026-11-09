@@ -1,4 +1,18 @@
 pipelineJob('deploy-hunter') {
+    // The reporter may start this job, and only the jobs that say so (jenkins.yml, projectMatrix; Plan, section 11).
+    properties {
+        authorizationMatrix {
+            inheritanceStrategy {
+                inheriting()
+            }
+            entries {
+                user {
+                    name('reporter')
+                    permissions(['Job/Build'])
+                }
+            }
+        }
+    }
     description('Hunter deployment log - triggered externally via deploy-hunter-remote.py')
 
     logRotator {

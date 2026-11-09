@@ -27,8 +27,11 @@ jenkins:
         - id: reporter
           password: ${JENKINS_REPORTER_PASSWORD}
 
+  # projectMatrix, so a job can grant more than the global entries (Plan, section 11; re, 9 Nov): the
+  # reporter reads everything but starts only the jobs that grant it Job/Build in their own properties,
+  # branch-tests (githouse holds its password) and deploy-hunter (the deploy scripts' reports).
   authorizationStrategy:
-    globalMatrix:
+    projectMatrix:
       entries:
       - userOrGroup:
           name: "admin"
@@ -37,7 +40,6 @@ jenkins:
       - user:
           name: "reporter"
           permissions:
-          - "Job/Build"
           - "Job/Read"
           - "Overall/Read"
       - user:
