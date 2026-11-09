@@ -1,0 +1,36 @@
+#!/bin/sh
+# Run the workspace's ci/test as `builder`, never as the agent's own user (Plan, section 11; re, 9 Nov).
+# Run by `jenkins` through sudo, with no arguments, from the build's workspace:
+#   - the workspace becomes builder's, and ci/test runs with a clean environment and a fresh home;
+#   - afterwards every builder process is killed and everything builder left outside the workspace removed,
+#     so one build can't leave something behind for the next;
+#   - the workspace goes back to jenkins, so the next build can clear it.
+# The exit status is ci/test's.
+set -u
+WORKSPACE_ROOT=/home/jenkins/agent/workspace
+ws=$(pwd -P)
+case "$ws/" in
+    "$WORKSPACE_ROOT"/?*/) ;;
+    *) echo "run-ci: run it from a build's workspace, under $WORKSPACE_ROOT (not $ws)" >&2; exit 2 ;;
+esac
+[ -f "$ws/ci/test" ] || { echo "run-ci: no ci/test here" >&2; exit 2; }
+
+cleanup() {
+    pkill -KILL -u builder 2>/dev/null
+    for _ in 1 2 3 4 5; do pgrep -u builder >/dev/null || break; sleep 1; pkill -KILL -u builder 2>/dev/null; done
+    find /tmp /var/tmp /dev/shm -mindepth 1 -maxdepth 1 -user builder -exec rm -rf {} + 2>/dev/null
+    rm -rf /home/builder && mkdir -m 0700 /home/builder && chown builder:builder /home/builder
+    chown -R -h jenkins:jenkins "$ws"
+}
+cleanup
+# builder may pass through the agent's home to the workspace, never list it (0711).
+chmod 0711 /home/jenkins /home/jenkins/agent "$WORKSPACE_ROOT" 2>/dev/null
+chown -R -h builder:builder "$ws"
+runuser -u builder -- env -i \
+    HOME=/home/builder PATH=/usr/local/bin:/usr/bin:/bin LANG=C.UTF-8 \
+    http_proxy="${http_proxy:-}" https_proxy="${https_proxy:-}" HTTP_PROXY="${HTTP_PROXY:-}" \
+    HTTPS_PROXY="${HTTPS_PROXY:-}" no_proxy="${no_proxy:-}" NO_PROXY="${NO_PROXY:-}" \
+    sh -c 'cd "$1" && chmod u+x ci/test && exec ./ci/test' run-ci "$ws"
+status=$?
+cleanup
+exit $status

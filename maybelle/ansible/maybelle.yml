@@ -40,6 +40,9 @@
     githouse_brakes_url: "http://10.0.0.2:3000/api/brakes/"
     # Where merge orders wait to be fetched: memory-lane carries them, githouse checks each.
     githouse_orders_url: "http://10.0.0.2:3000/api/merge-orders/pending/"
+    # After a push reaches GitHub, githouse asks Jenkins' branch-tests job to test it, as the reporter (Plan,
+    # section 11). Jenkins publishes 8080 on the host, which githouse reaches as hunter does.
+    githouse_jenkins_url: "http://10.0.0.2:8080/"
     # memory-lane's merge key, public half: the merge button signs with it, for whoever pressed (Plan, section
     # 10). Made by Justin on 8 Nov, the private half in the vault as memory_lane_merge_key. githouse lists it as
     # a signer, and merges a press only for a person in githouse_mergers, braked or not as that person.
@@ -165,6 +168,21 @@
       docker_network:
         name: jenkins-network
         state: present
+
+    # Where branch code runs (Plan, section 11): internal, so no route out, and its bridge has no address on
+    # the host (inhibit_ipv4), so the host's own services (sshd, Docker's published ports) aren't reachable
+    # through it either. Checked on a preview on hunter, 9 Nov: with inhibit_ipv4, the gateway address answers
+    # nothing and 10.0.0.2, 10.0.0.4 and 169.254.169.254 have no route; without it, the host's sshd answered.
+    # Its members: the agent, its proxy, and Jenkins, which the agent dials.
+    - name: branches-net, where branch code runs
+      docker_network:
+        name: branches-net
+        internal: true
+        enable_ipv6: false          # said, not assumed: inhibit_ipv4 only takes the IPv4 address away (re)
+        driver_options:
+          com.docker.network.bridge.inhibit_ipv4: "true"
+        ipam_config:
+          - subnet: 172.31.250.0/24
 
     - name: Copy Jenkins configuration file
       copy:
@@ -338,6 +356,7 @@
           - "8080:8080"
         networks:
           - name: jenkins-network
+          - name: branches-net
 
     # Apply any pending Jenkins-restart handlers right now, before the
     # docker-exec tasks below. If JCasC config or job .groovy files
@@ -371,6 +390,128 @@
       until: jenkins_exec_ready.rc == 0
       retries: 30
       delay: 2
+      changed_when: false
+
+    # --- The branches agent (Cryptograss:Moods/ramp/Plan, section 11) ------------------------------------
+    # Branch code runs here and nowhere else: jobs/branch-tests.groovy, a fixed pipeline, runs a branch's own
+    # ci/test inside `sh` on this agent. No secrets, no jenkins_home; on branches-net, which reaches Jenkins and
+    # the proxy, and the proxy lets through only the package registries and GitHub (jenkins-branches/proxy).
+    - name: The branches agent's build contexts
+      copy:
+        src: "{{ playbook_dir }}/../jenkins-branches/"
+        dest: /mnt/persist/jenkins-branches/build/
+        mode: '0644'
+
+    - name: The branches agent's image
+      docker_image:
+        name: cryptograss-jenkins-branches
+        build:
+          path: /mnt/persist/jenkins-branches/build
+          pull: yes
+        source: build
+        force_source: yes
+
+    - name: The branches proxy's image
+      docker_image:
+        name: cryptograss-branches-proxy
+        build:
+          path: /mnt/persist/jenkins-branches/build/proxy
+          pull: yes
+        source: build
+        force_source: yes
+
+    - name: The branches proxy, the agent's only way out
+      docker_container:
+        name: branches-proxy
+        image: cryptograss-branches-proxy
+        restart_policy: unless-stopped
+        recreate: true
+        networks:
+          - name: bridge
+          - name: branches-net
+        mem_limit: 128m
+
+    # Jenkins derives an inbound agent's secret from its name; asked as admin, inside the Jenkins container,
+    # so the password never leaves it. Written where only the agent's user reads it.
+    - name: The branches agent's secret, from Jenkins
+      shell: |
+        set -o pipefail
+        docker exec jenkins sh -c 'curl -sf -u "$JENKINS_ADMIN_ID:$JENKINS_ADMIN_PASSWORD" http://localhost:8080/computer/branches/jenkins-agent.jnlp' \
+          | python3 -c 'import re, sys; m = re.search(r"<argument>([0-9a-f]{64})</argument>", sys.stdin.read()); print(m.group(1)) if m else sys.exit(1)' \
+          > /mnt/persist/jenkins-branches/agent-secret.new
+        install -m 0400 -o 1000 -g 1000 /mnt/persist/jenkins-branches/agent-secret.new /mnt/persist/jenkins-branches/agent-secret
+        rm -f /mnt/persist/jenkins-branches/agent-secret.new
+      args:
+        executable: /bin/bash
+      register: branches_secret
+      until: branches_secret.rc == 0
+      retries: 30
+      delay: 5
+      changed_when: false
+      no_log: true
+
+    - name: The branches agent
+      docker_container:
+        name: jenkins-branches
+        image: cryptograss-jenkins-branches
+        restart_policy: unless-stopped
+        recreate: true
+        networks:
+          - name: branches-net
+        env:
+          JENKINS_URL: "http://jenkins:8080/"
+          JENKINS_AGENT_NAME: "branches"
+          JENKINS_SECRET: "@/run/agent-secret"
+          JENKINS_WEB_SOCKET: "true"
+          HTTP_PROXY: "http://branches-proxy:8888"
+          HTTPS_PROXY: "http://branches-proxy:8888"
+          http_proxy: "http://branches-proxy:8888"
+          https_proxy: "http://branches-proxy:8888"
+          NO_PROXY: "jenkins,localhost,127.0.0.1"
+          no_proxy: "jenkins,localhost,127.0.0.1"
+        volumes:
+          - /mnt/persist/jenkins-branches/agent-secret:/run/agent-secret:ro
+        mem_limit: 4g
+        cpus: 2
+        pids_limit: 2048
+
+    # The line the design rests on, checked from inside, every deploy: nothing of ours answers the agent but
+    # Jenkins and its proxy, and the proxy won't carry it anywhere but the registries and GitHub.
+    - name: The branches agent reaches nothing of ours
+      shell: |
+        docker exec jenkins-branches python3 - <<'PY'
+        import socket, sys
+        must_not = [('10.0.0.2', p) for p in (22, 2222, 3000, 5432, 8000, 8080)] + [
+            ('10.0.0.4', 22), ('10.0.0.4', 80), ('10.0.0.4', 443), ('169.254.169.254', 80),
+            ('172.17.0.1', 22), ('172.17.0.1', 8080), ('1.1.1.1', 443)]  # the host, by another bridge; the internet
+        bad = []
+        for host, port in must_not:
+            s = socket.socket(); s.settimeout(3)
+            try:
+                s.connect((host, port)); bad.append(f'{host}:{port} answered')
+            except OSError:
+                pass
+            finally:
+                s.close()
+        for host, port in (('jenkins', 8080), ('branches-proxy', 8888)):
+            try:
+                socket.create_connection((host, port), timeout=5).close()
+            except OSError as e:
+                bad.append(f'{host}:{port} unreachable ({e})')
+        # The proxy refuses what isn't on its list, IP addresses included, plain HTTP or CONNECT, and any
+        # port but 443 for CONNECT (re).
+        for request in (b'CONNECT 10.0.0.2:3000 HTTP/1.1\r\nHost: 10.0.0.2:3000\r\n\r\n',
+                        b'GET http://10.0.0.2:3000/ HTTP/1.1\r\nHost: 10.0.0.2:3000\r\n\r\n',
+                        b'CONNECT github.com:22 HTTP/1.1\r\nHost: github.com:22\r\n\r\n'):
+            s = socket.create_connection(('branches-proxy', 8888), timeout=10)
+            s.sendall(request)
+            status = s.recv(200).split(b'\r\n')[0]
+            s.close()
+            if b' 200' in status or not status:
+                bad.append(f'the proxy carried {request.split(b" ")[1].decode()} ({status.decode() or "no answer"})')
+        print('\n'.join(bad) or 'nothing of ours answers')
+        sys.exit(1 if bad else 0)
+        PY
       changed_when: false
 
     - name: Clone or update blue-railroad-import source
