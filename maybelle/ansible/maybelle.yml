@@ -40,6 +40,10 @@
     githouse_brakes_url: "http://10.0.0.2:3000/api/brakes/"
     # Where merge orders wait to be fetched: memory-lane carries them, githouse checks each.
     githouse_orders_url: "http://10.0.0.2:3000/api/merge-orders/pending/"
+    # memory-lane's merge key, public half: the merge button signs with it, for whoever pressed (Plan, section
+    # 10). Made by Justin on 8 Nov, the private half in the vault as memory_lane_merge_key. githouse lists it as
+    # a signer, and merges a press only for a person in githouse_mergers, braked or not as that person.
+    githouse_device_signer_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEZ0e+DFH+grTrRBkYlzIsAnnZ369/li+OWBVBimZiPj memory-lane-merge"
 
   pre_tasks:
     - name: Install community.docker collection
@@ -959,6 +963,10 @@
           # Who may kick, ban, scram (magenta.sh AZ5) and lift, with their SSH
           # key (memory-lane views_admin.py). Unset: nobody can.
           MOOD_ADMINS={{ memory_lane_motion_admins | default('justin') }}
+          # The merge button (Plan, section 10): who may press it, and the key it signs with. githouse checks both
+          # again itself; these only decide what memory-lane offers and signs.
+          GITHOUSE_MERGERS={{ githouse_mergers | join(',') }}
+          MERGE_KEY_PATH=/etc/magenta/merge_key
           # Tool I/O is kept now that pattern redaction exists (jMyles/memory-lane#26);
           # this caps each stored result.
           TOOL_RESULT_CONTENT_CHARS=20000
@@ -1106,6 +1114,19 @@
           {% endfor %}
       register: mood_allowed_signers
 
+    # The merge button's key (Plan, section 10): readable only by memory-lane's user (uid 1000, magent in its
+    # image). As the vault holds it, base64 or not: memory-lane reads either (services/merge_orders.py). Not in
+    # the vault: an empty file, and memory-lane offers no button.
+    - name: memory-lane's merge key
+      copy:
+        dest: /mnt/persist/magenta/merge_key
+        owner: '1000'
+        group: '1000'
+        mode: '0400'
+        content: "{{ memory_lane_merge_key | default('') | trim }}\n"
+      no_log: true
+      register: memory_lane_merge_key_file
+
     # Each person's PickiPedia name, from the same inventory: memory-lane shows
     # people by it, links it to their wiki user page, and takes @-mentions by it.
     - name: Write Moods wiki_names
@@ -1137,6 +1158,7 @@
                 - "10.0.0.2:3000:3000"
               volumes:
                 - /mnt/persist/magenta/allowed_signers:/etc/magenta/allowed_signers:ro
+                - /mnt/persist/magenta/merge_key:/etc/magenta/merge_key:ro
                 - /mnt/persist/magenta/wiki_names:/etc/magenta/wiki_names:ro
                 - /mnt/persist/magenta/backups:/mnt/persist/magenta/backups:ro
                 - /mnt/persist/magenta/memory-lane-cache:/var/cache/memory-lane
@@ -1215,7 +1237,7 @@
           - docker-compose.maybelle.yml
         build: always
         state: present
-        recreate: "{{ 'always' if (memory_lane_source.changed or memory_lane_env.changed or memory_lane_compose.changed or mood_allowed_signers.changed or mood_wiki_names.changed or (rebuild_images | default(false) | bool)) else 'auto' }}"
+        recreate: "{{ 'always' if (memory_lane_source.changed or memory_lane_env.changed or memory_lane_compose.changed or mood_allowed_signers.changed or mood_wiki_names.changed or memory_lane_merge_key_file.changed or (rebuild_images | default(false) | bool)) else 'auto' }}"
 
     # Inject secrets into scrubber container (from temp file created by chapter-1.sh)
     - name: Check if scrubber secrets temp file exists

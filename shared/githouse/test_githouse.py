@@ -329,7 +329,18 @@ class MergeTest(Repos):
     def order(self, **change):
         fields = {'repo': 'magenta', 'branch': 're/foo', 'commit': self.head, 'into': 'main', 'by': 'justin',
                   'nonce': os.urandom(16).hex(), 'expires': str(self.now + 3600), **change}
-        return githouse.ORDER_HEADER + '\n' + ''.join(f'{k}: {fields[k]}\n' for k in githouse.ORDER_FIELDS)
+        keys = githouse.ORDER_FIELDS + ((githouse.FOR_FIELD,) if githouse.FOR_FIELD in fields else ())
+        return githouse.ORDER_HEADER + '\n' + ''.join(f'{k}: {fields[k]}\n' for k in keys)
+
+    def pressed(self, person, **change):
+        """An order from the merge button: signed with memory-lane's key, for whoever pressed."""
+        if not (self.keys / 'memory-lane').exists():
+            run('ssh-keygen', '-q', '-t', 'ed25519', '-N', '', '-C', 'memory-lane-merge', '-f', str(self.keys / 'memory-lane'))
+            with self.signers.open('a') as f:
+                f.write(f'memory-lane namespaces="{githouse.MERGE_NAMESPACE}" '
+                        f'{(self.keys / "memory-lane.pub").read_text().strip()}\n')
+        text = self.order(by='memory-lane', **{'for': person}, **change)
+        return text, self.sign(text, key='memory-lane')
 
     def sign(self, text, key='justin', namespace=None):
         path = Path(tempfile.mkdtemp(dir=self.tmp)) / 'order.txt'  # a .sig already there would be asked about
@@ -530,6 +541,38 @@ class MergeTest(Repos):
 
     def test_nowhere_to_take_orders_from(self):
         self.assertEqual(githouse.take_orders(''), [])
+
+    # --- the merge button (Plan, section 10, 8 Nov): memory-lane's key, a person's press
+
+    def test_a_press_merges_as_the_person_who_pressed(self):
+        result = self.merge(*self.pressed('justin'))
+        self.assertEqual(result['outcome'], 'merged', result)
+        message = run('git', '--git-dir', str(self.github), 'log', '-1', '--format=%B%n%an', 'main')[1]
+        self.assertIn('Pressed by justin, signed by memory-lane', message)
+        self.assertEqual(message.strip().splitlines()[-1], 'justin')
+        self.assertEqual(self.asked, [['justin']])  # the brakes are asked about the person, never the key
+
+    def test_a_press_by_someone_who_may_not_merge(self):
+        # skyler has a key here but isn't in this signers file: the button can't do for them what their key can't.
+        result = self.merge(*self.pressed('skyler'))
+        self.assertEqual((result['outcome'], result['why']), ('refused', 'skyler may not merge'))
+
+    def test_a_braked_presser(self):
+        self.banned = {'justin'}
+        result = self.merge(*self.pressed('justin'))
+        self.assertIn('justin: banned', result['why'])
+
+    def test_whose_press_is_said_by_the_button_s_orders_and_only_theirs(self):
+        text, signature = self.pressed('justin')
+        no_for = text.replace('for: justin\n', '')
+        self.assertIn("says whose press it was", self.merge(no_for, self.sign(no_for, key='memory-lane'))['why'])
+        mine = self.order(**{'for': 'skyler'})
+        self.assertIn("says whose press it was", self.merge(mine)['why'])
+        for_itself = self.order(by='memory-lane', **{'for': 'memory-lane'})
+        self.assertIn("isn't a person's name", self.merge(for_itself, self.sign(for_itself, key='memory-lane'))['why'])
+        # memory-lane's key can't sign an order as anyone but memory-lane.
+        as_justin = self.order()
+        self.assertIn('not signed by justin', self.merge(as_justin, self.sign(as_justin, key='memory-lane'))['why'])
 
     def test_not_an_order(self):
         self.assertEqual(self.merge('merge everything please', 'x')['why'], 'not a merge order')

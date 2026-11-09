@@ -276,6 +276,11 @@ def _ancestor(repo, a, b):
 MERGE_NAMESPACE = 'magenta-merge'   # never the sign-in's ('magenta-moods'): a sign-in can't be replayed as a merge
 ORDER_HEADER = 'githouse merge order v1'
 ORDER_FIELDS = ('repo', 'branch', 'commit', 'into', 'by', 'nonce', 'expires')
+# The merge button (Plan, section 10, 8 Nov): a phone has no key, so memory-lane signs with its own, and the
+# order says whose press it was in a 'for' line. Such an order merges only for a person who may merge in their
+# own right, and the brakes are asked about that person, never about the key (re, 8 Nov).
+DEVICE_SIGNER = 'memory-lane'
+FOR_FIELD = 'for'
 ORDER_LIFE_MAX = 2 * 3600   # seconds: an order can't be made to last longer than this
 SHA = re.compile(r'[0-9a-f]{40}')
 NONCE = re.compile(r'[0-9a-f]{32,64}')
@@ -329,11 +334,15 @@ def parse_order(text):
         if not line:
             continue
         key, sep, value = line.partition(': ')
-        if not sep or key not in ORDER_FIELDS or key in found:
+        if not sep or key not in ORDER_FIELDS + (FOR_FIELD,) or key in found:
             raise Refused(f'an order has one line for each of {", ".join(ORDER_FIELDS)}, and nothing else')
         found[key] = value
-    if set(found) != set(ORDER_FIELDS):
+    if not set(ORDER_FIELDS) <= set(found):
         raise Refused(f'missing: {", ".join(sorted(set(ORDER_FIELDS) - set(found)))}')
+    if (found['by'] == DEVICE_SIGNER) != (FOR_FIELD in found):
+        raise Refused(f"an order by {DEVICE_SIGNER} says whose press it was ('for'), and only such an order does")
+    if FOR_FIELD in found and (not NAME.fullmatch(found[FOR_FIELD]) or found[FOR_FIELD] == DEVICE_SIGNER):
+        raise Refused(f"for: {found[FOR_FIELD]!r} isn't a person's name")
     if not NAME.fullmatch(found['by']) or not NONCE.fullmatch(found['nonce']) or not SHA.fullmatch(found['commit']):
         raise Refused('by, nonce or commit is malformed')
     if not BRANCH.fullmatch(found['branch']) or owned(found['branch']):
@@ -357,6 +366,15 @@ def signed_by(text, signature, by, signers):
         done = subprocess.run(['ssh-keygen', '-Y', 'verify', '-f', str(signers), '-I', by, '-n', MERGE_NAMESPACE,
                                '-s', str(sig)], input=text, capture_output=True, text=True)
     return done.returncode == 0
+
+
+def may_merge(name, signers):
+    """Whether the signers file lists `name` in its own right (a person who may sign merge orders)."""
+    try:
+        lines = Path(signers).read_text().splitlines()
+    except OSError:
+        return False
+    return any(line.split()[0].split(',').count(name) for line in lines if line.strip() and not line.startswith('#'))
 
 
 def spend(nonce):
@@ -384,7 +402,10 @@ def merge(text, signature, now=None, signers=None, brakes_url=None):
         signed = True
         if not spend(order['nonce']):
             raise Refused('that order was used already')
-        held = brake([order['by']], url=brakes_url)   # after spending: a braked order isn't good again later
+        person = order.get(FOR_FIELD, order['by'])   # whose merge it is: the presser, for the merge button
+        if person != order['by'] and not may_merge(person, signers):
+            raise Refused(f'{person} may not merge')
+        held = brake([person], url=brakes_url)   # after spending: a braked order isn't good again later
         if held:
             raise Refused(held)
         if order['expires'] < now:
@@ -438,9 +459,12 @@ def _merge(repo, order):
         raise Refused(f'{branch} conflicts with {into}; merge {into} into it, push, and sign again')
     if tree.returncode != 0:  # git itself failed, not a conflict: say what it said (re)
         raise Refused(f'merge-tree failed: {tree.stderr.strip()[:200]}')
+    person = order.get(FOR_FIELD, order['by'])
+    signed = (f"Signed by {order['by']}" if person == order['by'] else
+              f"Pressed by {person}, signed by {order['by']}")
     message = (f"Merge {order['repo']}:{branch} ({commit[:8]})\n\n"
-               f"Signed by {order['by']} (githouse merge order {order['nonce'][:12]}).\n")
-    who = {'GIT_AUTHOR_NAME': order['by'], 'GIT_AUTHOR_EMAIL': f"{order['by']}@githouse",
+               f"{signed} (githouse merge order {order['nonce'][:12]}).\n")
+    who = {'GIT_AUTHOR_NAME': person, 'GIT_AUTHOR_EMAIL': f"{person}@githouse",
            'GIT_COMMITTER_NAME': 'githouse', 'GIT_COMMITTER_EMAIL': 'githouse@maybelle'}
     merged = git(repo, 'commit-tree', tree.stdout.split()[0], '-p', tip, '-p', commit, '-m', message, env=who).strip()
     # GitHub first: its branches are GitHub's until the flip, and the minute's fetch would overwrite one made here.

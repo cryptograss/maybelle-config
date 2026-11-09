@@ -13,6 +13,7 @@
 # githouse_pushers ({container: [names] | {names, fetch_only}}),
 # githouse_repos (owner/name list), jenkins_github_ssh_key (vault, b64);
 # githouse_mergers (names that may sign a merge order; none if unset);
+# githouse_device_signer_key (memory-lane's public merge key, for the merge button; unset, no button);
 # githouse_brakes_url (memory-lane's /api/brakes/: unset, nothing merges);
 # githouse_orders_url (memory-lane's /api/merge-orders/pending/: unset, no orders by mail).
 
@@ -22,6 +23,14 @@
       - githouse_bind is match('^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.)')
       - githouse_port | int > 1024
     fail_msg: "githouse_bind must be a private address ({{ githouse_bind }}); this is a production box"
+
+# memory-lane signs the merge button's orders under its own name (Plan, section 10); a person in the inventory
+# called that would get its line's rights in merge_signers (re, 8 Nov).
+- name: Nobody in hunter's inventory is called memory-lane
+  assert:
+    that:
+      - "'memory-lane' not in ((lookup('file', playbook_dir ~ '/../../hunter/ansible/inventory.yml') | from_yaml).all.vars.people | map(attribute='name') | list)"
+    fail_msg: "memory-lane is the merge button's signer in merge_signers; a person can't have that name"
 
 - name: Where githouse keeps the repositories, its keys and its build
   file:
@@ -62,6 +71,9 @@
       {% for user in (lookup('file', playbook_dir ~ '/../../hunter/ansible/inventory.yml') | from_yaml).all.vars.people if user.name in (githouse_mergers | default([])) and (user.ssh_pubkey | default('') | trim) is match('ssh-') %}
       {{ user.name }} namespaces="magenta-merge" {{ user.ssh_pubkey | trim }}
       {% endfor %}
+      {% if githouse_device_signer_key | default('') | length > 0 %}
+      memory-lane namespaces="magenta-merge" {{ githouse_device_signer_key | trim }}
+      {% endif %}
 
 # As the vault holds it, base64; entrypoint.sh decodes it (so the deploy logic renders without the vault).
 - name: "GitHub's key for githouse (Jenkins's, from the vault): fetch over ssh, forward pushes"
