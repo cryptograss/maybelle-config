@@ -457,6 +457,62 @@ def _add_audio_only_variant(master: Path, audio_dir_name: str) -> bool:
     return True
 
 
+# Boxes that only hold other boxes, on the way down to a track's sample table.
+_SDTP_PATH = (b"moov", b"trak", b"mdia", b"minf", b"stbl")
+
+
+def _drop_empty_sdtp(init_segment: Path) -> bool:
+    """Remove empty sdtp boxes from an fMP4 init segment. Returns whether it changed.
+
+    ffmpeg 7.1 (Debian's, in our image) writes an sdtp box with no entries
+    into every video init segment. iPhone Safari's own HLS player refuses a
+    stream whose init segment has one: no picture and no sound. The same
+    file without those 12 bytes plays. Found by Skyler tapping test streams
+    on an iPhone 17, 8-9 Nov 2026: the release's exact bytes with only the
+    sdtp removed played; untouched, they did not. ffmpeg 8 no longer writes it.
+
+    An init segment holds no samples, so an sdtp there describes nothing;
+    only boxes that are empty (a 12-byte full-box header) are touched.
+    """
+    try:
+        data = bytearray(init_segment.read_bytes())
+    except OSError:
+        return False
+
+    def boxes(start: int, end: int):
+        offset = start
+        while offset + 8 <= end:
+            size = int.from_bytes(data[offset:offset + 4], "big")
+            if size < 8 or offset + size > end:
+                return  # 64-bit, to-end-of-file or malformed: leave the file alone
+            yield offset, size, bytes(data[offset + 4:offset + 8])
+            offset += size
+
+    # (offset of the empty sdtp, offsets of every box containing it)
+    found: list[tuple[int, list[int]]] = []
+
+    def walk(start: int, end: int, depth: int, parents: list[int]) -> None:
+        for offset, size, kind in boxes(start, end):
+            if depth < len(_SDTP_PATH) and kind == _SDTP_PATH[depth]:
+                walk(offset + 8, offset + size, depth + 1, parents + [offset])
+            elif depth == len(_SDTP_PATH) and kind == b"sdtp" and size == 12:
+                found.append((offset, parents))
+
+    walk(0, len(data), 0, [])
+    if not found:
+        return False
+
+    # Last first, so earlier offsets stay valid as bytes are cut.
+    for offset, parents in reversed(found):
+        for parent in parents:
+            size = int.from_bytes(data[parent:parent + 4], "big")
+            data[parent:parent + 4] = (size - 12).to_bytes(4, "big")
+        del data[offset:offset + 12]
+
+    init_segment.write_bytes(bytes(data))
+    return True
+
+
 async def _write_poster(input_path: Path, output_dir: Path,
                         total_seconds: float,
                         trim_start: Optional[float] = None,
@@ -1019,6 +1075,11 @@ async def transcode_video_to_hls(
 
         if not master_playlist.exists():
             return TranscodeResult(success=False, error="master.m3u8 not created")
+
+        # iPhone Safari refuses a stream whose init segment carries an empty
+        # sdtp box, which ffmpeg 7.1 writes into every video rendition.
+        for init_segment in sorted(output_dir.glob("stream_*/init*.mp4")):
+            _drop_empty_sdtp(init_segment)
 
         # With alternate audio renditions, ffmpeg leaves the audio-only
         # rendition out of the master playlist even though it wrote it.
