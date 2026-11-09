@@ -429,7 +429,7 @@
         networks:
           - name: bridge
           - name: branches-net
-        mem_limit: 128m
+        memory: 128m
 
     # Jenkins derives an inbound agent's secret from its name; asked as admin, inside the Jenkins container,
     # so the password never leaves it. Written where only the agent's user reads it.
@@ -471,7 +471,7 @@
           no_proxy: "jenkins,localhost,127.0.0.1"
         volumes:
           - /mnt/persist/jenkins-branches/agent-secret:/run/agent-secret:ro
-        mem_limit: 4g
+        memory: 4g
         cpus: 2
         pids_limit: 2048
 

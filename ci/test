@@ -29,3 +29,7 @@ for playbook in maybelle/ansible/maybelle.yml hunter/ansible/playbook.yml delive
     fi
     rm -f "$check"; echo "$playbook parses"
 done
+echo '--- every task takes what it says'
+# --syntax-check never asks a module what it takes: mem_limit on docker_container parsed fine and failed the
+# deploy halfway (9 Nov).
+python scripts/check_task_options.py maybelle/ansible/maybelle.yml hunter/ansible/playbook.yml delivery-kid/ansible/playbook.yml
