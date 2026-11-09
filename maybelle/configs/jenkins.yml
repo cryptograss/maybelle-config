@@ -3,6 +3,19 @@ jenkins:
   numExecutors: 3
   scmCheckoutRetryCount: 2
   mode: NORMAL
+  # The branches agent (Plan, section 11): where branch code runs. EXCLUSIVE, so only a job that names it
+  # runs there (branch-tests); nothing trusted, which might carry a credential, ever lands on it. It dials in
+  # over websocket from its own container on branches-net (maybelle.yml, "The branches agent").
+  nodes:
+    - permanent:
+        name: "branches"
+        labelString: "branches"
+        mode: EXCLUSIVE
+        numExecutors: 2
+        remoteFS: "/home/jenkins/agent"
+        launcher:
+          inbound:
+            webSocket: true
   
   securityRealm:
     local:
@@ -53,6 +66,7 @@ jobs:
   - file: /var/jenkins_home/jobs/pickipedia-import-bluerailroad.groovy
   - file: /var/jenkins_home/jobs/arthel-fetch-pinata-data.groovy
   - file: /var/jenkins_home/jobs/magenta-memory-uptime.groovy
+  - file: /var/jenkins_home/jobs/branch-tests.groovy
 
 credentials:
   system:

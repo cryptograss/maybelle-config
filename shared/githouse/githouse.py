@@ -51,6 +51,8 @@ meant to be cheap to lose.
   Orders arrive by mail: memory-lane keeps them, unread, and githouse fetches them every few seconds and
   checks each itself (8 Nov: only Justin has ssh to maybelle). Brakes stop it (section 10): root's freeze (/etc/githouse/frozen), AZ5, or a ban on the signer, the
   last two asked of memory-lane at every order. Its answer can only stop a merge; no answer stops it too.
+* After a push reaches GitHub, Jenkins' branch-tests job tests exactly that commit, on an agent with no
+  secrets (Plan, section 11): /etc/githouse/jenkins.json says where, jenkins_reporter as whom.
 * `githouse mirror`, on hunter: a read-only copy of all of it, fetched from
   maybelle every minute and mounted into every container, so clones are
   instant. Nothing on it needs backing up.
@@ -178,7 +180,45 @@ def after(repo, user, updates, forward=None):
                               capture_output=True, text=True)
         if done.returncode != 0:
             log(f'{repo.name}: forwarding {user}\'s push to GitHub failed: {done.stderr.strip()}')
+        else:  # on GitHub now, where the branches agent clones from: test what was pushed
+            for old, new, ref in updates:
+                branch = ref[len('refs/heads/'):]
+                if new != ZERO and ref.startswith('refs/heads/') and not owned(branch):
+                    test_branch(repo.name[:-len('.git')], branch, new)
     publish()
+
+
+# --- branch tests on Jenkins (Plan, section 11) ----------------------------------------------------------
+# After a push reaches GitHub, Jenkins' branch-tests job is asked to test exactly that commit, on the
+# `branches` agent. As the reporter, who may only read and start builds; its password in /etc/githouse,
+# since a hook runs under sshd's forced command with none of the container's environment (re, 6 Nov).
+
+def test_branch(repo, branch, commit, etc=None):
+    """Ask Jenkins to test this commit; True if it took the request. Never raises: a push mustn't fail on it."""
+    import http.cookiejar
+    etc = Path(etc or ETC)
+    try:
+        jenkins = json.loads((etc / 'jenkins.json').read_text())
+        password = (etc / 'jenkins_reporter').read_text().strip()
+    except (OSError, ValueError):
+        return False  # not set up here: nothing to ask
+    base, user = jenkins['url'].rstrip('/'), jenkins.get('user', 'reporter')
+    import base64
+    auth = 'Basic ' + base64.b64encode(f'{user}:{password}'.encode()).decode()
+    opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
+    try:
+        # Jenkins wants a crumb with a password, tied to the session the cookie carries.
+        asked = urllib.request.Request(f'{base}/crumbIssuer/api/json', headers={'Authorization': auth})
+        with opener.open(asked, timeout=10) as answer:
+            crumb = json.loads(answer.read())
+        query = urllib.parse.urlencode({'REPO': repo, 'BRANCH': branch, 'COMMIT': commit})
+        build = urllib.request.Request(f'{base}/job/branch-tests/buildWithParameters?{query}', data=b'', method='POST',
+                                       headers={'Authorization': auth, crumb['crumbRequestField']: crumb['crumb']})
+        with opener.open(build, timeout=10):
+            return True
+    except Exception as e:
+        log(f'{repo}:{branch}: Jenkins didn\'t take the branch test ({e})')
+        return False
 
 
 def authorized_keys(keys_dir, pushers):

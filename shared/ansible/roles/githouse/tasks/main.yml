@@ -14,6 +14,7 @@
 # githouse_repos (owner/name list), jenkins_github_ssh_key (vault, b64);
 # githouse_mergers (names that may sign a merge order; none if unset);
 # githouse_device_signer_key (memory-lane's public merge key, for the merge button; unset, no button);
+# githouse_jenkins_url, jenkins_reporter_password (branch tests on Jenkins; unset, none asked for);
 # githouse_brakes_url (memory-lane's /api/brakes/: unset, nothing merges);
 # githouse_orders_url (memory-lane's /api/merge-orders/pending/: unset, no orders by mail).
 
@@ -74,6 +75,24 @@
       {% if githouse_device_signer_key | default('') | length > 0 %}
       memory-lane namespaces="magenta-merge" {{ githouse_device_signer_key | trim }}
       {% endif %}
+
+# Branch tests (Plan, section 11): where Jenkins is, and the reporter's password, which may only read and
+# start builds. Files, not environment: the hooks run under sshd's forced command with none of it.
+- name: Where Jenkins is, for branch tests
+  copy:
+    dest: "{{ githouse_dir }}/etc/jenkins.json"
+    mode: '0644'
+    content: "{{ {'url': githouse_jenkins_url, 'user': 'reporter'} | to_json }}\n"
+  when: githouse_jenkins_url | default('') | length > 0
+
+- name: The reporter's password, for branch tests (only githouse's git user reads it)
+  copy:
+    dest: "{{ githouse_dir }}/etc/jenkins_reporter"
+    owner: '2999'
+    mode: '0400'
+    content: "{{ jenkins_reporter_password | default('') }}\n"
+  no_log: true
+  when: githouse_jenkins_url | default('') | length > 0
 
 # As the vault holds it, base64; entrypoint.sh decodes it (so the deploy logic renders without the vault).
 - name: "GitHub's key for githouse (Jenkins's, from the vault): fetch over ssh, forward pushes"

@@ -272,6 +272,74 @@ class GithouseTest(Repos):
 
 
 
+class BranchTestTest(Repos):
+    """After a push reaches GitHub, Jenkins is asked to test exactly that commit (Plan, section 11)."""
+
+    def setUp(self):
+        super().setUp()
+        self.asked = []
+        test = self
+
+        class Jenkins(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                assert self.path == '/crumbIssuer/api/json' and self.headers['Authorization'].startswith('Basic ')
+                body = json.dumps({'crumbRequestField': 'Jenkins-Crumb', 'crumb': 'c1'}).encode()
+                self.send_response(200)
+                self.send_header('Set-Cookie', 'JSESSIONID=s1; Path=/')
+                self.end_headers()
+                self.wfile.write(body)
+
+            def do_POST(self):
+                test.asked.append((self.path, self.headers.get('Jenkins-Crumb'), self.headers.get('Cookie'),
+                                   self.headers.get('Authorization')))
+                self.send_response(201)
+                self.end_headers()
+
+            def log_message(self, *args):
+                pass
+
+        server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Jenkins)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        self.etc = self.tmp / 'etc'
+        self.etc.mkdir()
+        (self.etc / 'jenkins.json').write_text(json.dumps({'url': f'http://127.0.0.1:{server.server_address[1]}/'}))
+        (self.etc / 'jenkins_reporter').write_text('pw\n')
+        patcher = unittest.mock.patch.object(githouse, 'ETC', self.etc)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_a_forwarded_push_is_tested_at_that_commit(self):
+        self.commit(self.work, 'the fix')
+        head = run('git', 'rev-parse', 'HEAD', cwd=self.work)[1].strip()
+        self.assertEqual(self.push('re', 'HEAD:re/foo')[0], 0)  # here, not yet forwarded (forwarding is off in Repos)
+        self.asked.clear()
+        githouse.after(self.repo, 're', [(githouse.ZERO, head, 'refs/heads/re/foo')], forward=True)
+        self.assertEqual(len(self.asked), 1)
+        path, crumb, cookie, auth = self.asked[0]
+        self.assertTrue(path.startswith('/job/branch-tests/buildWithParameters?'))
+        self.assertIn(f'COMMIT={head}', path)
+        self.assertIn('REPO=magenta', path)
+        self.assertIn('BRANCH=re%2Ffoo', path)
+        self.assertEqual((crumb, cookie), ('c1', 'JSESSIONID=s1'))
+
+    def test_a_deletion_or_a_failed_forward_is_not(self):
+        main = githouse.refs(self.repo, 'refs/heads/')['main']
+        githouse.after(self.repo, 're', [(main, githouse.ZERO, 'refs/heads/re/gone')], forward=True)
+        self.assertEqual(self.asked, [])
+        # A forward GitHub refuses (a ref githouse doesn't have) asks for nothing either.
+        githouse.after(self.repo, 're', [(githouse.ZERO, 'b' * 40, 'refs/heads/re/nowhere')], forward=True)
+        self.assertEqual(self.asked, [])
+
+    def test_not_set_up_here_or_jenkins_down(self):
+        (self.etc / 'jenkins.json').unlink()
+        self.assertFalse(githouse.test_branch('magenta', 're/foo', 'a' * 40))
+        (self.etc / 'jenkins.json').write_text(json.dumps({'url': 'http://127.0.0.1:9/'}))
+        self.assertFalse(githouse.test_branch('magenta', 're/foo', 'a' * 40))  # logged, never raised
+        self.assertIn("Jenkins didn't take the branch test", (self.root / 'githouse.log').read_text())
+
+
 class MergeTest(Repos):
     """githouse merge: a signed order, checked here, merged --no-ff and pushed to GitHub first (Plan, section 8)."""
 
