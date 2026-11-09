@@ -170,38 +170,3 @@ async def generate_torrent(
     finally:
         parent = album_dir.parent
         shutil.rmtree(parent, ignore_errors=True)
-
-
-class RepackageRequest(BaseModel):
-    cid: str
-    dry_run: bool = False
-
-
-class RepackageResponse(BaseModel):
-    success: bool
-    old_cid: str
-    new_cid: str | None = None
-    fixed: list[str] = []
-    error: str | None = None
-
-
-@router.post("/repackage", response_model=RepackageResponse)
-async def repackage(
-    req: RepackageRequest,
-    identity: str = Depends(require_auth),
-    settings: Settings = Depends(get_settings),
-):
-    """
-    Republish a video release with the empty sdtp boxes removed from its
-    init segments, so iPhone Safari plays it. Pins the result and returns
-    its new CID; the old CID stays pinned.
-
-    new_cid is null when the release needed no fix. With dry_run, lists the
-    init segments that would be fixed and changes nothing.
-    """
-    from ..services.repackage import repackage_release
-
-    result = await repackage_release(req.cid, settings.ipfs_api_url, dry_run=req.dry_run)
-    logger.info("[enrich] repackage %s by %s: %s", req.cid, identity,
-                result.new_cid or result.error or "no change")
-    return RepackageResponse(**result.__dict__)
