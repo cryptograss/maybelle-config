@@ -6,7 +6,7 @@ venv=$(mktemp -d)   # its own: two runs at once mustn't rebuild one venv under e
 python3 -m venv "$venv"
 . "$venv/bin/activate"
 pip install -q --upgrade pip
-pip install -q pytest PyYAML jinja2 mwclient ansible-core
+pip install -q pytest PyYAML jinja2 mwclient ansible
 echo '--- githouse'
 (cd shared/githouse && python -m pytest -q test_githouse.py)
 echo '--- maybelle scripts'
@@ -17,3 +17,15 @@ echo '--- render_diff, its own tests'
 python -m pytest -q scripts/tests
 echo '--- recovery gate'
 npx --yes jiti@2 hunter/ansible/roles/recovery/test_recovery_gate.mjs
+echo '--- the playbooks parse'
+# ansible splits a task's words when it loads the playbook, before anything runs: the first deploy of the
+# branches agent died there on an apostrophe (9 Nov), and nothing above would have seen it. Without the
+# vault, which nothing here can open.
+for playbook in maybelle/ansible/maybelle.yml hunter/ansible/playbook.yml delivery-kid/ansible/playbook.yml; do
+    check=$(mktemp -p "$(dirname "$playbook")" .syntax-XXXXXX.yml)
+    grep -v 'vault\.yml' "$playbook" > "$check"
+    if ! out=$(ansible-playbook --syntax-check -i localhost, "$check" 2>&1); then
+        rm -f "$check"; echo "$playbook doesn't parse:"; echo "$out" | tail -15; exit 1
+    fi
+    rm -f "$check"; echo "$playbook parses"
+done
