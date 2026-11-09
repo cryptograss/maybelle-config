@@ -3,8 +3,8 @@
 //
 // One fixed pipeline, written here, never a branch's Jenkinsfile (re, 9 Nov): a Jenkinsfile chooses its own
 // node and its Groovy runs on the controller, beside jenkins_home and every credential. This script only
-// clones the commit githouse names, anonymously, and runs the repository's own `ci/test` inside `sh` on the
-// agent: branch code runs there and nowhere else. The agent holds no secrets and reaches only the internet,
+// clones the commit githouse names, anonymously, and runs the repository's own `ci/test` on the agent, as a
+// user of its own (`builder`) that can't read the agent's secret: branch code runs there and nowhere else. The agent holds no secrets and reaches only the internet,
 // through a proxy that lets npm, PyPI and GitHub through (maybelle.yml, "branches agent").
 //
 // githouse triggers it after every push it forwards to GitHub (githouse.py, test_branch), as the reporter.
@@ -50,8 +50,10 @@ pipelineJob('branch-tests') {
                             currentBuild.result = 'NOT_BUILT'
                             return
                         }
+                        // As `builder`, never as the agent's own user, which holds its secret (re, 9 Nov):
+                        // run-ci is the one thing this agent's user may sudo (jenkins-branches/run-ci).
                         timeout(time: 30, unit: 'MINUTES') {
-                            sh 'chmod +x ci/test && ./ci/test'
+                            sh 'sudo -n /usr/local/bin/run-ci'
                         }
                     }
                 }

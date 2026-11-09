@@ -2,8 +2,9 @@
 # maybelle-config's tests, as the branches agent runs them (Plan, section 11; maybelle/jobs/branch-tests.groovy):
 # what .github/workflows/tests.yml runs, in one place.
 set -eu
-python3 -m venv /tmp/venv
-. /tmp/venv/bin/activate
+venv=$(mktemp -d)   # its own: two runs at once mustn't rebuild one venv under each other (re)
+python3 -m venv "$venv"
+. "$venv/bin/activate"
 pip install -q --upgrade pip
 pip install -q pytest PyYAML jinja2 mwclient ansible-core
 echo '--- githouse'

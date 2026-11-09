@@ -178,6 +178,7 @@
       docker_network:
         name: branches-net
         internal: true
+        enable_ipv6: false          # said, not assumed: inhibit_ipv4 only takes the IPv4 address away (re)
         driver_options:
           com.docker.network.bridge.inhibit_ipv4: "true"
         ipam_config:
@@ -497,12 +498,17 @@
                 socket.create_connection((host, port), timeout=5).close()
             except OSError as e:
                 bad.append(f'{host}:{port} unreachable ({e})')
-        # The proxy refuses what isn't on its list, IP addresses included.
-        s = socket.create_connection(('branches-proxy', 8888), timeout=5)
-        s.sendall(b'CONNECT 10.0.0.2:3000 HTTP/1.1\r\nHost: 10.0.0.2:3000\r\n\r\n')
-        if b' 200' in s.recv(200).split(b'\r\n')[0]:
-            bad.append('the proxy carried CONNECT 10.0.0.2:3000')
-        s.close()
+        # The proxy refuses what isn't on its list, IP addresses included, plain HTTP or CONNECT, and any
+        # port but 443 for CONNECT (re).
+        for request in (b'CONNECT 10.0.0.2:3000 HTTP/1.1\r\nHost: 10.0.0.2:3000\r\n\r\n',
+                        b'GET http://10.0.0.2:3000/ HTTP/1.1\r\nHost: 10.0.0.2:3000\r\n\r\n',
+                        b'CONNECT github.com:22 HTTP/1.1\r\nHost: github.com:22\r\n\r\n'):
+            s = socket.create_connection(('branches-proxy', 8888), timeout=10)
+            s.sendall(request)
+            status = s.recv(200).split(b'\r\n')[0]
+            s.close()
+            if b' 200' in status or not status:
+                bad.append(f'the proxy carried {request.split(b" ")[1].decode()} ({status.decode() or "no answer"})')
         print('\n'.join(bad) or 'nothing of ours answers')
         sys.exit(1 if bad else 0)
         PY

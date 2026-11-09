@@ -11,7 +11,8 @@ jenkins:
         name: "branches"
         labelString: "branches"
         mode: EXCLUSIVE
-        numExecutors: 2
+        # One at a time: run-ci kills every builder process after a build, which would kill a second one's.
+        numExecutors: 1
         remoteFS: "/home/jenkins/agent"
         launcher:
           inbound:
