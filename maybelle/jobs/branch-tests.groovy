@@ -9,6 +9,20 @@
 //
 // githouse triggers it after every push it forwards to GitHub (githouse.py, test_branch), as the reporter.
 pipelineJob('branch-tests') {
+    // The reporter may start this job, and only the jobs that say so (jenkins.yml, projectMatrix; Plan, section 11).
+    properties {
+        authorizationMatrix {
+            inheritanceStrategy {
+                inheriting()
+            }
+            entries {
+                user {
+                    name('reporter')
+                    permissions(['Job/Build'])
+                }
+            }
+        }
+    }
     description('Every branch pushed to githouse, tested on the branches agent (Plan, section 11). A repository\'s tests are its own ci/test.')
     logRotator {
         numToKeep(300)
