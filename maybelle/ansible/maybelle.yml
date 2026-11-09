@@ -216,6 +216,14 @@
         owner: 1000
         group: 1000
 
+    - name: Copy the Configuration as Code reload for the deploy
+      copy:
+        src: "{{ playbook_dir }}/../scripts/jcasc-reload.sh"
+        dest: "{{ jenkins_home }}/bin/jcasc-reload.sh"
+        mode: '0755'
+        owner: 1000
+        group: 1000
+
     - name: Copy the alarm reporter for Jenkins jobs
       copy:
         src: "{{ playbook_dir }}/../scripts/report-alarm.sh"
@@ -390,6 +398,15 @@
       until: jenkins_exec_ready.rc == 0
       retries: 30
       delay: 2
+      changed_when: false
+
+    # A job new to this deploy can be written to disk at boot and still not be loaded until the next start
+    # (branch-tests, 9 Nov: JCasC made it 65 ms before "Loaded all jobs", from a list read without it).
+    # Reloading Configuration as Code once Jenkins is up creates it now; then every job the config names is
+    # checked to exist, and the deploy fails if one doesn't (scripts/jcasc-reload.sh).
+    - name: Configuration as Code reloaded, and every job it names there
+      command: docker exec jenkins sh /var/jenkins_home/bin/jcasc-reload.sh
+      register: jcasc_reload
       changed_when: false
 
     # --- The branches agent (Cryptograss:Moods/ramp/Plan, section 11) ------------------------------------
