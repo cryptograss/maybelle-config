@@ -162,6 +162,22 @@ class GithouseTest(Repos):
         self.assertEqual(self.heads()['production'], production)
         self.assertEqual(run('git', '--git-dir', str(self.github), 'rev-parse', 'production')[1].strip(), production)
 
+    def test_a_deploy_branch_name_new_on_github_is_not_taken(self):
+        # A deploy branch's name githouse doesn't hold, made on GitHub (release/x; master in a repo that deploys
+        # main): taken, it would be a base retire() reads, so a merge commit on it could retire live branches as
+        # merged, and nothing signed it (re). Only a githouse with no deploy branch at all takes them; else adopt.
+        self.commit(self.work, 'mine')
+        self.assertEqual(self.push('re', 'HEAD:re/foo')[0], 0)
+        run('git', 'fetch', '--quiet', str(self.repo), 'refs/heads/re/foo:refs/remotes/h/re/foo', cwd=self.upstream)
+        run('git', 'merge', '--quiet', '--no-ff', '-m', 'merge re/foo, around githouse', 'h/re/foo', cwd=self.upstream)
+        run('git', 'push', '--quiet', 'origin', 'HEAD:release/x', cwd=self.upstream)
+        githouse.fetch(self.repo)
+        self.assertNotIn('release/x', self.heads())
+        self.assertIn('re/foo', self.heads())  # still live: not retired by a branch nobody signed
+        self.assertEqual(self.differs()['release/x']['state'], 'new')
+        self.assertTrue(githouse.adopt(self.repo, 'release/x'))
+        self.assertIn('release/x', self.heads())
+
     def test_githubs_view_is_never_a_live_branch(self):
         self.on_github('around githouse')
         githouse.fetch(self.repo)

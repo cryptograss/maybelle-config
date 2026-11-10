@@ -15,8 +15,8 @@ meant to be cheap to lose.
   (never forced); ahead of ours or apart from it, someone pushed or merged
   there, around githouse, and it's not taken: it's logged and written to
   github.json, and only root takes it (`githouse adopt <repo> <branch>`, on
-  maybelle). A deploy branch githouse doesn't have yet is taken from GitHub
-  once (a new githouse; a new release/*). Nobody pushes them here. Pull
+  maybelle). A new githouse takes GitHub's deploy branches once; after
+  that, a deploy branch's name new on GitHub is said, not taken (adopt). Nobody pushes them here. Pull
   requests' heads are still GitHub's, fetched and pruned to match.
 * Everyone else's branches are their own: re pushes re/*, magent magent/*,
   over ssh as the git user, on maybelle's private network only. Each key's
@@ -311,7 +311,8 @@ def reconcile(repo):
     * GitHub's behind ours, or gone: ours is pushed to it, never forced (a forward that failed, sent again).
     * GitHub's ahead of ours, or apart: pushed or merged on GitHub, around githouse. Not taken, not
       overwritten: logged once, and in github.json, for a person to look at; root takes it with adopt.
-    * none here yet: taken from GitHub, once (a new githouse; a release/* made there).
+    * none here yet: taken from GitHub only if githouse has no deploy branch in this repository at all (a new
+      githouse); a new name made on GitHub (a release/*) is said, like ahead, and root adopts it.
     True if a branch here changed."""
     ours = {b: s for b, s in refs(repo, 'refs/heads/').items() if owned(b)}
     theirs = refs(repo, 'refs/github/')
@@ -321,9 +322,17 @@ def reconcile(repo):
         if mine == gh:
             continue
         if mine is None:
-            if git(repo, 'update-ref', f'refs/heads/{branch}', gh, ZERO, check=False) is not None:
-                log(f'{repo.name}: {branch} taken from GitHub at {gh[:8]}: githouse had none')
-                changed = True
+            # Taken from GitHub only by a githouse with no deploy branch here at all (a new one). A new name made
+            # on GitHub (release/x; master where main deploys) would be a base retire() reads, unsigned (re):
+            # it's said, and root takes it with adopt.
+            if not ours:
+                if git(repo, 'update-ref', f'refs/heads/{branch}', gh, ZERO, check=False) is not None:
+                    log(f'{repo.name}: {branch} taken from GitHub at {gh[:8]}: githouse had none')
+                    changed = True
+                continue
+            differs[branch] = {'here': None, 'github': gh, 'state': 'new',
+                               'why': 'made on GitHub, not here: not taken (root: githouse adopt)'}
+            _say(repo, branch, ('new', gh), f'{branch}: new on GitHub at {gh[:8]}; not taken (root: githouse adopt)')
             continue
         if gh is None or _ancestor(repo, gh, mine):
             pushed = subprocess.run(['git', '--git-dir', str(repo), 'push', '--quiet', 'github',
