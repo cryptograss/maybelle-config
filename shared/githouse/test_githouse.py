@@ -162,6 +162,22 @@ class GithouseTest(Repos):
         self.assertEqual(self.heads()['production'], production)
         self.assertEqual(run('git', '--git-dir', str(self.github), 'rev-parse', 'production')[1].strip(), production)
 
+    def test_a_deploy_branch_name_new_on_github_is_not_taken(self):
+        # A deploy branch's name githouse doesn't hold, made on GitHub (release/x; master in a repo that deploys
+        # main): taken, it would be a base retire() reads, so a merge commit on it could retire live branches as
+        # merged, and nothing signed it (re). Only a githouse with no deploy branch at all takes them; else adopt.
+        self.commit(self.work, 'mine')
+        self.assertEqual(self.push('re', 'HEAD:re/foo')[0], 0)
+        run('git', 'fetch', '--quiet', str(self.repo), 'refs/heads/re/foo:refs/remotes/h/re/foo', cwd=self.upstream)
+        run('git', 'merge', '--quiet', '--no-ff', '-m', 'merge re/foo, around githouse', 'h/re/foo', cwd=self.upstream)
+        run('git', 'push', '--quiet', 'origin', 'HEAD:release/x', cwd=self.upstream)
+        githouse.fetch(self.repo)
+        self.assertNotIn('release/x', self.heads())
+        self.assertIn('re/foo', self.heads())  # still live: not retired by a branch nobody signed
+        self.assertEqual(self.differs()['release/x']['state'], 'new')
+        self.assertTrue(githouse.adopt(self.repo, 'release/x'))
+        self.assertIn('release/x', self.heads())
+
     def test_githubs_view_is_never_a_live_branch(self):
         self.on_github('around githouse')
         githouse.fetch(self.repo)
@@ -338,6 +354,190 @@ class GithouseTest(Repos):
         with self.assertRaises(PermissionError):
             githouse.auth('Re Bad', "git-upload-pack 'magenta.git'")
 
+
+
+class SecretTest(Repos):
+    """A push carrying a secret is refused at the door (Skyler and Justin, #ramp, 10 Nov; re's design)."""
+
+    VAULT_VALUE = 'Zq7-not-really-in-any-vault-9xK2'
+    TOKEN = 'ghp_' + 'A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8'   # GitHub's shape, made up here
+
+    def setUp(self):
+        super().setUp()
+        self.etc = self.tmp / 'etc'
+        self.etc.mkdir()
+        # As the playbook writes it from the scrubber's list (every vault string over 4 characters): hashes.
+        hashed = githouse.hash_secrets([self.VAULT_VALUE, 'admin', '3000'])
+        (self.etc / githouse.SECRETS_FILE).write_text(json.dumps(hashed))
+        self.assertNotIn(self.VAULT_VALUE, json.dumps(hashed))
+        self.assertEqual(hashed['lengths'], [len(self.VAULT_VALUE)])
+        patcher = unittest.mock.patch.object(githouse, 'ETC', self.etc)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        os.environ['GITHOUSE_ETC'] = str(self.etc)   # the hook runs as its own process
+        self.addCleanup(os.environ.pop, 'GITHOUSE_ETC', None)
+
+    def add(self, path, text, message='a change'):
+        (self.work / path).write_text(text)
+        run('git', 'add', path, cwd=self.work)
+        run('git', 'commit', '--quiet', '-m', message, cwd=self.work)
+
+    def test_a_vault_value_is_refused_and_not_repeated(self):
+        self.add('settings.py', f'PASSWORD = "{self.VAULT_VALUE}"\n')
+        code, said = self.push('re', 'HEAD:re/foo')
+        self.assertNotEqual(code, 0)
+        self.assertIn('settings.py: a value from the vault', said)
+        self.assertNotIn(self.VAULT_VALUE, said)
+        self.assertNotIn('re/foo', githouse.refs(self.repo, 'refs/heads/'))
+
+    def test_a_vault_value_passes_no_marker(self):
+        self.add('settings.py', f'PASSWORD = "{self.VAULT_VALUE}"  # {githouse.NOT_A_SECRET}\n')
+        self.assertNotEqual(self.push('re', 'HEAD:re/foo')[0], 0)
+
+    def test_short_vault_values_are_not_looked_for(self):
+        self.add('settings.py', 'USER = "admin"\nPORT = 3000\n')
+        self.assertEqual(self.push('re', 'HEAD:re/foo')[0], 0)
+
+    def test_a_token_shape_is_refused_unless_marked(self):
+        self.add('notes.md', f'token: {self.TOKEN}\n')
+        code, said = self.push('re', 'HEAD:re/foo')
+        self.assertNotEqual(code, 0)
+        self.assertIn('notes.md: a GitHub token', said)
+        self.assertNotIn(self.TOKEN, said)
+        run('git', 'reset', '--quiet', '--hard', 'HEAD~1', cwd=self.work)
+        self.add('test_redact.py', f"FAKE = '{self.TOKEN}'  # {githouse.NOT_A_SECRET}\n")
+        self.assertEqual(self.push('re', 'HEAD:re/foo')[0], 0)
+
+    def test_a_private_key_header(self):
+        self.add('key', '-----BEGIN OPENSSH PRIVATE KEY-----\nb3Blbg==\n-----END OPENSSH PRIVATE KEY-----\n')
+        self.assertIn('key: a private key', self.push('re', 'HEAD:re/foo')[1])
+
+    def test_in_a_commit_message(self):
+        self.add('a.txt', 'nothing here\n', message=f'fix login, the password was {self.VAULT_VALUE}')
+        self.assertIn('its message: a value from the vault', self.push('re', 'HEAD:re/foo')[1])
+
+    def test_added_then_removed_in_the_same_push_is_still_refused(self):
+        # History keeps it: the mirror and GitHub would have the first commit.
+        self.add('a.txt', f'{self.VAULT_VALUE}\n')
+        self.add('a.txt', 'gone now\n')
+        self.assertNotEqual(self.push('re', 'HEAD:re/foo')[0], 0)
+
+    def test_history_already_here_doesnt_stop_a_new_push(self):
+        # Found by scan and rotated by a person; it mustn't block everyone's next push.
+        self.on_main(f'{self.VAULT_VALUE}\n')
+        run('git', 'fetch', '--quiet', 'origin', cwd=self.work)
+        run('git', 'reset', '--quiet', '--hard', 'origin/main', cwd=self.work)
+        self.add('b.txt', 'unrelated\n')
+        self.assertEqual(self.push('re', 'HEAD:re/foo')[0], 0)
+        found = githouse.scan(self.repo)
+        self.assertEqual([where for _, where, _ in found], ['a.txt'])
+
+    def test_without_the_vault_s_list_the_shapes_still_hold(self):
+        (self.etc / githouse.SECRETS_FILE).unlink()
+        self.add('a.txt', f'{self.VAULT_VALUE}\n')
+        self.assertEqual(self.push('re', 'HEAD:re/foo')[0], 0)
+        self.add('b.txt', f'{self.TOKEN}\n')
+        self.assertNotEqual(self.push('re', 'HEAD:re/foo')[0], 0)
+
+    # --- re's seven plantings (#ramp, 10 Nov 19:42Z): five got past the first version
+
+    def refused(self, *refspecs):
+        code, said = self.push('re', *refspecs)
+        return code != 0 and self.TOKEN not in said and self.VAULT_VALUE not in said
+
+    def test_planted_in_an_ordinary_line(self):
+        self.add('a.txt', f'x = "{self.TOKEN}"\n')
+        self.assertTrue(self.refused('HEAD:re/foo'))
+
+    def test_planted_behind_gitattributes_binary(self):
+        self.add('.gitattributes', '*.txt binary\n')
+        self.add('a.txt', f'{self.TOKEN}\n')
+        self.assertTrue(self.refused('HEAD:re/foo'))
+
+    def test_planted_in_a_message_after_a_diff_line(self):
+        self.add('a.txt', 'fine\n', message=f'subject\n\ndiff --git a/x b/x\n{self.TOKEN}')
+        self.assertTrue(self.refused('HEAD:re/foo'))
+
+    def test_planted_in_a_message_line_starting_plus_plus_plus(self):
+        self.add('a.txt', 'fine\n', message=f'subject\n\n+++ {self.TOKEN}')
+        self.assertTrue(self.refused('HEAD:re/foo'))
+
+    def test_planted_in_a_file_line_starting_plus_plus(self):
+        self.add('a.txt', f'++ {self.TOKEN}\n')
+        self.assertTrue(self.refused('HEAD:re/foo'))
+
+    def test_planted_in_a_binary_file(self):
+        (self.work / 'state.db').write_bytes(b'SQLite format 3\x00\x01\x02' + self.VAULT_VALUE.encode() + b'\x00\xff\xfe')
+        run('git', 'add', 'state.db', cwd=self.work)
+        run('git', 'commit', '--quiet', '-m', 'a database', cwd=self.work)
+        self.assertTrue(self.refused('HEAD:re/foo'))
+
+    def test_planted_only_in_a_merge(self):
+        run('git', 'checkout', '--quiet', '-b', 'side', cwd=self.work)
+        self.add('side.txt', 'side\n')
+        run('git', 'checkout', '--quiet', '-', cwd=self.work)
+        self.add('main.txt', 'main\n')
+        run('git', 'merge', '--quiet', '--no-commit', 'side', cwd=self.work)
+        (self.work / 'resolved.txt').write_text(f'{self.TOKEN}\n')
+        run('git', 'add', 'resolved.txt', cwd=self.work)
+        run('git', 'commit', '--quiet', '-m', 'merge side', cwd=self.work)
+        self.assertTrue(self.refused('HEAD:re/foo'))
+
+    def test_a_merge_isnt_refused_for_what_it_brought_in(self):
+        # main into a branch, main holding an old fixture: --remerge-diff, not the diff to the first parent.
+        self.on_main(f'old = "{self.TOKEN}"\n')
+        run('git', 'checkout', '--quiet', '-b', 'mine', 'HEAD~0', cwd=self.work)
+        self.add('mine.txt', 'mine\n')
+        run('git', 'fetch', '--quiet', 'origin', cwd=self.work)
+        run('git', 'merge', '--quiet', '-m', 'main into mine', 'origin/main', cwd=self.work)
+        self.assertEqual(self.push('re', 'HEAD:re/foo')[0], 0)
+
+    def test_planted_in_a_file_name(self):
+        self.add(f'{self.TOKEN}.txt', 'fine\n')
+        self.assertTrue(self.refused('HEAD:re/foo'))
+
+    def test_the_old_files_context_after_the_hunk_header_isnt_checked(self):
+        # git prints the enclosing line of the old file after the second @@: history, not this commit.
+        self.on_main(f'def f():  # {self.TOKEN}\n' + ''.join(f'    x{i} = {i}\n' for i in range(20)))
+        run('git', 'fetch', '--quiet', 'origin', cwd=self.work)
+        run('git', 'reset', '--quiet', '--hard', 'origin/main', cwd=self.work)
+        (self.work / 'a.txt').write_text((self.work / 'a.txt').read_text().replace('x19 = 19', 'x19 = 190'))
+        run('git', 'commit', '--quiet', '-am', 'change inside f', cwd=self.work)
+        self.assertEqual(self.push('re', 'HEAD:re/foo')[0], 0)
+
+    # --- re's second look (#ramp, 10 Nov 19:55Z)
+
+    def test_a_vault_value_right_after_0x(self):
+        self.add('keys.js', f'const key = "0x{self.VAULT_VALUE}";\n')
+        self.assertTrue(self.refused('HEAD:re/foo'))
+
+    def test_inside_a_longer_word_is_still_not_seen(self):
+        # The limit of matching by hashes, said in a test: glued inside a word, no stretch starts at it.
+        self.add('a.txt', f'abc{self.VAULT_VALUE}\n')
+        self.assertEqual(self.push('re', 'HEAD:re/foo')[0], 0)
+
+    def test_an_octopus_merge_is_refused(self):
+        base = run('git', 'rev-parse', 'HEAD', cwd=self.work)[1].strip()
+        for name in ('one', 'two'):
+            run('git', 'checkout', '--quiet', '-b', name, base, cwd=self.work)
+            self.add(f'{name}.txt', f'{name}\n')
+        run('git', 'checkout', '--quiet', '-b', 'all', base, cwd=self.work)
+        self.add('three.txt', 'three\n')
+        run('git', 'merge', '--quiet', '--no-commit', 'one', 'two', cwd=self.work)
+        (self.work / 'own.txt').write_text(f'{self.TOKEN}\n')
+        run('git', 'add', 'own.txt', cwd=self.work)
+        run('git', 'commit', '--quiet', '-m', 'octopus', cwd=self.work)
+        code, said = self.push('re', 'HEAD:re/foo')
+        self.assertNotEqual(code, 0)
+        self.assertIn('more than two parents', said)
+
+    def on_main(self, text):
+        """A secret already in githouse's main (from before this check, say)."""
+        (self.upstream / 'a.txt').write_text(text)
+        run('git', 'add', '.', cwd=self.upstream)
+        run('git', 'commit', '--quiet', '-m', 'long ago', cwd=self.upstream)
+        run('git', 'push', '--quiet', 'origin', 'HEAD:main', cwd=self.upstream)
+        githouse.adopt(self.repo, 'main')
 
 
 class BranchTestTest(Repos):

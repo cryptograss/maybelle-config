@@ -343,12 +343,18 @@
           - "/var/log/pickipedia-backup.log:/var/log/pickipedia-backup.log:ro"
           - "/var/log/pickipedia-deploy.log:/var/log/pickipedia-deploy.log:ro"
           - "/var/log/delivery-kid-audit.log:/var/log/delivery-kid-audit.log:ro"
+          # githouse's repositories, read-only: the trusted jobs (pickipedia, arthel) build from them, not from
+          # GitHub (the flip, Cryptograss:Moods/ramp/Plan, section 6). memory-lane mounts them the same way.
+          - "{{ githouse_dir }}/git:/srv/git:ro"
           # Docker socket removed - Jenkins doesn't need it and it's a security risk
         etc_hosts:
           # Use Hetzner private network for faster/reliable inter-VPS communication
           pickipedia.xyz: "10.0.0.4"
         env_file: "{{ jenkins_home }}/.env"
         env:
+          # The image's JAVA_OPTS, and local checkouts allowed: the git plugin refuses file:// since SECURITY-2478,
+          # so a job's config can't read the controller's disk. Ours are written here, and /srv/git is githouse's.
+          JAVA_OPTS: "-Djenkins.install.runSetupWizard=false -Dhudson.plugins.git.GitSCM.ALLOW_LOCAL_CHECKOUT=true"
           CASC_JENKINS_CONFIG: "/var/jenkins_home/casc_configs/jenkins.yml"
           JENKINS_ADMIN_ID: admin
           JENKINS_ADMIN_PASSWORD: "{{ jenkins_admin_password }}"
@@ -399,6 +405,21 @@
       retries: 30
       delay: 2
       changed_when: false
+
+    # githouse's git user owns /srv/git, and git won't read another user's repository unless told to (tried,
+    # 10 Nov: neither -c nor the environment reaches a local fetch's upload-pack). jenkins's own config, in
+    # jenkins_home, so it outlasts the container. Costs nothing new: githouse already decides what deploys.
+    - name: Jenkins may fetch from githouse's repositories (the trusted jobs build from them)
+      shell: |
+        set -e
+        for name in {{ githouse_repos | map('regex_replace', '^.*/', '') | join(' ') }}; do
+          path=/srv/git/$name.git
+          docker exec -u jenkins jenkins git config --global --get-all safe.directory | grep -qxF "$path" && continue
+          docker exec -u jenkins jenkins git config --global --add safe.directory "$path"
+          echo "added $path"
+        done
+      register: jenkins_safe_dirs
+      changed_when: "'added' in jenkins_safe_dirs.stdout"
 
     # A job new to this deploy can be written to disk at boot and still not be loaded until the next start
     # (branch-tests, 9 Nov: JCasC made it 65 ms before "Loaded all jobs", from a list read without it).
@@ -1398,6 +1419,23 @@
       stat:
         path: /tmp/scrubber-secrets.json
       register: scrubber_secrets_file
+
+    # githouse refuses a push carrying any of these (shared/githouse/githouse.py, check_secrets): the same
+    # list, as SHA-256 hashes and lengths, never the values (re, #ramp, 10 Nov: a bug in the git user's
+    # forced command then leaks no vault), readable by githouse's git user alone, as jenkins_reporter is.
+    # Kept here, not asked of memory-lane: a push's content goes nowhere else, and memory-lane being down
+    # neither blocks every push nor skips the check (re). Refreshed whenever chapter 1 brings the list;
+    # until the first, githouse checks secrets' shapes only.
+    - name: githouse refuses a push carrying any of the vault's values (their hashes)
+      shell: |
+        set -e
+        umask 077
+        python3 {{ githouse_dir }}/build/githouse.py hash-secrets < /tmp/scrubber-secrets.json > {{ githouse_dir }}/etc/secret-hashes.json.tmp
+        chown 2999 {{ githouse_dir }}/etc/secret-hashes.json.tmp
+        chmod 0400 {{ githouse_dir }}/etc/secret-hashes.json.tmp
+        mv -f {{ githouse_dir }}/etc/secret-hashes.json.tmp {{ githouse_dir }}/etc/secret-hashes.json
+      no_log: true
+      when: scrubber_secrets_file.stat.exists
 
     - name: Copy secrets into scrubber container
       shell: docker cp /tmp/scrubber-secrets.json scrubber:/app/secrets/secrets.json

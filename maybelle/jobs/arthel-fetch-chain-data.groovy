@@ -11,8 +11,9 @@ pipelineJob('arthel-fetch-chain-data') {
             scm {
                 git {
                     remote {
-                        url('https://github.com/cryptograss/justinholmes.com.git')
-                        credentials('github-token')
+                        // githouse's copy (the flip, Cryptograss:Moods/ramp/Plan, section 6): production there
+                        // moves only by a signed merge, so a push to GitHub's, around githouse, never builds here.
+                        url('file:///srv/git/arthel.git')
                     }
                     branch('*/production')
                 }

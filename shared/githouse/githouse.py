@@ -15,8 +15,8 @@ meant to be cheap to lose.
   (never forced); ahead of ours or apart from it, someone pushed or merged
   there, around githouse, and it's not taken: it's logged and written to
   github.json, and only root takes it (`githouse adopt <repo> <branch>`, on
-  maybelle). A deploy branch githouse doesn't have yet is taken from GitHub
-  once (a new githouse; a new release/*). Nobody pushes them here. Pull
+  maybelle). A new githouse takes GitHub's deploy branches once; after
+  that, a deploy branch's name new on GitHub is said, not taken (adopt). Nobody pushes them here. Pull
   requests' heads are still GitHub's, fetched and pruned to match.
 * Everyone else's branches are their own: re pushes re/*, magent magent/*,
   over ssh as the git user, on maybelle's private network only. Each key's
@@ -57,6 +57,11 @@ meant to be cheap to lose.
   Orders arrive by mail: memory-lane keeps them, unread, and githouse fetches them every few seconds and
   checks each itself (8 Nov: only Justin has ssh to maybelle). Brakes stop it (section 10): root's freeze (/etc/githouse/frozen), AZ5, or a ban on the signer, the
   last two asked of memory-lane at every order. Its answer can only stop a merge; no answer stops it too.
+* A push that carries a secret is refused, before anything else holds a copy (Skyler and Justin, #ramp,
+  10 Nov; re's design): any value from the vault, exactly, as the scrubber has them (/etc/githouse/
+  secret-hashes.json: SHA-256 of each, never the values), in any line a commit adds, merges included, or
+  in its message; or anything shaped like a private key or a known service's token. A line ending 'githouse: not a secret' passes the shapes
+  (a redaction test needs them), never the vault's values. `githouse scan` looks through all of history.
 * After a push reaches GitHub, Jenkins' branch-tests job tests exactly that commit, on an agent with no
   secrets (Plan, section 11): /etc/githouse/jenkins.json says where, jenkins_reporter as whom.
 * `githouse mirror`, on hunter: a read-only copy of all of it, fetched from
@@ -194,6 +199,162 @@ def after(repo, user, updates, forward=None):
     publish()
 
 
+# --- secrets: refused at the door ---------------------------------------------------------------
+# Every push comes here first; within a minute hunter's mirror (every container) and GitHub (everyone) have
+# it, and a secret can't be taken back from either. So it's refused here, in pre-receive.
+
+SECRETS_FILE = 'secret-hashes.json'   # /etc/githouse: SHA-256 of the vault's values and their lengths, never the values
+SECRET_MIN = 12                        # shorter values ("admin", a port) are everywhere in code
+NOT_A_SECRET = 'githouse: not a secret'
+SHAPES = {
+    'a private key': re.compile(r'-----BEGIN (?:[A-Z]+ )?PRIVATE KEY(?: BLOCK)?-----'),
+    'an AWS access key': re.compile(r'\b(?:AKIA|ASIA)[0-9A-Z]{16}\b'),
+    'a GitHub token': re.compile(r'\b(?:gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{50,})\b'),
+    'an Anthropic key': re.compile(r'\bsk-ant-[A-Za-z0-9_-]{20,}'),
+    'an OpenAI key': re.compile(r'\bsk-(?:proj-)?[A-Za-z0-9]{32,}\b'),
+    'a Slack token': re.compile(r'\bxox[abposr]-[A-Za-z0-9-]{10,}'),
+    'a Google API key': re.compile(r'\bAIza[0-9A-Za-z_-]{35}\b'),
+    'a Stripe live key': re.compile(r'\b[sr]k_live_[0-9A-Za-z]{20,}'),
+    'a JWT (Pinata\'s keys are these)': re.compile(r'\beyJhbGciOi[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}'),
+}
+
+
+def _needle(value):
+    """What's looked for of a vault value: the value, or, of many lines (a key file), its longest line."""
+    return max(value.strip().splitlines() or [''], key=len).strip()
+
+
+def hash_secrets(values):
+    """The file the playbook writes from the scrubber's list: SHA-256 of each value worth looking for, and
+    the lengths there are. githouse never holds the values (re, #ramp, 10 Nov: a bug in the git user's
+    forced command then leaks no vault)."""
+    needles = {_needle(v) for v in values if isinstance(v, str)}
+    needles = {n for n in needles if len(n) >= SECRET_MIN}
+    return {'sha256': sorted(hashlib.sha256(n.encode()).hexdigest() for n in needles),
+            'lengths': sorted({len(n) for n in needles})}
+
+
+def secret_hashes(etc=None):
+    """(lengths, hashes) from /etc/githouse; ((), set()) if it isn't there yet (a fresh githouse)."""
+    try:
+        found = json.loads((Path(etc or ETC) / SECRETS_FILE).read_text())
+        return tuple(sorted(int(n) for n in found['lengths'])), set(found['sha256'])
+    except (OSError, ValueError, KeyError, TypeError):
+        return (), set()
+
+
+def _vault_value_in(line, vault):
+    """The length of a vault value in this line, or None. Each stretch that starts and ends where a word
+    does (not inside one), or starts right after a word's 0x (a hex key pasted as 0x<key>, re), of a length
+    some value has, is hashed and looked up."""
+    lengths, hashes = vault
+    if not hashes:
+        return None
+    n = len(line)
+    for i in range(n):
+        if i and line[i - 1].isalnum() and not (line[i - 2:i] in ('0x', '0X') and (i == 2 or not line[i - 3].isalnum())):
+            continue
+        for length in lengths:
+            j = i + length
+            if j > n:
+                break
+            if j < n and line[j].isalnum():
+                continue
+            if hashlib.sha256(line[i:j].encode()).hexdigest() in hashes:
+                return length
+    return None
+
+
+def secret_in(line, vault):
+    """What secret this line carries, said without it ('a value from the vault, 40 characters'), or None."""
+    length = _vault_value_in(line, vault)
+    if length:
+        return f'a value from the vault, {length} characters'
+    if NOT_A_SECRET in line:
+        return None
+    for name, shape in SHAPES.items():
+        if shape.search(line):
+            return name
+    return None
+
+
+def _git_text(repo, *args):
+    """git's output as text, whatever bytes a file held (--text diffs of binaries)."""
+    done = subprocess.run(['git', '--git-dir', str(repo), *args], capture_output=True)
+    if done.returncode != 0:
+        raise RuntimeError(f"git {' '.join(args)}: {done.stderr.decode('utf-8', 'replace').strip()}")
+    return done.stdout.decode('utf-8', 'replace')
+
+
+def secrets_in(repo, revs, vault):
+    """[(commit, where, what)] in the commits revs name: every line of every message, in a pass of its own;
+    and every line of every diff but removals, headers too (a file's name), binaries as text (--text), a
+    merge by what its resolution added (--remerge-diff: not what it brought in, which was checked as its own
+    commits). re's review, 10 Nov: seven ways planted, each a test.
+    Not covered, on purpose: a NUL byte in a hand-made commit object hides the rest of its message from git
+    log itself. Only someone hiding a secret on purpose gets there, and they could as well base64 it; this
+    check is for accidents (re)."""
+    found = []
+    for record in _git_text(repo, 'log', '--format=%H%x00%B%x00', *revs).split('\x00\n'):
+        if '\x00' not in record:
+            continue
+        commit, message = record.split('\x00', 1)
+        for line in message.split('\n'):
+            what = secret_in(line, vault)
+            if what:
+                found.append((commit.strip(), 'its message', what))
+    commit = where = ''
+    in_header = False
+    for line in _git_text(repo, 'log', '-p', '-U0', '--text', '--remerge-diff', '--no-color', '--no-ext-diff',
+                          '--no-textconv', '--format=commit %H', *revs).split('\n'):
+        if line.startswith('commit ') and SHA.fullmatch(line[7:]):
+            commit, where, in_header = line[7:], '', False
+            continue
+        if line.startswith('diff --git ') or line.startswith('diff --cc ') or line.startswith('remerge '):
+            in_header = True
+            where = line
+        elif in_header and line.startswith('+++ '):
+            where = line[6:] if line.startswith('+++ b/') else line[4:]
+        if line.startswith('@@'):
+            in_header = False
+            line = line.split('@@', 2)[1] if line.count('@@') >= 2 else line  # not the context after: the old file's
+        elif line.startswith('-') and not in_header:
+            continue  # a removal
+        elif line.startswith('--- ') and in_header:
+            continue  # the old file's name
+        what = secret_in(line[1:] if line.startswith('+') and not in_header else line, vault)
+        if what:
+            # Said without the secret: a path that holds one is "a file's name".
+            found.append((commit, "a file's name" if secret_in(where, vault) else where, what))
+    return found
+
+
+def check_secrets(repo, updates, etc=None):
+    """What's refused in a push for a secret it carries: [message]. Only commits new to githouse: a secret
+    already in history (found by scan, rotated by a person) doesn't stop every push after it."""
+    vault, refused = secret_hashes(etc), []
+    for old, new, ref in updates:
+        if new == ZERO:
+            continue
+        # --remerge-diff reworks a merge of two; an octopus's own lines would go unseen (re). githouse makes
+        # only --no-ff merges of two, so nobody needs to push one: merge one branch at a time.
+        for octopus in (git(repo, 'rev-list', '--min-parents=3', new, '--not', '--all') or '').split():
+            refused.append(f'{octopus[:8]}: a merge of more than two parents, which githouse can\'t check for '
+                           f'secrets. Merge one branch at a time, and push again')
+        for commit, where, what in secrets_in(repo, [new, '--not', '--all'], vault):
+            line = f'{commit[:8]} {where}: {what}. Take it out of the commit (amend or rebase) and push again'
+            if not what.startswith('a value from the vault'):
+                line += f"; if it isn't a secret (a test's fake), end its line with '{NOT_A_SECRET}'"
+            if line not in refused:
+                refused.append(line)
+    return refused
+
+
+def scan(repo, etc=None):
+    """All of a repository's history, every ref: [(commit, where, what)]. For root, once, and after a leak."""
+    return secrets_in(repo, ['--all'], secret_hashes(etc))
+
+
 # --- branch tests on Jenkins (Plan, section 11) ----------------------------------------------------------
 # After a push reaches GitHub, Jenkins' branch-tests job is asked to test exactly that commit, on the
 # `branches` agent. As the reporter, who may only read and start builds; its password in /etc/githouse,
@@ -311,7 +472,8 @@ def reconcile(repo):
     * GitHub's behind ours, or gone: ours is pushed to it, never forced (a forward that failed, sent again).
     * GitHub's ahead of ours, or apart: pushed or merged on GitHub, around githouse. Not taken, not
       overwritten: logged once, and in github.json, for a person to look at; root takes it with adopt.
-    * none here yet: taken from GitHub, once (a new githouse; a release/* made there).
+    * none here yet: taken from GitHub only if githouse has no deploy branch in this repository at all (a new
+      githouse); a new name made on GitHub (a release/*) is said, like ahead, and root adopts it.
     True if a branch here changed."""
     ours = {b: s for b, s in refs(repo, 'refs/heads/').items() if owned(b)}
     theirs = refs(repo, 'refs/github/')
@@ -321,9 +483,17 @@ def reconcile(repo):
         if mine == gh:
             continue
         if mine is None:
-            if git(repo, 'update-ref', f'refs/heads/{branch}', gh, ZERO, check=False) is not None:
-                log(f'{repo.name}: {branch} taken from GitHub at {gh[:8]}: githouse had none')
-                changed = True
+            # Taken from GitHub only by a githouse with no deploy branch here at all (a new one). A new name made
+            # on GitHub (release/x; master where main deploys) would be a base retire() reads, unsigned (re):
+            # it's said, and root takes it with adopt.
+            if not ours:
+                if git(repo, 'update-ref', f'refs/heads/{branch}', gh, ZERO, check=False) is not None:
+                    log(f'{repo.name}: {branch} taken from GitHub at {gh[:8]}: githouse had none')
+                    changed = True
+                continue
+            differs[branch] = {'here': None, 'github': gh, 'state': 'new',
+                               'why': 'made on GitHub, not here: not taken (root: githouse adopt)'}
+            _say(repo, branch, ('new', gh), f'{branch}: new on GitHub at {gh[:8]}; not taken (root: githouse adopt)')
             continue
         if gh is None or _ancestor(repo, gh, mine):
             pushed = subprocess.run(['git', '--git-dir', str(repo), 'push', '--quiet', 'github',
@@ -811,6 +981,8 @@ def main(argv):
         updates = [tuple(line.split()) for line in sys.stdin.read().splitlines() if line.strip()]
         if command == 'pre-receive':
             refused = check(repo, user, updates) if user else ['pushes come through githouse auth']
+            if not refused:
+                refused = check_secrets(repo, updates)
             for message in refused:
                 sys.stderr.write(f'githouse: {message}\n')
             return 1 if refused else 0
@@ -836,6 +1008,19 @@ def main(argv):
             result = {'outcome': 'refused', 'why': 'expected {"order", "signature"} on stdin'}
         print(json.dumps(result))
         return 0 if result.get('outcome') == 'merged' else 1
+    if command == 'hash-secrets':  # the scrubber's list on stdin (a JSON list of values), the hashes out
+        print(json.dumps(hash_secrets(json.loads(sys.stdin.read()))))
+        return 0
+    if command == 'scan':  # scan [repo...]: every repository's whole history, for a secret it carries
+        names = args[1:] or [r.name[:-4] for r in sorted(ROOT.glob('*.git'))]
+        found = 0
+        for name in names:
+            for commit, where, what in scan(ROOT / f'{name}.git'):
+                print(f'{name} {commit[:8]} {where}: {what}')
+                found += 1
+        print(f'{found} found, in {len(names)} repositories' + ('' if secret_hashes()[1] else
+              f' (no {SECRETS_FILE} here: shapes only, not the vault\'s values)'))
+        return 1 if found else 0
     if command == 'adopt':  # adopt <repo> <branch>: root takes GitHub's deploy branch, as a fast-forward only
         if os.geteuid() == 0:
             sys.stderr.write('githouse: adopt as git (docker exec -u git), so what it writes stays git\'s\n')

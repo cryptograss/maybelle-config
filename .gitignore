@@ -1,3 +1,5 @@
 plaintext-vault.yml
 __pycache__/
 *.pyc
+# Local settings, and sometimes secrets: never committed (githouse refuses the vault's values anyway)
+.env
