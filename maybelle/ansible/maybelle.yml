@@ -1055,9 +1055,20 @@
     # memory-lane is part of magenta since 18 Oct 2026 (magenta/memory-lane/); its
     # services are built from there. /mnt/persist/magenta/source, the old clone of
     # its own repository, is no longer updated or used.
+    # From githouse's copy (the flip, 10 Nov 2026; Cryptograss:Moods/ramp/Plan, section 6), whose main moves
+    # only by a signed merge there: a push to GitHub's main, around githouse, never reaches maybelle. No
+    # GitHub fallback: githouse is set up earlier in this play, and a fresh one has main within minutes.
+    - name: githouse has magenta's main (a fresh githouse fetches it first)
+      command: git --git-dir {{ githouse_dir }}/git/magenta.git rev-parse --verify --quiet refs/heads/main
+      register: githouse_magenta_main
+      changed_when: false
+      retries: 30
+      delay: 10
+      until: githouse_magenta_main.rc == 0
+
     - name: Clone or update magenta repository (memory-lane is in it)
       git:
-        repo: https://github.com/cryptograss/magenta.git
+        repo: "file://{{ githouse_dir }}/git/magenta.git"
         dest: /mnt/persist/magenta/magenta-source
         version: main
         force: yes

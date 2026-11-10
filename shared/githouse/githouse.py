@@ -7,11 +7,17 @@ integrator: the copy deploys come from lives there, not on hunter, which is
 meant to be cheap to lose.
 
 * A bare repository per repository we work on, /srv/git/<name>.git.
-* GitHub's branches -- main, master, production, release/* -- and pull
-  requests' heads are GitHub's: fetched every 60 seconds, the repositories
-  staggered across the minute, forced and pruned to match. Nobody pushes them
-  here. Until the flip, merges still happen on GitHub, and this copy lags by
-  up to a minute.
+* The deploy branches -- main, master, production, release/* -- are
+  githouse's since the flip (10 Nov 2026; Plan, section 6): they move only by
+  a signed merge here, and GitHub is a mirror they're pushed to. Every 60
+  seconds, the repositories staggered across the minute, githouse looks at
+  GitHub's (kept as refs/github/<branch>): behind ours, it's sent ours again
+  (never forced); ahead of ours or apart from it, someone pushed or merged
+  there, around githouse, and it's not taken: it's logged and written to
+  github.json, and only root takes it (`githouse adopt <repo> <branch>`, on
+  maybelle). A deploy branch githouse doesn't have yet is taken from GitHub
+  once (a new githouse; a new release/*). Nobody pushes them here. Pull
+  requests' heads are still GitHub's, fetched and pruned to match.
 * Everyone else's branches are their own: re pushes re/*, magent magent/*,
   over ssh as the git user, on maybelle's private network only. Each key's
   forced command names who it is (`githouse auth <name>`), and the hook lets
@@ -30,13 +36,13 @@ meant to be cheap to lose.
   (maybelle-config:re/fix-mtime-guard) for its whole life; when it merges its
   ref moves to refs/merged/<branch>, when its owner deletes it to
   refs/closed/<branch>, and a push creating either name again is refused,
-  with the next free one offered. Merged means: its tip is in a GitHub
+  with the next free one offered. Merged means: its tip is in a deploy
   branch's history but not on that branch's own line (first parents) -- a
   merge commit brought it in. A branch just cut from main, with nothing on
   it yet, isn't merged. (Squash and rebase merges break this: merge commits
   only, on every repository here.)
 * What's pushed here goes on to GitHub (post-receive) with the deploy key,
-  so pull requests keep working until the flip; a forward that fails is
+  so pull requests and Jenkins keep working; a forward that fails is
   logged, never retried by deleting anything.
 * branches.json, beside the repositories: every repository's branches, live,
   merged and closed, for magenta's autocomplete (memory-lane serves it).
@@ -45,9 +51,9 @@ meant to be cheap to lose.
   repository, the branch, its head commit and the branch it goes into, with a nonce and an expiry; it
   is signed with `ssh-keygen -Y sign -n magenta-merge`, and githouse checks the signature itself against
   /etc/githouse/merge_signers, which ansible writes with only the people who may merge. memory-lane
-  is never in the path. The merge is `--no-ff` of exactly that commit, pushed to GitHub first (until the
-  flip GitHub's branches are GitHub's: the minute's fetch brings it back), and each order and what came
-  of it are kept in /srv/git/.merges, its nonce spent whether it merged or not.
+  is never in the path. The merge is `--no-ff` of exactly that commit onto githouse's own branch, then
+  pushed on to GitHub (a push that fails is sent again each minute; the merge stands here), and each
+  order and what came of it are kept in /srv/git/.merges, its nonce spent whether it merged or not.
   Orders arrive by mail: memory-lane keeps them, unread, and githouse fetches them every few seconds and
   checks each itself (8 Nov: only Justin has ssh to maybelle). Brakes stop it (section 10): root's freeze (/etc/githouse/frozen), AZ5, or a ban on the signer, the
   last two asked of memory-lane at every order. Its answer can only stop a merge; no answer stops it too.
@@ -76,7 +82,7 @@ from pathlib import Path
 
 ROOT = Path(os.environ.get('GITHOUSE_ROOT', '/srv/git'))
 ETC = Path(os.environ.get('GITHOUSE_ETC', '/etc/githouse'))
-OWNED = ('main', 'master', 'production', 'release/*')  # GitHub's branches
+OWNED = ('main', 'master', 'production', 'release/*')  # the deploy branches: githouse's since the flip
 NAME = re.compile(r'[a-z][a-z0-9-]{0,31}')
 BRANCH = re.compile(r'[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*')
 PUBKEY = re.compile(r'^(sk-)?(ssh-ed25519|ecdsa-sha2-nistp\d+|ssh-rsa)(@openssh\.com)? [A-Za-z0-9+/=]+( \S+)?$')
@@ -102,7 +108,7 @@ def ssh_with(key):
 
 
 def owned(branch):
-    """Whether a branch is GitHub's (fetched here, never pushed here)."""
+    """Whether a branch is a deploy branch (moved only by a merge here, never pushed here)."""
     return any(fnmatch.fnmatchcase(branch, pattern) for pattern in OWNED)
 
 
@@ -261,34 +267,122 @@ def write_authorized_keys():
 # --- GitHub's branches -------------------------------------------------------------
 
 def fetch(repo):
-    """GitHub's branches and pull requests' heads, as GitHub has them now; then retire what merged.
-    True if anything changed."""
+    """Pull requests' heads, as GitHub has them now, and GitHub's deploy branches, as refs/github/<branch>;
+    then each deploy branch squared with GitHub's (reconcile), and what merged retired. True if anything
+    changed here."""
     listed = git(repo, 'ls-remote', 'github', 'refs/heads/*', 'refs/pull/*/head')
-    there = {}
+    there, source = {}, {}
     for line in listed.splitlines():
         sha, ref = line.split('\t', 1)
-        if ref.startswith('refs/pull/') or owned(ref[len('refs/heads/'):]):
-            there[ref] = sha
-    here = {f'refs/heads/{b}': s for b, s in refs(repo, 'refs/heads/').items() if owned(b)}
+        if ref.startswith('refs/pull/'):
+            there[ref], source[ref] = sha, ref
+        elif owned(ref[len('refs/heads/'):]):
+            mine = 'refs/github/' + ref[len('refs/heads/'):]
+            there[mine], source[mine] = sha, ref
+    here = {f'refs/github/{b}': s for b, s in refs(repo, 'refs/github/').items()}
     here.update({f'refs/pull/{n}': s for n, s in refs(repo, 'refs/pull/').items()})
-    if there == here:
-        return False
-    wanted = [f'+{ref}:{ref}' for ref, sha in there.items() if here.get(ref) != sha]
-    for start in range(0, len(wanted), 200):
-        git(repo, 'fetch', '--quiet', '--no-tags', 'github', *wanted[start:start + 200])
-    for ref in set(here) - set(there):  # gone from GitHub: GitHub's, so gone here
-        git(repo, 'update-ref', '-d', ref)
-    # A clone checks out what GitHub would give it: its default branch.
+    fetched = there != here
+    if fetched:
+        wanted = [f'+{source[ref]}:{ref}' for ref, sha in there.items() if here.get(ref) != sha]
+        for start in range(0, len(wanted), 200):
+            git(repo, 'fetch', '--quiet', '--no-tags', 'github', *wanted[start:start + 200])
+        for ref in set(here) - set(there):  # gone from GitHub: GitHub's view of it goes too, nothing of ours
+            git(repo, 'update-ref', '-d', ref)
+    taken = reconcile(repo)
+    # A clone checks out the default branch GitHub names, if it's one of ours.
     default = re.search(r'^ref: refs/heads/(\S+)\tHEAD$', git(repo, 'ls-remote', '--symref', 'github', 'HEAD'), re.M)
-    if default and owned(default.group(1)):
+    if default and owned(default.group(1)) and default.group(1) in refs(repo, 'refs/heads/'):
         git(repo, 'symbolic-ref', 'HEAD', f'refs/heads/{default.group(1)}')
+    if fetched or taken:
+        retire(repo)
+    publish()
+    return fetched or taken
+
+
+# Where GitHub's deploy branches differ from githouse's and stay that way: {repo: {branch: {...}}}, written to
+# github.json for memory-lane; and what's been logged already, so a standing difference is said once.
+DIFFERS = {}
+_SAID = {}
+
+
+def reconcile(repo):
+    """Each deploy branch, githouse's against GitHub's (refs/github/), after the flip (Plan, section 6):
+    * the same: nothing.
+    * GitHub's behind ours, or gone: ours is pushed to it, never forced (a forward that failed, sent again).
+    * GitHub's ahead of ours, or apart: pushed or merged on GitHub, around githouse. Not taken, not
+      overwritten: logged once, and in github.json, for a person to look at; root takes it with adopt.
+    * none here yet: taken from GitHub, once (a new githouse; a release/* made there).
+    True if a branch here changed."""
+    ours = {b: s for b, s in refs(repo, 'refs/heads/').items() if owned(b)}
+    theirs = refs(repo, 'refs/github/')
+    differs, changed = {}, False
+    for branch in sorted(set(ours) | set(theirs)):
+        mine, gh = ours.get(branch), theirs.get(branch)
+        if mine == gh:
+            continue
+        if mine is None:
+            if git(repo, 'update-ref', f'refs/heads/{branch}', gh, ZERO, check=False) is not None:
+                log(f'{repo.name}: {branch} taken from GitHub at {gh[:8]}: githouse had none')
+                changed = True
+            continue
+        if gh is None or _ancestor(repo, gh, mine):
+            pushed = subprocess.run(['git', '--git-dir', str(repo), 'push', '--quiet', 'github',
+                                     f'{mine}:refs/heads/{branch}'], capture_output=True, text=True)
+            if pushed.returncode == 0:
+                git(repo, 'update-ref', f'refs/github/{branch}', mine)
+                _say(repo, branch, None, f'{branch} sent to GitHub at {mine[:8]}')
+                continue
+            state, why = 'behind', f'GitHub refused it: {pushed.stderr.strip()[:200]}'
+        elif _ancestor(repo, mine, gh):
+            state, why = 'ahead', 'pushed or merged on GitHub, not here: not taken (root: githouse adopt)'
+        else:
+            state, why = 'apart', 'GitHub and githouse have each moved: not taken (a person looks)'
+        differs[branch] = {'here': mine, 'github': gh, 'state': state, 'why': why}
+        _say(repo, branch, (state, gh, mine), f'{branch}: GitHub {state} at {(gh or "none")[:8]}, '
+                                              f'githouse at {mine[:8]}; {why}')
+    for branch in set(_SAID.get(repo.name, {})) - set(differs):
+        _SAID[repo.name].pop(branch, None)
+    DIFFERS[repo.name[:-4]] = differs
+    return changed
+
+
+def _say(repo, branch, key, line):
+    """Log a line about a branch's difference with GitHub once, until it changes (key None: say it, and forget)."""
+    said = _SAID.setdefault(repo.name, {})
+    if key is None:
+        said.pop(branch, None)
+        log(f'{repo.name}: {line}')
+    elif said.get(branch) != key:
+        said[branch] = key
+        log(f'{repo.name}: {line}')
+
+
+def adopt(repo, branch):
+    """Root's way to take GitHub's deploy branch after someone moved it there: only as a fast-forward of
+    githouse's, and only to what GitHub has now. Returns the commits taken, oldest first."""
+    if not owned(branch):
+        raise Refused(f'{branch} is not a deploy branch')
+    git(repo, 'fetch', '--quiet', '--no-tags', 'github', f'+refs/heads/{branch}:refs/github/{branch}')
+    gh = refs(repo, 'refs/github/').get(branch)
+    mine = refs(repo, 'refs/heads/').get(branch)
+    if gh is None:
+        raise Refused(f'GitHub has no {branch}')
+    if mine == gh:
+        return []
+    if mine is not None and not _ancestor(repo, mine, gh):
+        raise Refused(f'GitHub\'s {branch} ({gh[:8]}) is not ahead of githouse\'s ({mine[:8]}): '
+                      f'they\'ve each moved; merge GitHub\'s into a branch of your own and sign it')
+    taken = git(repo, 'rev-list', '--reverse', '--oneline', gh if mine is None else f'{mine}..{gh}').splitlines()
+    git(repo, 'update-ref', f'refs/heads/{branch}', gh, mine or ZERO)
+    log(f'{repo.name}: root adopted GitHub\'s {branch} at {gh[:8]} ({len(taken)} commits)')
+    reconcile(repo)
     retire(repo)
     publish()
-    return True
+    return taken
 
 
 def retire(repo):
-    """Move every pushed branch that a merge brought into a GitHub branch to refs/merged/."""
+    """Move every pushed branch that a merge brought into a deploy branch to refs/merged/."""
     heads = refs(repo, 'refs/heads/')
     bases = {b: s for b, s in heads.items() if owned(b)}
     lines = {b: set(git(repo, 'rev-list', '--first-parent', s).split()) for b, s in bases.items()}
@@ -386,7 +480,7 @@ def parse_order(text):
     if not NAME.fullmatch(found['by']) or not NONCE.fullmatch(found['nonce']) or not SHA.fullmatch(found['commit']):
         raise Refused('by, nonce or commit is malformed')
     if not BRANCH.fullmatch(found['branch']) or owned(found['branch']):
-        raise Refused(f"{found['branch']}: not a branch that merges (GitHub's own branches don't)")
+        raise Refused(f"{found['branch']}: not a branch that merges (the deploy branches don't)")
     if not owned(found['into']) or not BRANCH.fullmatch(found['into']):
         raise Refused(f"{found['into']}: a merge goes into one of {', '.join(OWNED)}")
     try:
@@ -475,22 +569,24 @@ def merge(text, signature, now=None, signers=None, brakes_url=None):
 
 def _merge(repo, order):
     branch, commit, into = order['branch'], order['commit'], order['into']
-    # The branch's head, as GitHub and this copy have it: it must be the commit signed for.
-    there = git(repo, 'ls-remote', 'github', f'refs/heads/{branch}', f'refs/heads/{into}', check=False)
-    if there is None:
-        raise Refused("GitHub didn't answer; nothing merged")
-    heads = {ref[len('refs/heads/'):]: sha for sha, ref in (line.split('\t', 1) for line in there.splitlines())}
+    # The target is githouse's own deploy branch (the flip): GitHub's is only a mirror of it.
+    tip = refs(repo, 'refs/heads/').get(into)
+    if tip is None:
+        raise Refused(f'{into}: no such branch here')
+    # The branch's head, as GitHub and this copy have it: it must be the commit signed for. A branch
+    # pushed here has GitHub's copy forwarded; one only on GitHub (a pull request's) is fetched from there.
+    there = git(repo, 'ls-remote', 'github', f'refs/heads/{branch}', check=False)
+    on_github = (there or '').split('\t', 1)[0] or None
     here = refs(repo, 'refs/heads/').get(branch)
-    if into not in heads:
-        raise Refused(f'{into}: no such branch on GitHub')
-    for where, sha in (('GitHub', heads.get(branch)), ('githouse', here)):
+    if there is None and here is None:
+        raise Refused(f"GitHub didn't answer, and githouse has no {branch}; nothing merged")
+    for where, sha in (('GitHub', on_github), ('githouse', here)):
         if sha is not None and sha != commit:
             raise Refused(f'{branch} has moved on {where} ({sha[:8]}); sign for what it is now')
-    if heads.get(branch) is None and here is None:
+    if on_github is None and here is None:
         raise Refused(f'{branch}: no such branch')
-    wanted = [f'+refs/heads/{into}:refs/heads/{into}'] + ([f'refs/heads/{branch}'] if heads.get(branch) else [])
-    git(repo, 'fetch', '--quiet', '--no-tags', 'github', *wanted)
-    tip = heads[into]
+    if here is None:
+        git(repo, 'fetch', '--quiet', '--no-tags', 'github', f'refs/heads/{branch}')
     if git(repo, 'merge-base', '--is-ancestor', commit, tip, check=False) is not None:
         raise Refused(f'{commit[:8]} is in {into} already')
     tree = subprocess.run(['git', '--git-dir', str(repo), 'merge-tree', '--write-tree', '--no-messages', tip, commit],
@@ -507,19 +603,25 @@ def _merge(repo, order):
     who = {'GIT_AUTHOR_NAME': person, 'GIT_AUTHOR_EMAIL': f"{person}@githouse",
            'GIT_COMMITTER_NAME': 'githouse', 'GIT_COMMITTER_EMAIL': 'githouse@maybelle'}
     merged = git(repo, 'commit-tree', tree.stdout.split()[0], '-p', tip, '-p', commit, '-m', message, env=who).strip()
-    # GitHub first: its branches are GitHub's until the flip, and the minute's fetch would overwrite one made here.
+    # Here first: githouse's branch is the one deploys come from. Only if it's still where we read it.
+    if git(repo, 'update-ref', f'refs/heads/{into}', merged, tip, check=False) is None:
+        raise Refused(f'{into} moved here meanwhile; sign again')
+    result = {'outcome': 'merged', 'merge': merged, 'onto': tip}
+    # Then GitHub, the mirror. A refusal there doesn't undo the merge: the minute's reconcile sends it again,
+    # or, if GitHub's moved on its own, says so.
     pushed = subprocess.run(['git', '--git-dir', str(repo), 'push', '--quiet', 'github', f'{merged}:refs/heads/{into}'],
                             capture_output=True, text=True)
-    if pushed.returncode != 0:
-        raise Refused(f'GitHub refused the merge ({into} moved, or the key can\'t push): {pushed.stderr.strip()[:200]}')
-    # Merged now, on GitHub. Here it's only bookkeeping: the minute's fetch would bring it anyway.
+    if pushed.returncode == 0:
+        git(repo, 'update-ref', f'refs/github/{into}', merged, check=False)
+    else:
+        result['github'] = f'not yet: {pushed.stderr.strip()[:200]}'
+        log(f'{repo.name}: merged {merged[:8]} into {into}; GitHub refused it for now: {pushed.stderr.strip()[:200]}')
     try:
-        git(repo, 'update-ref', f'refs/heads/{into}', merged, tip)
         retire(repo)
         publish()
     except RuntimeError as e:
-        log(f'{repo.name}: merged {merged[:8]} on GitHub; here, {e}')
-    return {'outcome': 'merged', 'merge': merged, 'onto': tip}
+        log(f'{repo.name}: merged {merged[:8]}; {e}')
+    return result
 
 
 # --- orders by mail: memory-lane carries them, githouse checks them ------------------------
@@ -623,6 +725,12 @@ def publish():
     temp.write_text(json.dumps(found, indent=1, sort_keys=True))
     temp.chmod(0o644)
     temp.replace(path)
+    # github.json: where GitHub's deploy branches differ from githouse's and haven't been squared (reconcile).
+    path = ROOT / 'github.json'
+    temp = path.with_suffix('.json.tmp')
+    temp.write_text(json.dumps({name: d for name, d in DIFFERS.items() if d}, indent=1, sort_keys=True))
+    temp.chmod(0o644)
+    temp.replace(path)
 
 
 def log(line):
@@ -652,7 +760,8 @@ def paced(step, before=None):
 
 
 def loop():
-    """On maybelle: the keys as relayed, then GitHub's branches, every minute; merge orders by mail meanwhile."""
+    """On maybelle: the keys as relayed, then each repository squared with GitHub, every minute; merge orders by
+    mail meanwhile."""
     threading.Thread(target=orders_loop, daemon=True).start()
     paced(fetch_locked, before=write_authorized_keys)
 
@@ -727,6 +836,21 @@ def main(argv):
             result = {'outcome': 'refused', 'why': 'expected {"order", "signature"} on stdin'}
         print(json.dumps(result))
         return 0 if result.get('outcome') == 'merged' else 1
+    if command == 'adopt':  # adopt <repo> <branch>: root takes GitHub's deploy branch, as a fast-forward only
+        if os.geteuid() == 0:
+            sys.stderr.write('githouse: adopt as git (docker exec -u git), so what it writes stays git\'s\n')
+            return 2
+        if len(args) != 3 or not NAME.fullmatch(args[1]) or not (ROOT / f'{args[1]}.git' / 'HEAD').exists():
+            sys.stderr.write('githouse: adopt <repo> <branch>, a repository here\n')
+            return 2
+        try:
+            with MERGING:
+                taken = adopt(ROOT / f'{args[1]}.git', args[2])
+        except (Refused, RuntimeError) as e:
+            sys.stderr.write(f'githouse: {e}\n')
+            return 1
+        print('\n'.join(taken) if taken else f'{args[2]} is already GitHub\'s; nothing taken')
+        return 0
     if command == 'loop':
         loop()
     if command == 'mirror':  # mirror <upstream> <owner/name>...: hunter's copy of maybelle's

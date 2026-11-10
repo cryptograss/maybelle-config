@@ -16,22 +16,51 @@
 #                                  (deploy-hunter-remote.py pipes the vault
 #                                  password through `ssh -t`, so a downstream
 #                                  read blocks rather than getting EOF)
+#
+# Where from (the flip, 10 Nov 2026; Cryptograss:Moods/ramp/Plan, section 6): githouse's copy on maybelle,
+# whose deploy branches move only by a signed merge there, so a push to GitHub's, around githouse, never
+# reaches hunter. Fetched straight from maybelle over the private network with the mirror's key, which
+# githouse lets fetch and nothing else; not from hunter's own mirror, which runs up to a minute behind a
+# merge. GitHub only on a fresh hunter, before the mirror's key exists here and maybelle has pulled it:
+# that deploy says so, and the next one comes from githouse.
+- name: Is the mirror's key to maybelle here yet (not on a fresh hunter)
+  stat:
+    path: "{{ base_dir }}/githouse/etc/mirror_key"
+  register: githouse_key
+
+- name: Where this deploy's code comes from
+  set_fact:
+    source_base: "{{ ('ssh://git@' ~ githouse_ssh ~ '/') if githouse_key.stat.exists else 'https://github.com/cryptograss/' }}"
+
+- name: Say it when it's GitHub (a fresh hunter only)
+  debug:
+    msg: "⚠ No mirror key yet: this deploy's code comes from GitHub, not githouse. Redeploy once the mirror is up."
+  when: not githouse_key.stat.exists
+
 - name: Fetch source repositories
   environment:
     GIT_HTTP_LOW_SPEED_LIMIT: "1000"
     GIT_HTTP_LOW_SPEED_TIME: "60"
     GIT_TERMINAL_PROMPT: "0"
+    GIT_SSH_COMMAND: >-
+      ssh -i {{ base_dir }}/githouse/etc/mirror_key -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=20
+      -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile={{ base_dir }}/githouse/etc/known_hosts_deploy
   block:
     - name: Clone or update maybelle-config repository
       git:
-        repo: https://github.com/cryptograss/maybelle-config.git
+        repo: "{{ source_base }}maybelle-config.git"
         dest: "{{ base_dir }}/maybelle-config"
         version: production
         force: yes
         update: yes
+      register: fetched
+      retries: 3
+      delay: 30
+      until: fetched is succeeded
 
+    # The git module points origin at source_base, so this fetch is from the same place.
     - name: Force fetch latest changes from production branch
-      shell: git fetch origin production && git reset --hard origin/production
+      shell: git remote set-url origin {{ source_base }}maybelle-config.git && git fetch origin production && git reset --hard origin/production
       args:
         chdir: "{{ base_dir }}/maybelle-config"
 
@@ -40,14 +69,14 @@
     # 18 Oct 2026. {{ base_dir }}/memory-lane-source, its old clone, is no longer updated.
     - name: Clone or update magenta repository (agents' instructions; memory-lane)
       git:
-        repo: https://github.com/cryptograss/magenta.git
+        repo: "{{ source_base }}magenta.git"
         dest: "{{ base_dir }}/magenta-source"
         version: main
         force: yes
         update: yes
 
     - name: Force fetch latest magenta changes from main branch
-      shell: git fetch origin main && git reset --hard origin/main
+      shell: git remote set-url origin {{ source_base }}magenta.git && git fetch origin main && git reset --hard origin/main
       args:
         chdir: "{{ base_dir }}/magenta-source"
 

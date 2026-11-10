@@ -194,3 +194,21 @@
   retries: 30
   delay: 10
   until: githouse_branches.stat.exists
+
+# Deploys on maybelle come from these copies since the flip (Cryptograss:Moods/ramp/Plan, section 6):
+# root fetches from them (deploy-*.sh, maybelle-chapter-1.sh, magenta's clone in maybelle.yml), and git
+# won't read a repository another user owns unless told to. Neither -c nor the environment reaches the
+# upload-pack of a local fetch (git clears both; tried on bookworm's 2.39 and noble's 2.43, 10 Nov), so
+# it's root's system config. Trusting them costs nothing new: whoever controls githouse's repositories
+# already decides what a deploy runs.
+- name: Root may fetch from githouse's repositories (deploys come from them)
+  shell: |
+    set -e
+    for name in {{ githouse_repos | map('regex_replace', '^.*/', '') | join(' ') }}; do
+      path={{ githouse_dir }}/git/$name.git
+      git config --system --get-all safe.directory | grep -qxF "$path" && continue
+      git config --system --add safe.directory "$path"
+      echo "added $path"
+    done
+  register: githouse_safe_dirs
+  changed_when: "'added' in githouse_safe_dirs.stdout"

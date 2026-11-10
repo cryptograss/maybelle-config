@@ -162,6 +162,19 @@ apt-get install -y -qq git ansible
 if [ -d "$REPO_DIR/.git" ]; then
     echo "Updating maybelle-config repository..."
     cd "$REPO_DIR"
+    # From githouse's copy (the flip, 10 Nov 2026; Cryptograss:Moods/ramp/Plan, section 6): production
+    # there moves only by a signed merge. GitHub only before githouse has a copy (a cold start).
+    GITHOUSE_REPO="$MOUNT_POINT/githouse/git/maybelle-config.git"
+    if [ -f "$GITHOUSE_REPO/HEAD" ]; then
+        # githouse's git user owns it; root may read it (githouse's role says why)
+        git config --system --get-all safe.directory | grep -qxF "$GITHOUSE_REPO" ||
+            git config --system --add safe.directory "$GITHOUSE_REPO"
+        git remote set-url origin "$GITHOUSE_REPO"
+        echo "From githouse"
+    else
+        git remote set-url origin https://github.com/cryptograss/maybelle-config.git
+        echo "githouse has no maybelle-config here: from GitHub (a cold start only)"
+    fi
     git fetch origin production
     git reset --hard origin/production
 else
