@@ -366,8 +366,11 @@ class SecretTest(Repos):
         super().setUp()
         self.etc = self.tmp / 'etc'
         self.etc.mkdir()
-        # As the playbook writes it from the scrubber's list: every vault string over 4 characters.
-        (self.etc / githouse.SECRETS_FILE).write_text(json.dumps([self.VAULT_VALUE, 'admin', '3000']))
+        # As the playbook writes it from the scrubber's list (every vault string over 4 characters): hashes.
+        hashed = githouse.hash_secrets([self.VAULT_VALUE, 'admin', '3000'])
+        (self.etc / githouse.SECRETS_FILE).write_text(json.dumps(hashed))
+        self.assertNotIn(self.VAULT_VALUE, json.dumps(hashed))
+        self.assertEqual(hashed['lengths'], [len(self.VAULT_VALUE)])
         patcher = unittest.mock.patch.object(githouse, 'ETC', self.etc)
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -435,6 +438,72 @@ class SecretTest(Repos):
         self.assertEqual(self.push('re', 'HEAD:re/foo')[0], 0)
         self.add('b.txt', f'{self.TOKEN}\n')
         self.assertNotEqual(self.push('re', 'HEAD:re/foo')[0], 0)
+
+    # --- re's seven plantings (#ramp, 10 Nov 19:42Z): five got past the first version
+
+    def refused(self, *refspecs):
+        code, said = self.push('re', *refspecs)
+        return code != 0 and self.TOKEN not in said and self.VAULT_VALUE not in said
+
+    def test_planted_in_an_ordinary_line(self):
+        self.add('a.txt', f'x = "{self.TOKEN}"\n')
+        self.assertTrue(self.refused('HEAD:re/foo'))
+
+    def test_planted_behind_gitattributes_binary(self):
+        self.add('.gitattributes', '*.txt binary\n')
+        self.add('a.txt', f'{self.TOKEN}\n')
+        self.assertTrue(self.refused('HEAD:re/foo'))
+
+    def test_planted_in_a_message_after_a_diff_line(self):
+        self.add('a.txt', 'fine\n', message=f'subject\n\ndiff --git a/x b/x\n{self.TOKEN}')
+        self.assertTrue(self.refused('HEAD:re/foo'))
+
+    def test_planted_in_a_message_line_starting_plus_plus_plus(self):
+        self.add('a.txt', 'fine\n', message=f'subject\n\n+++ {self.TOKEN}')
+        self.assertTrue(self.refused('HEAD:re/foo'))
+
+    def test_planted_in_a_file_line_starting_plus_plus(self):
+        self.add('a.txt', f'++ {self.TOKEN}\n')
+        self.assertTrue(self.refused('HEAD:re/foo'))
+
+    def test_planted_in_a_binary_file(self):
+        (self.work / 'state.db').write_bytes(b'SQLite format 3\x00\x01\x02' + self.VAULT_VALUE.encode() + b'\x00\xff\xfe')
+        run('git', 'add', 'state.db', cwd=self.work)
+        run('git', 'commit', '--quiet', '-m', 'a database', cwd=self.work)
+        self.assertTrue(self.refused('HEAD:re/foo'))
+
+    def test_planted_only_in_a_merge(self):
+        run('git', 'checkout', '--quiet', '-b', 'side', cwd=self.work)
+        self.add('side.txt', 'side\n')
+        run('git', 'checkout', '--quiet', '-', cwd=self.work)
+        self.add('main.txt', 'main\n')
+        run('git', 'merge', '--quiet', '--no-commit', 'side', cwd=self.work)
+        (self.work / 'resolved.txt').write_text(f'{self.TOKEN}\n')
+        run('git', 'add', 'resolved.txt', cwd=self.work)
+        run('git', 'commit', '--quiet', '-m', 'merge side', cwd=self.work)
+        self.assertTrue(self.refused('HEAD:re/foo'))
+
+    def test_a_merge_isnt_refused_for_what_it_brought_in(self):
+        # main into a branch, main holding an old fixture: --remerge-diff, not the diff to the first parent.
+        self.on_main(f'old = "{self.TOKEN}"\n')
+        run('git', 'checkout', '--quiet', '-b', 'mine', 'HEAD~0', cwd=self.work)
+        self.add('mine.txt', 'mine\n')
+        run('git', 'fetch', '--quiet', 'origin', cwd=self.work)
+        run('git', 'merge', '--quiet', '-m', 'main into mine', 'origin/main', cwd=self.work)
+        self.assertEqual(self.push('re', 'HEAD:re/foo')[0], 0)
+
+    def test_planted_in_a_file_name(self):
+        self.add(f'{self.TOKEN}.txt', 'fine\n')
+        self.assertTrue(self.refused('HEAD:re/foo'))
+
+    def test_the_old_files_context_after_the_hunk_header_isnt_checked(self):
+        # git prints the enclosing line of the old file after the second @@: history, not this commit.
+        self.on_main(f'def f():  # {self.TOKEN}\n' + ''.join(f'    x{i} = {i}\n' for i in range(20)))
+        run('git', 'fetch', '--quiet', 'origin', cwd=self.work)
+        run('git', 'reset', '--quiet', '--hard', 'origin/main', cwd=self.work)
+        (self.work / 'a.txt').write_text((self.work / 'a.txt').read_text().replace('x19 = 19', 'x19 = 190'))
+        run('git', 'commit', '--quiet', '-am', 'change inside f', cwd=self.work)
+        self.assertEqual(self.push('re', 'HEAD:re/foo')[0], 0)
 
     def on_main(self, text):
         """A secret already in githouse's main (from before this check, say)."""

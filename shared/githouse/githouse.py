@@ -59,8 +59,8 @@ meant to be cheap to lose.
   last two asked of memory-lane at every order. Its answer can only stop a merge; no answer stops it too.
 * A push that carries a secret is refused, before anything else holds a copy (Skyler and Justin, #ramp,
   10 Nov; re's design): any value from the vault, exactly, as the scrubber has them (/etc/githouse/
-  secrets.json, readable by git alone), in an added line or a commit message; or anything shaped like a
-  private key or a known service's token. A line ending 'githouse: not a secret' passes the shapes
+  secret-hashes.json: SHA-256 of each, never the values), in any line a commit adds, merges included, or
+  in its message; or anything shaped like a private key or a known service's token. A line ending 'githouse: not a secret' passes the shapes
   (a redaction test needs them), never the vault's values. `githouse scan` looks through all of history.
 * After a push reaches GitHub, Jenkins' branch-tests job tests exactly that commit, on an agent with no
   secrets (Plan, section 11): /etc/githouse/jenkins.json says where, jenkins_reporter as whom.
@@ -203,8 +203,8 @@ def after(repo, user, updates, forward=None):
 # Every push comes here first; within a minute hunter's mirror (every container) and GitHub (everyone) have
 # it, and a secret can't be taken back from either. So it's refused here, in pre-receive.
 
-SECRETS_FILE = 'secrets.json'    # /etc/githouse/secrets.json: the vault's string values, the scrubber's list
-SECRET_MIN = 12                  # shorter values ("admin", a port) are everywhere in code
+SECRETS_FILE = 'secret-hashes.json'   # /etc/githouse: SHA-256 of the vault's values and their lengths, never the values
+SECRET_MIN = 12                        # shorter values ("admin", a port) are everywhere in code
 NOT_A_SECRET = 'githouse: not a secret'
 SHAPES = {
     'a private key': re.compile(r'-----BEGIN (?:[A-Z]+ )?PRIVATE KEY(?: BLOCK)?-----'),
@@ -219,27 +219,56 @@ SHAPES = {
 }
 
 
-def secret_values(etc=None):
-    """The vault's values worth looking for: each at least SECRET_MIN long; a value of many lines by its
-    longest line (a key file). Longest first. None at all if the file isn't there (a fresh githouse)."""
+def _needle(value):
+    """What's looked for of a vault value: the value, or, of many lines (a key file), its longest line."""
+    return max(value.strip().splitlines() or [''], key=len).strip()
+
+
+def hash_secrets(values):
+    """The file the playbook writes from the scrubber's list: SHA-256 of each value worth looking for, and
+    the lengths there are. githouse never holds the values (re, #ramp, 10 Nov: a bug in the git user's
+    forced command then leaks no vault)."""
+    needles = {_needle(v) for v in values if isinstance(v, str)}
+    needles = {n for n in needles if len(n) >= SECRET_MIN}
+    return {'sha256': sorted(hashlib.sha256(n.encode()).hexdigest() for n in needles),
+            'lengths': sorted({len(n) for n in needles})}
+
+
+def secret_hashes(etc=None):
+    """(lengths, hashes) from /etc/githouse; ((), set()) if it isn't there yet (a fresh githouse)."""
     try:
-        values = json.loads((Path(etc or ETC) / SECRETS_FILE).read_text())
-    except (OSError, ValueError):
-        return []
-    found = set()
-    for value in values if isinstance(values, list) else []:
-        if isinstance(value, str):
-            line = max(value.strip().splitlines() or [''], key=len).strip()
-            if len(line) >= SECRET_MIN:
-                found.add(line)
-    return sorted(found, key=len, reverse=True)
+        found = json.loads((Path(etc or ETC) / SECRETS_FILE).read_text())
+        return tuple(sorted(int(n) for n in found['lengths'])), set(found['sha256'])
+    except (OSError, ValueError, KeyError, TypeError):
+        return (), set()
 
 
-def secret_in(line, values):
+def _vault_value_in(line, vault):
+    """The length of a vault value in this line, or None. Each stretch that starts and ends where a word
+    does (not inside one), of a length some value has, is hashed and looked up."""
+    lengths, hashes = vault
+    if not hashes:
+        return None
+    n = len(line)
+    for i in range(n):
+        if i and line[i - 1].isalnum():
+            continue
+        for length in lengths:
+            j = i + length
+            if j > n:
+                break
+            if j < n and line[j].isalnum():
+                continue
+            if hashlib.sha256(line[i:j].encode()).hexdigest() in hashes:
+                return length
+    return None
+
+
+def secret_in(line, vault):
     """What secret this line carries, said without it ('a value from the vault, 40 characters'), or None."""
-    for value in values:
-        if value in line:
-            return f'a value from the vault, {len(value)} characters'
+    length = _vault_value_in(line, vault)
+    if length:
+        return f'a value from the vault, {length} characters'
     if NOT_A_SECRET in line:
         return None
     for name, shape in SHAPES.items():
@@ -248,38 +277,62 @@ def secret_in(line, values):
     return None
 
 
-def secrets_in_log(text, values):
-    """[(commit, where, what)] in `git log -p -U0 --format=commit %H%n%B` output: added lines and messages."""
-    found, commit, where, header = [], '', '', False
-    for line in text.splitlines():
-        if line.startswith('commit ') and SHA.fullmatch(line[7:]):
-            commit, where, header = line[7:], 'its message', True
+def _git_text(repo, *args):
+    """git's output as text, whatever bytes a file held (--text diffs of binaries)."""
+    done = subprocess.run(['git', '--git-dir', str(repo), *args], capture_output=True)
+    if done.returncode != 0:
+        raise RuntimeError(f"git {' '.join(args)}: {done.stderr.decode('utf-8', 'replace').strip()}")
+    return done.stdout.decode('utf-8', 'replace')
+
+
+def secrets_in(repo, revs, vault):
+    """[(commit, where, what)] in the commits revs name: every line of every message, in a pass of its own;
+    and every line of every diff but removals, headers too (a file's name), binaries as text (--text), a
+    merge by what its resolution added (--remerge-diff: not what it brought in, which was checked as its own
+    commits). re's review, 10 Nov: seven ways planted, each a test."""
+    found = []
+    for record in _git_text(repo, 'log', '--format=%H%x00%B%x00', *revs).split('\x00\n'):
+        if '\x00' not in record:
             continue
-        if line.startswith('diff --git '):
-            header = False
-            continue
-        if line.startswith('+++ '):
-            where = line[6:] if line.startswith('+++ b/') else line[4:]
-            continue
-        if header or (line.startswith('+') and not line.startswith('+++')):
-            what = secret_in(line if header else line[1:], values)
+        commit, message = record.split('\x00', 1)
+        for line in message.split('\n'):
+            what = secret_in(line, vault)
             if what:
-                found.append((commit, where, what))
+                found.append((commit.strip(), 'its message', what))
+    commit = where = ''
+    in_header = False
+    for line in _git_text(repo, 'log', '-p', '-U0', '--text', '--remerge-diff', '--no-color', '--no-ext-diff',
+                          '--no-textconv', '--format=commit %H', *revs).split('\n'):
+        if line.startswith('commit ') and SHA.fullmatch(line[7:]):
+            commit, where, in_header = line[7:], '', False
+            continue
+        if line.startswith('diff --git ') or line.startswith('diff --cc ') or line.startswith('remerge '):
+            in_header = True
+            where = line
+        elif in_header and line.startswith('+++ '):
+            where = line[6:] if line.startswith('+++ b/') else line[4:]
+        if line.startswith('@@'):
+            in_header = False
+            line = line.split('@@', 2)[1] if line.count('@@') >= 2 else line  # not the context after: the old file's
+        elif line.startswith('-') and not in_header:
+            continue  # a removal
+        elif line.startswith('--- ') and in_header:
+            continue  # the old file's name
+        what = secret_in(line[1:] if line.startswith('+') and not in_header else line, vault)
+        if what:
+            # Said without the secret: a path that holds one is "a file's name".
+            found.append((commit, "a file's name" if secret_in(where, vault) else where, what))
     return found
-
-
-def _log(repo, *revs):
-    return git(repo, 'log', '-p', '-U0', '--no-color', '--no-ext-diff', '--no-merges', '--format=commit %H%n%B', *revs)
 
 
 def check_secrets(repo, updates, etc=None):
     """What's refused in a push for a secret it carries: [message]. Only commits new to githouse: a secret
     already in history (found by scan, rotated by a person) doesn't stop every push after it."""
-    values, refused = secret_values(etc), []
+    vault, refused = secret_hashes(etc), []
     for old, new, ref in updates:
         if new == ZERO:
             continue
-        for commit, where, what in secrets_in_log(_log(repo, new, '--not', '--all'), values):
+        for commit, where, what in secrets_in(repo, [new, '--not', '--all'], vault):
             line = f'{commit[:8]} {where}: {what}. Take it out of the commit (amend or rebase) and push again'
             if not what.startswith('a value from the vault'):
                 line += f"; if it isn't a secret (a test's fake), end its line with '{NOT_A_SECRET}'"
@@ -290,7 +343,7 @@ def check_secrets(repo, updates, etc=None):
 
 def scan(repo, etc=None):
     """All of a repository's history, every ref: [(commit, where, what)]. For root, once, and after a leak."""
-    return secrets_in_log(_log(repo, '--all'), secret_values(etc))
+    return secrets_in(repo, ['--all'], secret_hashes(etc))
 
 
 # --- branch tests on Jenkins (Plan, section 11) ----------------------------------------------------------
@@ -946,6 +999,9 @@ def main(argv):
             result = {'outcome': 'refused', 'why': 'expected {"order", "signature"} on stdin'}
         print(json.dumps(result))
         return 0 if result.get('outcome') == 'merged' else 1
+    if command == 'hash-secrets':  # the scrubber's list on stdin (a JSON list of values), the hashes out
+        print(json.dumps(hash_secrets(json.loads(sys.stdin.read()))))
+        return 0
     if command == 'scan':  # scan [repo...]: every repository's whole history, for a secret it carries
         names = args[1:] or [r.name[:-4] for r in sorted(ROOT.glob('*.git'))]
         found = 0
@@ -953,7 +1009,7 @@ def main(argv):
             for commit, where, what in scan(ROOT / f'{name}.git'):
                 print(f'{name} {commit[:8]} {where}: {what}')
                 found += 1
-        print(f'{found} found, in {len(names)} repositories' + ('' if secret_values() else
+        print(f'{found} found, in {len(names)} repositories' + ('' if secret_hashes()[1] else
               f' (no {SECRETS_FILE} here: shapes only, not the vault\'s values)'))
         return 1 if found else 0
     if command == 'adopt':  # adopt <repo> <branch>: root takes GitHub's deploy branch, as a fast-forward only

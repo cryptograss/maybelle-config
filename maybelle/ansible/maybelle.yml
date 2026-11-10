@@ -1421,17 +1421,19 @@
       register: scrubber_secrets_file
 
     # githouse refuses a push carrying any of these (shared/githouse/githouse.py, check_secrets): the same
-    # list, the vault's string values, readable by githouse's git user alone, as jenkins_reporter is. Kept
-    # here, not asked of memory-lane: a push's content goes nowhere else, and memory-lane being down
-    # neither blocks every push nor skips the check (re, #ramp, 10 Nov). Refreshed whenever chapter 1
-    # brings the list; until the first, githouse checks secrets' shapes only.
-    - name: githouse refuses a push carrying any of the vault's values
-      copy:
-        src: /tmp/scrubber-secrets.json
-        remote_src: true
-        dest: "{{ githouse_dir }}/etc/secrets.json"
-        owner: '2999'
-        mode: '0400'
+    # list, as SHA-256 hashes and lengths, never the values (re, #ramp, 10 Nov: a bug in the git user's
+    # forced command then leaks no vault), readable by githouse's git user alone, as jenkins_reporter is.
+    # Kept here, not asked of memory-lane: a push's content goes nowhere else, and memory-lane being down
+    # neither blocks every push nor skips the check (re). Refreshed whenever chapter 1 brings the list;
+    # until the first, githouse checks secrets' shapes only.
+    - name: githouse refuses a push carrying any of the vault's values (their hashes)
+      shell: |
+        set -e
+        umask 077
+        python3 {{ githouse_dir }}/build/githouse.py hash-secrets < /tmp/scrubber-secrets.json > {{ githouse_dir }}/etc/secret-hashes.json.tmp
+        chown 2999 {{ githouse_dir }}/etc/secret-hashes.json.tmp
+        chmod 0400 {{ githouse_dir }}/etc/secret-hashes.json.tmp
+        mv -f {{ githouse_dir }}/etc/secret-hashes.json.tmp {{ githouse_dir }}/etc/secret-hashes.json
       no_log: true
       when: scrubber_secrets_file.stat.exists
 
