@@ -51,6 +51,23 @@
       args:
         chdir: "{{ base_dir }}/magenta-source"
 
+    # Which magenta this deploy runs, for the Moods (report-deploy.sh sends it when the deploy ends; the ramp
+    # shows a merge as live on hunter once it's in this commit). Written on maybelle, where the deploy runs.
+    - name: Read the magenta commit this deploy runs
+      command: git rev-parse HEAD
+      args:
+        chdir: "{{ base_dir }}/magenta-source"
+      register: magenta_deployed
+      changed_when: false
+
+    - name: Note it for the deploy report, on maybelle
+      copy:
+        content: "{{ {'magenta': magenta_deployed.stdout} | to_json }}\n"
+        dest: /mnt/persist/deploys/hunter.commits.json
+        mode: "0644"
+      delegate_to: localhost
+      become: false
+
 - name: Get docker group GID from host
   shell: "getent group docker | cut -d: -f3"
   register: docker_gid
