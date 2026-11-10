@@ -8,6 +8,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends git openssh-ser
 # key ("User git not allowed because account is locked"); "*" is unusable but not locked.
 RUN useradd -u 2999 -d /srv/git -M -s /bin/sh git && usermod -p '*' git && mkdir -p /run/sshd /opt/githouse
 COPY githouse.py test_githouse.py entrypoint.sh /opt/githouse/
+# `githouse adopt|scan|...` for root on maybelle: docker exec -u git githouse githouse scan
+RUN printf '#!/bin/sh\nexec python3 /opt/githouse/githouse.py "$@"\n' > /usr/local/bin/githouse && chmod 755 /usr/local/bin/githouse
 RUN cd /opt/githouse && python3 -m unittest -q test_githouse && rm -rf __pycache__ /tmp/tmp*
 COPY sshd_config /etc/ssh/sshd_config
 ENTRYPOINT ["/bin/sh", "/opt/githouse/entrypoint.sh"]
