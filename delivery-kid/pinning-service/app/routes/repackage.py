@@ -12,7 +12,7 @@ Requires API key auth (X-API-Key header).
 import logging
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from ..auth import require_auth
 from ..config import get_settings, Settings
@@ -24,7 +24,9 @@ router = APIRouter(prefix="/enrich", tags=["enrich"])
 
 
 class RepackageRequest(BaseModel):
-    cid: str
+    # A CID and nothing else: it becomes a path in IPFS (/ipfs/<cid>/…) and a working directory removed
+    # recursively (/repackage/<cid>), so no slash, dot or space may reach either (re's review, 10 Nov).
+    cid: str = Field(pattern=r"^(Qm[1-9A-HJ-NP-Za-km-z]{44}|b[a-z2-7]{20,120})$")
     dry_run: bool = False
 
 

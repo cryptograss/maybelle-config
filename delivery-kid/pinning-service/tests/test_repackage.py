@@ -179,3 +179,16 @@ def test_a_failing_node_reports_the_error():
                                            transport=httpx.MockTransport(broken)))
 
     assert not result.success and "ipfs is down" in result.error
+
+
+def test_the_route_takes_a_cid_and_nothing_else():
+    # re's review (10 Nov): the cid becomes /ipfs/<cid>/... and a working directory removed recursively.
+    import pytest
+    from pydantic import ValidationError
+    from app.routes.repackage import RepackageRequest
+    for good in ("QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG",
+                 "bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi"):
+        assert RepackageRequest(cid=good).cid == good
+    for bad in ("../etc", "bafy/../x", "Qm x", "", "bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi/sub"):
+        with pytest.raises(ValidationError):
+            RepackageRequest(cid=bad)
