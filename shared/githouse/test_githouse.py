@@ -62,23 +62,31 @@ class Repos(unittest.TestCase):
     def branches(self):
         return json.loads((self.root / 'branches.json').read_text())['magenta']
 
-    def merge_on_github(self, branch):
-        """Someone merges a pushed branch on GitHub, with a merge commit, as our repositories do."""
+    def merge_on_github(self, branch, adopt=True):
+        """Someone merges a pushed branch on GitHub, with a merge commit, and root adopts it (since the flip,
+        githouse takes nothing from GitHub's deploy branches on its own)."""
         run('git', 'fetch', '--quiet', str(self.repo), f'refs/heads/{branch}:refs/remotes/h/{branch}', cwd=self.upstream)
         run('git', 'merge', '--quiet', '--no-ff', '-m', f'Merge {branch}', f'h/{branch}', cwd=self.upstream)
         run('git', 'push', '--quiet', 'origin', 'HEAD:main', cwd=self.upstream)
+        if adopt:
+            githouse.adopt(self.repo, 'main')
+
+    def on_github(self, words, branch='main'):
+        """Someone commits straight to a deploy branch on GitHub, around githouse."""
+        self.commit(self.upstream, words)
+        run('git', 'push', '--quiet', 'origin', f'HEAD:{branch}', cwd=self.upstream)
+        return run('git', '--git-dir', str(self.github), 'rev-parse', branch)[1].strip()
+
+    def heads(self):
+        return githouse.refs(self.repo, 'refs/heads/')
+
+    def differs(self):
+        return json.loads((self.root / 'github.json').read_text()).get('magenta', {})
 
 
 class GithouseTest(Repos):
 
     # --- GitHub's branches -----------------------------------------------------------
-
-    def test_githubs_branches_are_fetched(self):
-        self.assertEqual(set(self.branches()['live']), {'main', 'production'})
-        self.commit(self.upstream, 'two')
-        run('git', 'push', '--quiet', 'origin', 'HEAD:main', cwd=self.upstream)
-        self.assertTrue(githouse.fetch(self.repo))
-        self.assertFalse(githouse.fetch(self.repo))  # nothing new: nothing fetched
 
     def test_the_fetch_leaves_pushed_branches_alone(self):
         self.commit(self.work, 'mine')
@@ -91,14 +99,74 @@ class GithouseTest(Repos):
         githouse.fetch(self.repo)
         self.assertEqual(githouse.refs(self.repo, 'refs/heads/')['re/foo'], mine)
 
-    def test_a_branch_deleted_on_github_goes(self):
-        run('git', 'push', '--quiet', 'origin', 'HEAD:release/1', cwd=self.upstream)
+    def test_a_new_githouse_takes_githubs_deploy_branches_once(self):
+        self.assertEqual(set(self.branches()['live']), {'main', 'production'})
+        self.assertEqual(self.differs(), {})
+        self.assertFalse(githouse.fetch(self.repo))  # nothing new: nothing fetched, nothing changed
+
+    def test_a_push_to_githubs_deploy_branch_is_not_taken(self):
+        # The flip (Plan, section 6): main moves only by a merge here. A commit pushed to GitHub's main,
+        # around githouse (a token that can push, a GitHub button), never reaches githouse's, so no deploy.
+        ours = self.heads()['main']
+        theirs = self.on_github('around githouse')
         githouse.fetch(self.repo)
-        self.assertIn('release/1', self.branches()['live'])
-        run('git', 'push', '--quiet', 'origin', ':release/1', cwd=self.upstream)
+        self.assertEqual(self.heads()['main'], ours)
+        self.assertEqual(self.differs()['main']['state'], 'ahead')
+        self.assertEqual(self.differs()['main']['github'], theirs)
+        githouse.fetch(self.repo)  # said once in the log, not every minute
+        self.assertEqual((self.root / 'githouse.log').read_text().count('main: GitHub ahead'), 1)
+        self.assertEqual(self.heads()['main'], ours)
+
+    def test_root_adopts_a_fast_forward_and_only_that(self):
+        theirs = self.on_github('a bump, merged on GitHub')
         githouse.fetch(self.repo)
-        githouse.publish()
-        self.assertNotIn('release/1', self.branches()['live'])
+        taken = githouse.adopt(self.repo, 'main')
+        self.assertEqual(len(taken), 1)
+        self.assertIn('a bump', taken[0])
+        self.assertEqual(self.heads()['main'], theirs)
+        self.assertEqual(self.differs(), {})
+        self.assertEqual(githouse.adopt(self.repo, 'main'), [])
+        with self.assertRaises(githouse.Refused):
+            githouse.adopt(self.repo, 're/foo')  # a deploy branch, or nothing
+
+    def merged_here(self):
+        """githouse's main moved by a merge here (of re/foo), GitHub's not told yet."""
+        self.commit(self.work, 'mine')
+        self.assertEqual(self.push('re', 'HEAD:re/foo')[0], 0)
+        ours = self.heads()['main']
+        merged = githouse.git(self.repo, 'commit-tree', 're/foo^{tree}', '-p', ours, '-p', 're/foo',
+                              '-m', 'a merge here').strip()
+        githouse.git(self.repo, 'update-ref', 'refs/heads/main', merged, ours)
+        return merged
+
+    def test_apart_is_said_and_never_adopted(self):
+        merged = self.merged_here()
+        self.on_github('theirs')
+        githouse.fetch(self.repo)
+        self.assertEqual(self.heads()['main'], merged)
+        self.assertEqual(self.differs()['main']['state'], 'apart')
+        with self.assertRaises(githouse.Refused):
+            githouse.adopt(self.repo, 'main')
+        self.assertEqual(self.heads()['main'], merged)
+
+    def test_github_behind_is_sent_ours_never_forced(self):
+        merged = self.merged_here()  # as when the merge's push to GitHub failed
+        githouse.fetch(self.repo)
+        self.assertEqual(run('git', '--git-dir', str(self.github), 'rev-parse', 'main')[1].strip(), merged)
+        self.assertEqual(self.differs(), {})
+
+    def test_a_deploy_branch_deleted_on_github_is_sent_back(self):
+        production = self.heads()['production']
+        run('git', 'push', '--quiet', 'origin', ':production', cwd=self.upstream)
+        githouse.fetch(self.repo)
+        self.assertEqual(self.heads()['production'], production)
+        self.assertEqual(run('git', '--git-dir', str(self.github), 'rev-parse', 'production')[1].strip(), production)
+
+    def test_githubs_view_is_never_a_live_branch(self):
+        self.on_github('around githouse')
+        githouse.fetch(self.repo)
+        self.assertIn('main', githouse.refs(self.repo, 'refs/github/'))
+        self.assertEqual(set(self.branches()['live']), {'main', 'production'})
 
     # --- who pushes what -------------------------------------------------------------
 
@@ -148,7 +216,7 @@ class GithouseTest(Repos):
         self.commit(self.work, 'mine')
         self.push('re', 'HEAD:re/foo')
         merged_tip = githouse.refs(self.repo, 'refs/heads/')['re/foo']
-        self.merge_on_github('re/foo')
+        self.merge_on_github('re/foo', adopt=False)  # main moved, retire() not run yet
         githouse.git(self.repo, 'fetch', '--quiet', 'github', '+refs/heads/main:refs/heads/main')
         self.commit(self.work, 'more')
         self.push('re', 'HEAD:re/foo')  # lands after retire() has read the branches
@@ -423,7 +491,7 @@ class MergeTest(Repos):
     def github_main(self):
         return run('git', '--git-dir', str(self.github), 'rev-parse', 'main')[1].strip()
 
-    def test_a_signed_order_merges_on_github_first(self):
+    def test_a_signed_order_merges_here_then_on_github(self):
         before = self.github_main()
         text = self.order()
         result = self.merge(text)
@@ -509,14 +577,40 @@ class MergeTest(Repos):
         run('git', 'add', '.', cwd=self.upstream)
         run('git', 'commit', '--quiet', '-m', 'meanwhile', cwd=self.upstream)
         run('git', 'push', '--quiet', 'origin', 'HEAD:main', cwd=self.upstream)
+        githouse.adopt(self.repo, 'main')
         before = self.github_main()
         result = self.merge(self.order())
         self.assertIn('conflicts with main', result['why'])
         self.assertEqual(self.github_main(), before)
+        self.assertEqual(self.heads()['main'], before)
 
-    def test_only_into_githubs_branches_and_not_twice(self):
+    def test_the_merge_is_onto_githouses_main_not_githubs(self):
+        # Something pushed to GitHub's main around githouse isn't in the merge, and isn't deployed.
+        ours = self.heads()['main']
+        self.on_github('around githouse')
+        result = self.merge(self.order())
+        self.assertEqual(result['outcome'], 'merged', result)
+        self.assertEqual(result['onto'], ours)
+        self.assertEqual(self.heads()['main'], result['merge'])
+        # GitHub refused it (its main moved): the merge stands here, and the difference is said.
+        self.assertIn('not yet', result['github'])
+        githouse.fetch(self.repo)
+        self.assertEqual(self.differs()['main']['state'], 'apart')
+        self.assertEqual(self.heads()['main'], result['merge'])
+
+    def test_a_branch_only_on_github_merges(self):
+        # A branch githouse never had (dependabot's, say), merged by its head on GitHub.
+        self.commit(self.upstream, 'a bump')
+        run('git', 'push', '--quiet', 'origin', 'HEAD:dependabot/bump', cwd=self.upstream)
+        head = run('git', '--git-dir', str(self.github), 'rev-parse', 'dependabot/bump')[1].strip()
+        result = self.merge(self.order(branch='dependabot/bump', commit=head))
+        self.assertEqual(result['outcome'], 'merged', result)
+        self.assertEqual(self.github_main(), result['merge'])
+        self.assertEqual(self.heads()['main'], result['merge'])
+
+    def test_only_into_deploy_branches_and_not_twice(self):
         self.assertIn('a merge goes into', self.merge(self.order(into='re/other'))['why'])
-        self.assertIn("GitHub's own branches don't", self.merge(self.order(branch='main'))['why'])
+        self.assertIn("the deploy branches don't", self.merge(self.order(branch='main'))['why'])
         self.assertEqual(self.merge(self.order())['outcome'], 'merged')
         self.assertIn('no such branch', self.merge(self.order())['why'])  # merged: its name is retired here
         self.assertIn('no repository', self.merge(self.order(repo='nonesuch'))['why'])

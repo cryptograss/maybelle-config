@@ -69,9 +69,27 @@ echo ""
 echo "Updating maybelle-config repository..."
 cd "$REPO_DIR"
 
+# From githouse's copy on maybelle (the flip, 10 Nov 2026; Cryptograss:Moods/ramp/Plan, section 6):
+# production there moves only by a signed merge, so a push to GitHub's, around githouse, never deploys.
+# GitHub only before githouse has a copy (a cold start), and then it says so.
+GITHOUSE_REPO=/mnt/persist/githouse/git/maybelle-config.git
+if [ -f "$GITHOUSE_REPO/HEAD" ]; then
+    # githouse's git user owns it; root may read it (githouse's role says why)
+    git config --system --get-all safe.directory | grep -qxF "$GITHOUSE_REPO" ||
+        git config --system --add safe.directory "$GITHOUSE_REPO"
+    git remote set-url origin "$GITHOUSE_REPO"
+    echo "✓ From githouse"
+else
+    git remote set-url origin https://github.com/cryptograss/maybelle-config.git
+    echo "⚠ githouse has no maybelle-config here: from GitHub (a cold start only)"
+fi
+
 # Ensure we can fetch all branches (fixes shallow single-branch clones)
 git remote set-branches origin '*'
-git fetch origin main production
+if ! git fetch origin main production; then
+    echo "ERROR: couldn't fetch main and production from $(git remote get-url origin)"
+    exit 1
+fi
 
 # Hard reset to production (handles force pushes/rebases)
 git checkout production 2>/dev/null || git checkout -b production origin/production
