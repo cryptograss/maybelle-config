@@ -328,11 +328,37 @@
         - /var/log/pickipedia-backup.log
         - /var/log/pickipedia-deploy.log
 
+    # Jenkins' git trusts githouse's repositories: a system config file, mounted read-only at /etc/gitconfig
+    # (the image has none). githouse's git user owns /srv/git, and git won't read another user's repository
+    # unless told to; neither -c nor the environment reaches a local fetch's upload-pack (tried 10 Nov). Not
+    # `git config --global` in jenkins_home by docker exec: the 10 Nov deploy failed there on a stale
+    # .gitconfig.lock ("could not lock config file"), and this file needs no lock and says its state.
+    - name: Where Jenkins' git config lives
+      file:
+        path: /mnt/persist/jenkins-etc
+        state: directory
+        mode: '0755'
+
+    - name: Jenkins' git config, trusting githouse's repositories
+      copy:
+        dest: /mnt/persist/jenkins-etc/gitconfig
+        mode: '0644'
+        content: |
+          # Written by maybelle.yml: the trusted jobs build from githouse (Cryptograss:Moods/ramp/Plan, section 7).
+          [safe]
+          {% for full_name in githouse_repos %}
+              directory = /srv/git/{{ full_name.split('/')[1] }}.git
+          {% endfor %}
+      register: jenkins_gitconfig
+
     - name: Start Jenkins container
       docker_container:
         name: jenkins
         image: cryptograss-jenkins:latest
         restart_policy: unless-stopped
+        # A file mounted by itself keeps the inode it was started with, and copy replaces by rename: a changed
+        # gitconfig (a repository added to githouse) reaches Jenkins only by a restart.
+        restart: "{{ jenkins_gitconfig is changed }}"
         volumes:
           - "{{ jenkins_home }}:/var/jenkins_home"
           - "/mnt/persist/magenta/backups:/mnt/persist/magenta/backups:ro"
@@ -346,6 +372,7 @@
           # githouse's repositories, read-only: the trusted jobs (pickipedia, arthel) build from them, not from
           # GitHub (the flip, Cryptograss:Moods/ramp/Plan, section 6). memory-lane mounts them the same way.
           - "{{ githouse_dir }}/git:/srv/git:ro"
+          - "/mnt/persist/jenkins-etc/gitconfig:/etc/gitconfig:ro"
           # Docker socket removed - Jenkins doesn't need it and it's a security risk
         etc_hosts:
           # Use Hetzner private network for faster/reliable inter-VPS communication
@@ -405,21 +432,6 @@
       retries: 30
       delay: 2
       changed_when: false
-
-    # githouse's git user owns /srv/git, and git won't read another user's repository unless told to (tried,
-    # 10 Nov: neither -c nor the environment reaches a local fetch's upload-pack). jenkins's own config, in
-    # jenkins_home, so it outlasts the container. Costs nothing new: githouse already decides what deploys.
-    - name: Jenkins may fetch from githouse's repositories (the trusted jobs build from them)
-      shell: |
-        set -e
-        for name in {{ githouse_repos | map('regex_replace', '^.*/', '') | join(' ') }}; do
-          path=/srv/git/$name.git
-          docker exec -u jenkins jenkins git config --global --get-all safe.directory | grep -qxF "$path" && continue
-          docker exec -u jenkins jenkins git config --global --add safe.directory "$path"
-          echo "added $path"
-        done
-      register: jenkins_safe_dirs
-      changed_when: "'added' in jenkins_safe_dirs.stdout"
 
     # A job new to this deploy can be written to disk at boot and still not be loaded until the next start
     # (branch-tests, 9 Nov: JCasC made it 65 ms before "Loaded all jobs", from a list read without it).
