@@ -475,9 +475,22 @@ def _drop_empty_sdtp(init_segment: Path) -> bool:
     only boxes that are empty (a 12-byte full-box header) are touched.
     """
     try:
-        data = bytearray(init_segment.read_bytes())
+        fixed = drop_empty_sdtp_bytes(init_segment.read_bytes())
     except OSError:
         return False
+    if fixed is None:
+        return False
+    init_segment.write_bytes(fixed)
+    return True
+
+
+def drop_empty_sdtp_bytes(original: bytes) -> Optional[bytes]:
+    """The init segment without its empty sdtp boxes, or None if it has none.
+
+    The byte-level half of _drop_empty_sdtp, shared with repackaging releases
+    that were published before the fix (services/repackage.py).
+    """
+    data = bytearray(original)
 
     def boxes(start: int, end: int):
         offset = start
@@ -500,7 +513,7 @@ def _drop_empty_sdtp(init_segment: Path) -> bool:
 
     walk(0, len(data), 0, [])
     if not found:
-        return False
+        return None
 
     # Last first, so earlier offsets stay valid as bytes are cut.
     for offset, parents in reversed(found):
@@ -509,8 +522,7 @@ def _drop_empty_sdtp(init_segment: Path) -> bool:
             data[parent:parent + 4] = (size - 12).to_bytes(4, "big")
         del data[offset:offset + 12]
 
-    init_segment.write_bytes(bytes(data))
-    return True
+    return bytes(data)
 
 
 async def _write_poster(input_path: Path, output_dir: Path,
