@@ -60,6 +60,16 @@
       register: magenta_deployed
       changed_when: false
 
+    # Made here, not left to report-deploy.sh: that makes it only when it has its key, and without the directory
+    # this copy fails the whole deploy (a fresh maybelle, say), for the sake of a report (re).
+    - name: Where the deploy report's commits are kept, on maybelle
+      file:
+        path: /mnt/persist/deploys
+        state: directory
+        mode: "0755"
+      delegate_to: localhost
+      become: false
+
     - name: Note it for the deploy report, on maybelle
       copy:
         content: "{{ {'magenta': magenta_deployed.stdout} | to_json }}\n"

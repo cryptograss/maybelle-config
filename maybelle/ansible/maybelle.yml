@@ -1069,6 +1069,12 @@
 
     # Which magenta this deploy runs, for the Moods (report-deploy.sh sends it when the deploy ends; the ramp
     # shows a merge as live on maybelle once it's in this commit).
+    - name: Where the deploy report's commits are kept
+      file:
+        path: /mnt/persist/deploys
+        state: directory
+        mode: "0755"
+
     - name: Note the magenta commit for the deploy report
       copy:
         content: "{{ {'magenta': memory_lane_source.after} | to_json }}\n"
