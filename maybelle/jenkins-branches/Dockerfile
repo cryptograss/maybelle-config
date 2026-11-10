@@ -25,10 +25,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* \
     && useradd -m -u 1500 -s /bin/sh builder
 COPY run-ci /usr/local/bin/run-ci
-# Exactly run-ci, with no arguments ("" in sudoers), nothing else.
+# Exactly run-ci, with no arguments ("" in sudoers) or `reclaim`, nothing else.
 RUN chmod 0755 /usr/local/bin/run-ci && chown root:root /usr/local/bin/run-ci \
     && printf '%s\n' 'Defaults:jenkins env_keep += "http_proxy https_proxy HTTP_PROXY HTTPS_PROXY no_proxy NO_PROXY"' \
-                      'jenkins ALL=(root) NOPASSWD: /usr/local/bin/run-ci ""' > /etc/sudoers.d/run-ci \
+                      'jenkins ALL=(root) NOPASSWD: /usr/local/bin/run-ci "", /usr/local/bin/run-ci reclaim' > /etc/sudoers.d/run-ci \
     && chmod 0440 /etc/sudoers.d/run-ci && visudo -cf /etc/sudoers.d/run-ci \
     && node --version && npm --version && php --version | head -1
 USER jenkins

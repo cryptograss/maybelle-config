@@ -491,6 +491,10 @@
         memory: 4g
         cpus: 2
         pids_limit: 2048
+        # An init as PID 1 (docker's tini), with the agent under it. The agent's java was PID 1 and reaps
+        # nothing: every git or sh orphaned by a build stayed <defunct>, holding its slot, until all 2048 were
+        # held and no build could fork (9 Nov: #19-#21 failed on "Resource temporarily unavailable").
+        init: true
 
     # The line the design rests on, checked from inside, every deploy: nothing of ours answers the agent but
     # Jenkins and its proxy, and the proxy won't carry it anywhere but the registries and GitHub.
