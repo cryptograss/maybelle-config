@@ -356,6 +356,95 @@ class GithouseTest(Repos):
 
 
 
+class SecretTest(Repos):
+    """A push carrying a secret is refused at the door (Skyler and Justin, #ramp, 10 Nov; re's design)."""
+
+    VAULT_VALUE = 'Zq7-not-really-in-any-vault-9xK2'
+    TOKEN = 'ghp_' + 'A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8'   # GitHub's shape, made up here
+
+    def setUp(self):
+        super().setUp()
+        self.etc = self.tmp / 'etc'
+        self.etc.mkdir()
+        # As the playbook writes it from the scrubber's list: every vault string over 4 characters.
+        (self.etc / githouse.SECRETS_FILE).write_text(json.dumps([self.VAULT_VALUE, 'admin', '3000']))
+        patcher = unittest.mock.patch.object(githouse, 'ETC', self.etc)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        os.environ['GITHOUSE_ETC'] = str(self.etc)   # the hook runs as its own process
+        self.addCleanup(os.environ.pop, 'GITHOUSE_ETC', None)
+
+    def add(self, path, text, message='a change'):
+        (self.work / path).write_text(text)
+        run('git', 'add', path, cwd=self.work)
+        run('git', 'commit', '--quiet', '-m', message, cwd=self.work)
+
+    def test_a_vault_value_is_refused_and_not_repeated(self):
+        self.add('settings.py', f'PASSWORD = "{self.VAULT_VALUE}"\n')
+        code, said = self.push('re', 'HEAD:re/foo')
+        self.assertNotEqual(code, 0)
+        self.assertIn('settings.py: a value from the vault', said)
+        self.assertNotIn(self.VAULT_VALUE, said)
+        self.assertNotIn('re/foo', githouse.refs(self.repo, 'refs/heads/'))
+
+    def test_a_vault_value_passes_no_marker(self):
+        self.add('settings.py', f'PASSWORD = "{self.VAULT_VALUE}"  # {githouse.NOT_A_SECRET}\n')
+        self.assertNotEqual(self.push('re', 'HEAD:re/foo')[0], 0)
+
+    def test_short_vault_values_are_not_looked_for(self):
+        self.add('settings.py', 'USER = "admin"\nPORT = 3000\n')
+        self.assertEqual(self.push('re', 'HEAD:re/foo')[0], 0)
+
+    def test_a_token_shape_is_refused_unless_marked(self):
+        self.add('notes.md', f'token: {self.TOKEN}\n')
+        code, said = self.push('re', 'HEAD:re/foo')
+        self.assertNotEqual(code, 0)
+        self.assertIn('notes.md: a GitHub token', said)
+        self.assertNotIn(self.TOKEN, said)
+        run('git', 'reset', '--quiet', '--hard', 'HEAD~1', cwd=self.work)
+        self.add('test_redact.py', f"FAKE = '{self.TOKEN}'  # {githouse.NOT_A_SECRET}\n")
+        self.assertEqual(self.push('re', 'HEAD:re/foo')[0], 0)
+
+    def test_a_private_key_header(self):
+        self.add('key', '-----BEGIN OPENSSH PRIVATE KEY-----\nb3Blbg==\n-----END OPENSSH PRIVATE KEY-----\n')
+        self.assertIn('key: a private key', self.push('re', 'HEAD:re/foo')[1])
+
+    def test_in_a_commit_message(self):
+        self.add('a.txt', 'nothing here\n', message=f'fix login, the password was {self.VAULT_VALUE}')
+        self.assertIn('its message: a value from the vault', self.push('re', 'HEAD:re/foo')[1])
+
+    def test_added_then_removed_in_the_same_push_is_still_refused(self):
+        # History keeps it: the mirror and GitHub would have the first commit.
+        self.add('a.txt', f'{self.VAULT_VALUE}\n')
+        self.add('a.txt', 'gone now\n')
+        self.assertNotEqual(self.push('re', 'HEAD:re/foo')[0], 0)
+
+    def test_history_already_here_doesnt_stop_a_new_push(self):
+        # Found by scan and rotated by a person; it mustn't block everyone's next push.
+        self.on_main(f'{self.VAULT_VALUE}\n')
+        run('git', 'fetch', '--quiet', 'origin', cwd=self.work)
+        run('git', 'reset', '--quiet', '--hard', 'origin/main', cwd=self.work)
+        self.add('b.txt', 'unrelated\n')
+        self.assertEqual(self.push('re', 'HEAD:re/foo')[0], 0)
+        found = githouse.scan(self.repo)
+        self.assertEqual([where for _, where, _ in found], ['a.txt'])
+
+    def test_without_the_vault_s_list_the_shapes_still_hold(self):
+        (self.etc / githouse.SECRETS_FILE).unlink()
+        self.add('a.txt', f'{self.VAULT_VALUE}\n')
+        self.assertEqual(self.push('re', 'HEAD:re/foo')[0], 0)
+        self.add('b.txt', f'{self.TOKEN}\n')
+        self.assertNotEqual(self.push('re', 'HEAD:re/foo')[0], 0)
+
+    def on_main(self, text):
+        """A secret already in githouse's main (from before this check, say)."""
+        (self.upstream / 'a.txt').write_text(text)
+        run('git', 'add', '.', cwd=self.upstream)
+        run('git', 'commit', '--quiet', '-m', 'long ago', cwd=self.upstream)
+        run('git', 'push', '--quiet', 'origin', 'HEAD:main', cwd=self.upstream)
+        githouse.adopt(self.repo, 'main')
+
+
 class BranchTestTest(Repos):
     """After a push reaches GitHub, Jenkins is asked to test exactly that commit (Plan, section 11)."""
 

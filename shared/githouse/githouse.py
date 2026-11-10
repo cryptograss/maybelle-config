@@ -57,6 +57,11 @@ meant to be cheap to lose.
   Orders arrive by mail: memory-lane keeps them, unread, and githouse fetches them every few seconds and
   checks each itself (8 Nov: only Justin has ssh to maybelle). Brakes stop it (section 10): root's freeze (/etc/githouse/frozen), AZ5, or a ban on the signer, the
   last two asked of memory-lane at every order. Its answer can only stop a merge; no answer stops it too.
+* A push that carries a secret is refused, before anything else holds a copy (Skyler and Justin, #ramp,
+  10 Nov; re's design): any value from the vault, exactly, as the scrubber has them (/etc/githouse/
+  secrets.json, readable by git alone), in an added line or a commit message; or anything shaped like a
+  private key or a known service's token. A line ending 'githouse: not a secret' passes the shapes
+  (a redaction test needs them), never the vault's values. `githouse scan` looks through all of history.
 * After a push reaches GitHub, Jenkins' branch-tests job tests exactly that commit, on an agent with no
   secrets (Plan, section 11): /etc/githouse/jenkins.json says where, jenkins_reporter as whom.
 * `githouse mirror`, on hunter: a read-only copy of all of it, fetched from
@@ -192,6 +197,100 @@ def after(repo, user, updates, forward=None):
                 if new != ZERO and ref.startswith('refs/heads/') and not owned(branch):
                     test_branch(repo.name[:-len('.git')], branch, new)
     publish()
+
+
+# --- secrets: refused at the door ---------------------------------------------------------------
+# Every push comes here first; within a minute hunter's mirror (every container) and GitHub (everyone) have
+# it, and a secret can't be taken back from either. So it's refused here, in pre-receive.
+
+SECRETS_FILE = 'secrets.json'    # /etc/githouse/secrets.json: the vault's string values, the scrubber's list
+SECRET_MIN = 12                  # shorter values ("admin", a port) are everywhere in code
+NOT_A_SECRET = 'githouse: not a secret'
+SHAPES = {
+    'a private key': re.compile(r'-----BEGIN (?:[A-Z]+ )?PRIVATE KEY(?: BLOCK)?-----'),
+    'an AWS access key': re.compile(r'\b(?:AKIA|ASIA)[0-9A-Z]{16}\b'),
+    'a GitHub token': re.compile(r'\b(?:gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{50,})\b'),
+    'an Anthropic key': re.compile(r'\bsk-ant-[A-Za-z0-9_-]{20,}'),
+    'an OpenAI key': re.compile(r'\bsk-(?:proj-)?[A-Za-z0-9]{32,}\b'),
+    'a Slack token': re.compile(r'\bxox[abposr]-[A-Za-z0-9-]{10,}'),
+    'a Google API key': re.compile(r'\bAIza[0-9A-Za-z_-]{35}\b'),
+    'a Stripe live key': re.compile(r'\b[sr]k_live_[0-9A-Za-z]{20,}'),
+    'a JWT (Pinata\'s keys are these)': re.compile(r'\beyJhbGciOi[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}'),
+}
+
+
+def secret_values(etc=None):
+    """The vault's values worth looking for: each at least SECRET_MIN long; a value of many lines by its
+    longest line (a key file). Longest first. None at all if the file isn't there (a fresh githouse)."""
+    try:
+        values = json.loads((Path(etc or ETC) / SECRETS_FILE).read_text())
+    except (OSError, ValueError):
+        return []
+    found = set()
+    for value in values if isinstance(values, list) else []:
+        if isinstance(value, str):
+            line = max(value.strip().splitlines() or [''], key=len).strip()
+            if len(line) >= SECRET_MIN:
+                found.add(line)
+    return sorted(found, key=len, reverse=True)
+
+
+def secret_in(line, values):
+    """What secret this line carries, said without it ('a value from the vault, 40 characters'), or None."""
+    for value in values:
+        if value in line:
+            return f'a value from the vault, {len(value)} characters'
+    if NOT_A_SECRET in line:
+        return None
+    for name, shape in SHAPES.items():
+        if shape.search(line):
+            return name
+    return None
+
+
+def secrets_in_log(text, values):
+    """[(commit, where, what)] in `git log -p -U0 --format=commit %H%n%B` output: added lines and messages."""
+    found, commit, where, header = [], '', '', False
+    for line in text.splitlines():
+        if line.startswith('commit ') and SHA.fullmatch(line[7:]):
+            commit, where, header = line[7:], 'its message', True
+            continue
+        if line.startswith('diff --git '):
+            header = False
+            continue
+        if line.startswith('+++ '):
+            where = line[6:] if line.startswith('+++ b/') else line[4:]
+            continue
+        if header or (line.startswith('+') and not line.startswith('+++')):
+            what = secret_in(line if header else line[1:], values)
+            if what:
+                found.append((commit, where, what))
+    return found
+
+
+def _log(repo, *revs):
+    return git(repo, 'log', '-p', '-U0', '--no-color', '--no-ext-diff', '--no-merges', '--format=commit %H%n%B', *revs)
+
+
+def check_secrets(repo, updates, etc=None):
+    """What's refused in a push for a secret it carries: [message]. Only commits new to githouse: a secret
+    already in history (found by scan, rotated by a person) doesn't stop every push after it."""
+    values, refused = secret_values(etc), []
+    for old, new, ref in updates:
+        if new == ZERO:
+            continue
+        for commit, where, what in secrets_in_log(_log(repo, new, '--not', '--all'), values):
+            line = f'{commit[:8]} {where}: {what}. Take it out of the commit (amend or rebase) and push again'
+            if not what.startswith('a value from the vault'):
+                line += f"; if it isn't a secret (a test's fake), end its line with '{NOT_A_SECRET}'"
+            if line not in refused:
+                refused.append(line)
+    return refused
+
+
+def scan(repo, etc=None):
+    """All of a repository's history, every ref: [(commit, where, what)]. For root, once, and after a leak."""
+    return secrets_in_log(_log(repo, '--all'), secret_values(etc))
 
 
 # --- branch tests on Jenkins (Plan, section 11) ----------------------------------------------------------
@@ -820,6 +919,8 @@ def main(argv):
         updates = [tuple(line.split()) for line in sys.stdin.read().splitlines() if line.strip()]
         if command == 'pre-receive':
             refused = check(repo, user, updates) if user else ['pushes come through githouse auth']
+            if not refused:
+                refused = check_secrets(repo, updates)
             for message in refused:
                 sys.stderr.write(f'githouse: {message}\n')
             return 1 if refused else 0
@@ -845,6 +946,16 @@ def main(argv):
             result = {'outcome': 'refused', 'why': 'expected {"order", "signature"} on stdin'}
         print(json.dumps(result))
         return 0 if result.get('outcome') == 'merged' else 1
+    if command == 'scan':  # scan [repo...]: every repository's whole history, for a secret it carries
+        names = args[1:] or [r.name[:-4] for r in sorted(ROOT.glob('*.git'))]
+        found = 0
+        for name in names:
+            for commit, where, what in scan(ROOT / f'{name}.git'):
+                print(f'{name} {commit[:8]} {where}: {what}')
+                found += 1
+        print(f'{found} found, in {len(names)} repositories' + ('' if secret_values() else
+              f' (no {SECRETS_FILE} here: shapes only, not the vault\'s values)'))
+        return 1 if found else 0
     if command == 'adopt':  # adopt <repo> <branch>: root takes GitHub's deploy branch, as a fast-forward only
         if os.geteuid() == 0:
             sys.stderr.write('githouse: adopt as git (docker exec -u git), so what it writes stays git\'s\n')
