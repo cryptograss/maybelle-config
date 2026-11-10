@@ -6,6 +6,10 @@
 #     so one build can't leave something behind for the next;
 #   - the workspace goes back to jenkins, so the next build can clear it.
 # The exit status is ci/test's.
+#
+# `run-ci reclaim` only gives the workspace back to jenkins (and kills what builder left running), so the job
+# can clear it. The job asks for it before every deleteDir: a build aborted mid-test never reached the cleanup
+# below, left a workspace jenkins couldn't delete, and every build after it failed there (9 Nov, #34-#36).
 set -u
 WORKSPACE_ROOT=/home/jenkins/agent/workspace
 ws=$(pwd -P)
@@ -13,8 +17,6 @@ case "$ws/" in
     "$WORKSPACE_ROOT"/?*/) ;;
     *) echo "run-ci: run it from a build's workspace, under $WORKSPACE_ROOT (not $ws)" >&2; exit 2 ;;
 esac
-[ -f "$ws/ci/test" ] || { echo "run-ci: no ci/test here" >&2; exit 2; }
-
 cleanup() {
     pkill -KILL -u builder 2>/dev/null
     for _ in 1 2 3 4 5; do pgrep -u builder >/dev/null || break; sleep 1; pkill -KILL -u builder 2>/dev/null; done
@@ -22,7 +24,13 @@ cleanup() {
     rm -rf /home/builder && mkdir -m 0700 /home/builder && chown builder:builder /home/builder
     chown -R -h jenkins:jenkins "$ws"
 }
+if [ "${1:-}" = reclaim ]; then cleanup; exit 0; fi
+[ -f "$ws/ci/test" ] || { echo "run-ci: no ci/test here" >&2; exit 2; }
 cleanup
+# Stopped (an abort, a timeout): cleaned up all the same, so the next build can clear the workspace. ci/test
+# runs in the background and is waited for, since a shell runs a trap only once its foreground command is
+# done, and wait returns as soon as the signal comes.
+trap 'cleanup; exit 143' HUP INT TERM
 # builder may pass through the agent's home to the workspace, never list it (0711).
 chmod 0711 /home/jenkins /home/jenkins/agent "$WORKSPACE_ROOT" 2>/dev/null
 chown -R -h builder:builder "$ws"
@@ -30,7 +38,9 @@ runuser -u builder -- env -i \
     HOME=/home/builder PATH=/usr/local/bin:/usr/bin:/bin LANG=C.UTF-8 \
     http_proxy="${http_proxy:-}" https_proxy="${https_proxy:-}" HTTP_PROXY="${HTTP_PROXY:-}" \
     HTTPS_PROXY="${HTTPS_PROXY:-}" no_proxy="${no_proxy:-}" NO_PROXY="${NO_PROXY:-}" \
-    sh -c 'cd "$1" && chmod u+x ci/test && exec ./ci/test' run-ci "$ws"
+    sh -c 'cd "$1" && chmod u+x ci/test && exec ./ci/test' run-ci "$ws" </dev/null &
+wait $!
 status=$?
+trap - HUP INT TERM
 cleanup
 exit $status

@@ -47,6 +47,8 @@ pipelineJob('branch-tests') {
                 }
                 currentBuild.displayName = "${repo}:${branch} ${commit.take(8)}"
                 node('branches') {
+                    // The last build's workspace back to jenkins first: one aborted mid-test is still builder's.
+                    sh 'sudo -n /usr/local/bin/run-ci reclaim'
                     deleteDir()
                     stage('Clone') {
                         // Anonymously, through the proxy: our repositories are public, and the agent has no token.
