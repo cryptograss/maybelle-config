@@ -60,7 +60,6 @@ jenkins:
 
 jobs:
   - file: /var/jenkins_home/jobs/arthel-production-build.groovy
-  - file: /var/jenkins_home/jobs/arthel-branches-builds.groovy
   - file: /var/jenkins_home/jobs/arthel-fetch-chain-data.groovy
   - file: /var/jenkins_home/jobs/cron-health.groovy
   - file: /var/jenkins_home/jobs/deploy-hunter.groovy
@@ -71,16 +70,13 @@ jobs:
   - file: /var/jenkins_home/jobs/magenta-memory-uptime.groovy
   - file: /var/jenkins_home/jobs/branch-tests.groovy
 
+# No credentials. github-token (maybelle_github_token) went with arthel-branches-builds, its last user, on
+# 10 Nov: the trusted jobs build from githouse since the flip, and arthel's production path never used it. An
+# empty list, not no section: Configuration as Code then removes the credential Jenkins still holds.
 credentials:
   system:
     domainCredentials:
-      - credentials:
-        - usernamePassword:
-            scope: GLOBAL
-            id: "github-token"
-            username: "maybelle"
-            password: "${GITHUB_TOKEN}"
-            description: "GitHub Token"
+      - credentials: []
 
 unclassified:
   location:

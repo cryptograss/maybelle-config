@@ -280,6 +280,10 @@
         - backup-pickipedia.groovy
         - backup-memory-lane.groovy
         - pickipedia-enrich-torrents.groovy
+        # 10 Nov: it ran any arthel branch's own integration/Jenkinsfile on the controller, with every secret
+        # there, emergents' branches included (githouse forwards them to GitHub); every build had failed since
+        # July. Branch code runs on the branches agent only (Plan, section 11).
+        - arthel-branches-builds.groovy
       notify: Restart Jenkins container
 
     # Jenkins persists job runtime state (config.xml, builds/) in
@@ -298,6 +302,7 @@
         - backup-pickipedia
         - backup-memory-lane
         - pickipedia-enrich-torrents
+        - arthel-branches-builds
       notify: Restart Jenkins container
 
     - name: Check if log paths are directories (Docker creates dirs for missing mount sources)
@@ -386,7 +391,6 @@
           JENKINS_ADMIN_ID: admin
           JENKINS_ADMIN_PASSWORD: "{{ jenkins_admin_password }}"
           JENKINS_REPORTER_PASSWORD: "{{ jenkins_reporter_password }}"
-          GITHUB_TOKEN: "{{ maybelle_github_token }}"
           GITHUB_REPO_URL: "{{ github_repo_url }}"
           BLUERAILROAD_BOT_USERNAME: "{{ BLUERAILROAD_BOT_USERNAME }}"
           BLUERAILROAD_BOT_PASSWORD: "{{ BLUERAILROAD_BOT_PASSWORD }}"
