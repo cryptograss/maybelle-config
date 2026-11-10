@@ -245,13 +245,14 @@ def secret_hashes(etc=None):
 
 def _vault_value_in(line, vault):
     """The length of a vault value in this line, or None. Each stretch that starts and ends where a word
-    does (not inside one), of a length some value has, is hashed and looked up."""
+    does (not inside one), or starts right after a word's 0x (a hex key pasted as 0x<key>, re), of a length
+    some value has, is hashed and looked up."""
     lengths, hashes = vault
     if not hashes:
         return None
     n = len(line)
     for i in range(n):
-        if i and line[i - 1].isalnum():
+        if i and line[i - 1].isalnum() and not (line[i - 2:i] in ('0x', '0X') and (i == 2 or not line[i - 3].isalnum())):
             continue
         for length in lengths:
             j = i + length
@@ -289,7 +290,10 @@ def secrets_in(repo, revs, vault):
     """[(commit, where, what)] in the commits revs name: every line of every message, in a pass of its own;
     and every line of every diff but removals, headers too (a file's name), binaries as text (--text), a
     merge by what its resolution added (--remerge-diff: not what it brought in, which was checked as its own
-    commits). re's review, 10 Nov: seven ways planted, each a test."""
+    commits). re's review, 10 Nov: seven ways planted, each a test.
+    Not covered, on purpose: a NUL byte in a hand-made commit object hides the rest of its message from git
+    log itself. Only someone hiding a secret on purpose gets there, and they could as well base64 it; this
+    check is for accidents (re)."""
     found = []
     for record in _git_text(repo, 'log', '--format=%H%x00%B%x00', *revs).split('\x00\n'):
         if '\x00' not in record:
@@ -332,6 +336,11 @@ def check_secrets(repo, updates, etc=None):
     for old, new, ref in updates:
         if new == ZERO:
             continue
+        # --remerge-diff reworks a merge of two; an octopus's own lines would go unseen (re). githouse makes
+        # only --no-ff merges of two, so nobody needs to push one: merge one branch at a time.
+        for octopus in (git(repo, 'rev-list', '--min-parents=3', new, '--not', '--all') or '').split():
+            refused.append(f'{octopus[:8]}: a merge of more than two parents, which githouse can\'t check for '
+                           f'secrets. Merge one branch at a time, and push again')
         for commit, where, what in secrets_in(repo, [new, '--not', '--all'], vault):
             line = f'{commit[:8]} {where}: {what}. Take it out of the commit (amend or rebase) and push again'
             if not what.startswith('a value from the vault'):

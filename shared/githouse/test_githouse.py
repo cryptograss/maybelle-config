@@ -505,6 +505,32 @@ class SecretTest(Repos):
         run('git', 'commit', '--quiet', '-am', 'change inside f', cwd=self.work)
         self.assertEqual(self.push('re', 'HEAD:re/foo')[0], 0)
 
+    # --- re's second look (#ramp, 10 Nov 19:55Z)
+
+    def test_a_vault_value_right_after_0x(self):
+        self.add('keys.js', f'const key = "0x{self.VAULT_VALUE}";\n')
+        self.assertTrue(self.refused('HEAD:re/foo'))
+
+    def test_inside_a_longer_word_is_still_not_seen(self):
+        # The limit of matching by hashes, said in a test: glued inside a word, no stretch starts at it.
+        self.add('a.txt', f'abc{self.VAULT_VALUE}\n')
+        self.assertEqual(self.push('re', 'HEAD:re/foo')[0], 0)
+
+    def test_an_octopus_merge_is_refused(self):
+        base = run('git', 'rev-parse', 'HEAD', cwd=self.work)[1].strip()
+        for name in ('one', 'two'):
+            run('git', 'checkout', '--quiet', '-b', name, base, cwd=self.work)
+            self.add(f'{name}.txt', f'{name}\n')
+        run('git', 'checkout', '--quiet', '-b', 'all', base, cwd=self.work)
+        self.add('three.txt', 'three\n')
+        run('git', 'merge', '--quiet', '--no-commit', 'one', 'two', cwd=self.work)
+        (self.work / 'own.txt').write_text(f'{self.TOKEN}\n')
+        run('git', 'add', 'own.txt', cwd=self.work)
+        run('git', 'commit', '--quiet', '-m', 'octopus', cwd=self.work)
+        code, said = self.push('re', 'HEAD:re/foo')
+        self.assertNotEqual(code, 0)
+        self.assertIn('more than two parents', said)
+
     def on_main(self, text):
         """A secret already in githouse's main (from before this check, say)."""
         (self.upstream / 'a.txt').write_text(text)
