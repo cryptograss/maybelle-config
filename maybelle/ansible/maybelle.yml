@@ -421,10 +421,7 @@
       changed_when: false
 
     - name: Force-restart Jenkins if not running cleanly
-      docker_container:
-        name: jenkins
-        state: started
-        restart: true
+      command: docker restart jenkins   # the container that's there, as the handler does (11 Nov)
       when: jenkins_state.stdout != "running"
 
     # Wait until docker exec actually works — being briefly in "running"
@@ -2066,11 +2063,12 @@
     # IPFS/Pinning service removed - now handled by delivery-kid
 
   handlers:
+    # A plain restart of the container that's there. Not docker_container with only a name: on 11 Nov 01:14Z
+    # this handler, so written, left a container named jenkins with none of its definition (no jenkins_home,
+    # no /srv/git, no port): "Start Jenkins container" had reported ok, and Jenkins answered 502. The one
+    # place that says what the container is stays "Start Jenkins container".
     - name: Restart Jenkins container
-      docker_container:
-        name: jenkins
-        state: started
-        restart: yes
+      command: docker restart jenkins
 
   # Handlers are now in roles (caddy role has its own handlers)
 
