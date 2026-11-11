@@ -33,6 +33,11 @@ mcp.{{ domain_name }} {
     reverse_proxy 10.0.0.2:8000
 }
 
+# githouse's repositories to read, read-only (roles/cgit; Justin, #ramp, 11 Nov)
+code.{{ domain_name }} {
+    reverse_proxy localhost:8890
+}
+
 # GlitchTip error tracking (open source Sentry alternative)
 glitchtip.{{ domain_name }} {
     reverse_proxy localhost:8800

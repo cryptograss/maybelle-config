@@ -19,7 +19,8 @@ meant to be cheap to lose.
   that, a deploy branch's name new on GitHub is said, not taken (adopt). Nobody pushes them here. Pull
   requests' heads are still GitHub's, fetched and pruned to match.
 * Everyone else's branches are their own: re pushes re/*, magent magent/*,
-  over ssh as the git user, on maybelle's private network only. Each key's
+  over ssh as the git user (maybelle's private network; its public address too, with githouse_public,
+  since 11 Nov), and people by their inventory keys (githouse_people). Each key's
   forced command names who it is (`githouse auth <name>`), and the hook lets
   that name push <name>/* and nothing else: no other branches, no tags. The
   fetch never touches these, so a push can't be clobbered by a fetch in

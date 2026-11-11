@@ -1,0 +1,34 @@
+# cgit's settings (roles/cgit). Settings first: cgit reads this file top to bottom, and a repo.* line
+# belongs to the repository named before it.
+root-title=cryptograss: the code
+root-desc=githouse's repositories, read-only. Each opens on the branch it deploys from.
+robots=noindex, nofollow
+virtual-root=/
+css=/cgit.css
+logo=/cgit.png
+favicon=/favicon.ico
+cache-root=/var/cache/cgit
+cache-size=1000
+local-time=0
+enable-http-clone=0
+enable-blame=1
+enable-commit-graph=1
+enable-log-filecount=1
+enable-log-linecount=1
+enable-index-links=1
+max-stats=quarter
+# Colour by language (Pygments), in the tree view; READMEs rendered (Markdown).
+source-filter=/usr/lib/cgit/filters/syntax-highlighting.py
+about-filter=/usr/lib/cgit/filters/about-formatting.sh
+readme=:README.md
+readme=:README
+clone-url=ssh://git@{{ cgit_githouse_host }}:{{ githouse_port }}/$CGIT_REPO_URL.git https://github.com/cryptograss/$CGIT_REPO_URL
+
+{% for full in githouse_repos %}
+{% set name = full.split('/')[-1] %}
+repo.url={{ name }}
+repo.path=/srv/git/{{ name }}.git
+repo.defbranch={{ cgit_deploys_from.get(name, 'main') }}
+repo.desc=deploys from {{ cgit_deploys_from.get(name, 'main') }}; on GitHub as {{ full }}
+
+{% endfor %}
