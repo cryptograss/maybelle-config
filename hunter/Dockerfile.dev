@@ -32,7 +32,8 @@ RUN if [ -f /tmp/id_ed25519.pub ]; then \
     fi
 
 # Install Claude tools (skip Playwright/Puppeteer for local dev - not needed)
-RUN npm install -g @anthropic-ai/sdk @anthropic-ai/claude-code
+ARG CLAUDE_CODE_VERSION=2.1.322
+RUN npm install -g @anthropic-ai/sdk @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}
 
 # Install Docker CLI
 RUN apt-get update && apt-get install -y \

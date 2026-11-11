@@ -41,12 +41,20 @@ RUN echo "# Enable mouse support" > /etc/tmux.conf && \
     echo "set -g window-size latest" >> /etc/tmux.conf && \
     echo "setw -g aggressive-resize on" >> /etc/tmux.conf
 
-# Install Claude tools and Playwright globally (as root)
-RUN npm install -g @anthropic-ai/sdk @anthropic-ai/claude-code playwright
+# Install the Anthropic SDK and Playwright globally (as root)
+RUN npm install -g @anthropic-ai/sdk playwright
+
+# Claude Code, which magenta's Claude turns run on. Pinned: a new model's alias
+# ('fable' for Fable 5.2) arrives with a new version, and unpinned, the build
+# cache held the old one for days. To update it, raise this and redeploy hunter.
+ARG CLAUDE_CODE_VERSION=2.1.322
+RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}
 
 # Pi, the open-source harness other agents run on (memory-lane poller/pi_harness.py).
 # Pinned: the runner's translation was written against this version's output.
-RUN npm install -g @earendil-works/pi-coding-agent@1.1.0
+# Its built-in model list is the Mood's model menu, so a new model needs a new Pi.
+ARG PI_VERSION=1.5.2
+RUN npm install -g @earendil-works/pi-coding-agent@${PI_VERSION}
 
 # PickiPedia's MCP server, as every agent and magent run it: our fork of
 # upstream's (cryptograss/pickipedia-mcp), which marks a bot's article edits
