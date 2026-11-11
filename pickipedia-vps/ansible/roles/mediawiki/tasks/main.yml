@@ -281,6 +281,23 @@
     - "{{ mediawiki_root }}/images"
     - "{{ mediawiki_root }}/cache"
 
+# The search index holds rows for pages that no longer exist. Special:Search turns each hit into
+# a Title from the page row it joins, and a hit whose page is gone becomes an empty Title, so
+# MediaWiki throws "This Title instance does not represent a proper page" (PreconditionException)
+# and the whole search fails: "train", "railroad", "Squats"... (Justin, #ops, 11 Nov 2026; the
+# deleted Blue Railroad leaderboards, BlueRailroad:Token pages and files). Body text was stale
+# too: "fitness" and "OVEN MITT" found nothing. rebuildtextindex.php rebuilds it from the pages
+# as they are; raise searchindex_version to run it again.
+- name: Rebuild the search index (once per searchindex_version)
+  shell: >-
+    docker exec pickipedia-wiki php /var/www/html/maintenance/rebuildtextindex.php
+    && touch /var/lib/pickipedia-searchindex-v{{ searchindex_version | default(1) }}
+  args:
+    creates: "/var/lib/pickipedia-searchindex-v{{ searchindex_version | default(1) }}"
+  # On a fresh box with no wiki database yet this fails; the marker isn't written, so the next
+  # deploy tries again, and the rest of this one goes on.
+  ignore_errors: true
+
 - name: Create migration import script
   copy:
     dest: /usr/local/bin/import-pickipedia-backup.sh
@@ -331,6 +348,8 @@
       echo ""
       echo "Running MediaWiki update script..."
       docker exec pickipedia-wiki php /var/www/html/maintenance/update.php --quick
+      # A dump's search index can name pages the dump no longer has: rebuild it from the pages.
+      docker exec pickipedia-wiki php /var/www/html/maintenance/rebuildtextindex.php
 
       # Restart container to pick up changes
       docker restart pickipedia-wiki
