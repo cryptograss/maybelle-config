@@ -31,6 +31,10 @@
       emergent-re: [re]
       emergent-blu: [blu]
       hunter: {names: [mirror], fetch_only: true}
+    # People who push their own branches (<name>/*) from their own machines, by the key hunter's inventory knows
+    # them by, through maybelle as a jump host (Justin, #ramp, 11 Nov: "add the githouse remote to my local repos").
+    # Merging stays a signed order. GitHub as a dumb mirror needs everyone who writes code to come in here.
+    githouse_people: [justin]
     # Who may merge a branch without a pull request: `magenta.sh merge <repo>:<branch>`,
     # signed with their SSH key and checked by githouse (Plan, section 8). Justin added
     # skyler on 7 Nov (#ramp, #m-39e5f25f).

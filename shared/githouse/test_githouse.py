@@ -288,6 +288,26 @@ class GithouseTest(Repos):
         self.assertTrue(all(',restrict ' in line and 'no-pty' not in line for line in lines))
         self.assertIn('emergent-blu/blu.pub is not one public key', (self.root / 'githouse.log').read_text())
 
+    def test_a_person_by_their_inventory_key(self):
+        # Justin, #ramp, 11 Nov: the githouse remote on his laptop, through maybelle. people.json, from the inventory.
+        pub = 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGQ6Z3lmZmJhcmJhemJhemJhemJhemJhemJhemJhemJhemJh jmyles@laptop'
+        keys = self.tmp / 'keys'
+        (keys / 'emergent-re').mkdir(parents=True)
+        (keys / 'emergent-re' / 're.pub').write_text(pub + '\n')
+        people = {'justin': pub, 're': pub, 'skyler': pub + '\n' + pub, 'Bad Name': pub}
+        lines = githouse.authorized_keys(keys, {'emergent-re': ['re']}, people).splitlines()
+        self.assertEqual(len(lines), 2)   # re's own (the container's), and justin's; not a second re, nor two keys
+        self.assertTrue(lines[1].endswith(f' auth justin",restrict {pub}'))
+        said = (self.root / 'githouse.log').read_text()
+        self.assertIn("'re' is not a name, or a container vouches for it already", said)
+        self.assertIn('skyler has not one public key', said)
+
+    def test_a_person_pushes_their_own_branches_only(self):
+        self.commit(self.work, 'from a laptop')
+        self.assertEqual(self.push('justin', 'HEAD:justin/try')[0], 0)
+        self.assertNotEqual(self.push('justin', 'HEAD:re/try')[0], 0)
+        self.assertNotEqual(self.push('justin', 'HEAD:production')[0], 0)
+
     def test_write_authorized_keys_replaces_the_whole_file(self):
         etc = self.tmp / 'etc'
         (etc / 'keys' / 'emergent-re').mkdir(parents=True)

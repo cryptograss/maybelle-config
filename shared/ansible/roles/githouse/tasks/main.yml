@@ -63,6 +63,19 @@
 # file: only githouse_mergers, by the key hunter's inventory knows them by, in
 # a namespace of its own, so a sign-in signature (magenta-moods) is never a
 # merge. Cryptograss:Moods/ramp/Plan, section 8. Read as maybelle.yml reads
+# People's own keys, from hunter's inventory, for those githouse_people names: each pushes <name>/* from their own
+# machine (githouse.authorized_keys). Not relayed through hunter, and not in keys/, which the relay pulls whole.
+- name: Who may push from their own machine, by the key hunter's inventory knows them by
+  copy:
+    dest: "{{ githouse_dir }}/etc/people.json"
+    mode: '0644'
+    content: |
+      {
+      {% for user in (lookup('file', playbook_dir ~ '/../../hunter/ansible/inventory.yml') | from_yaml).all.vars.people if user.name in (githouse_people | default([])) and (user.ssh_pubkey | default('') | trim) is match('ssh-') %}
+        {{ user.name | to_json }}: {{ user.ssh_pubkey | trim | to_json }}{{ ',' if not loop.last else '' }}
+      {% endfor %}
+      }
+
 # allowed_signers: lookup('file') | from_yaml, the vault templates untouched.
 - name: Who may merge, by their keys (githouse checks merge orders against this, not memory-lane)
   copy:
