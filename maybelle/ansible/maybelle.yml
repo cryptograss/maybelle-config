@@ -853,6 +853,18 @@
       include_role:
         name: githouse
 
+    # Its repositories to read in a browser, read-only, at code.maybelle.cryptograss.live (the *.maybelle
+    # name resolves already). Justin, #ramp, 11 Nov: "cgit with Pygments, go ahead and build it".
+    - name: cgit, githouse's repositories in a browser
+      include_role:
+        name: cgit
+      vars:
+        cgit_port: 8890
+        cgit_githouse_host: maybelle.cryptograss.live
+        # The branch each opens on: the one it deploys from (memory-lane's merge_orders.DEPLOYS_FROM).
+        cgit_deploys_from: {magenta: main, maybelle-config: production, pickipedia: production, arthel: production,
+                            rabbithole: main, pickipedia-mcp: master}
+
     - name: Remove old rsync cron if exists
       ansible.builtin.cron:
         name: "push sites to prod"

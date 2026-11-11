@@ -163,7 +163,7 @@
           volumes:
             - {{ githouse_dir }}/git:/srv/git
             - {{ githouse_dir }}/etc:/etc/githouse:ro
-          # ssh on the private network only (githouse_bind is asserted private above).
+          # ssh on the private address, or on every address with githouse_public (see the assertion above).
           ports:
             - "{{ '0.0.0.0' if githouse_public | default(false) | bool else githouse_bind }}:{{ githouse_port }}:22"
           mem_limit: 512m
