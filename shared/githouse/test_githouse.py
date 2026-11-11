@@ -531,6 +531,17 @@ class SecretTest(Repos):
         self.add('keys.js', f'const key = "0x{self.VAULT_VALUE}";\n')
         self.assertTrue(self.refused('HEAD:re/foo'))
 
+    def test_a_vault_value_among_a_binary_s_bytes(self):
+        # Only printable runs are looked in (11 Nov: hashing every stretch of arthel's binaries took hours); a value
+        # with a binary's bytes on either side of it is still a printable run, and still found.
+        (self.work / 'blob.bin').write_bytes(b'\x00\x89PNG\x1a' + self.VAULT_VALUE.encode() + b'\xff\x00\x10tail')
+        run('git', 'add', 'blob.bin', cwd=self.work)
+        run('git', 'commit', '--quiet', '-m', 'a binary', cwd=self.work)
+        self.assertTrue(self.refused('HEAD:re/foo'))
+        vault = githouse.secret_hashes(self.etc)
+        self.assertIsNone(githouse._vault_value_in('\x00' * 5000 + 'é' * 40, vault))   # no printable run long enough
+        self.assertEqual(githouse._vault_value_in('\x01\x02' + self.VAULT_VALUE + '\x03', vault), len(self.VAULT_VALUE))
+
     def test_inside_a_longer_word_is_still_not_seen(self):
         # The limit of matching by hashes, said in a test: glued inside a word, no stretch starts at it.
         self.add('a.txt', f'abc{self.VAULT_VALUE}\n')

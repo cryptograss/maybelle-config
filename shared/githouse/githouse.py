@@ -252,25 +252,34 @@ def secret_hashes(etc=None):
         return (), set()
 
 
+_PRINTABLE = re.compile(r'[\x20-\x7e]+')   # a vault value is printable ASCII: where to look for one at all
+_ALNUM = re.compile(r'[^\W_]')
+
+
 def _vault_value_in(line, vault):
     """The length of a vault value in this line, or None. Each stretch that starts and ends where a word
     does (not inside one), or starts right after a word's 0x (a hex key pasted as 0x<key>, re), of a length
-    some value has, is hashed and looked up."""
+    some value has, is hashed and looked up. Only within runs of printable ASCII: a binary's --text diff is
+    mostly not, and hashing every stretch of it took the scan hours (11 Nov)."""
     lengths, hashes = vault
-    if not hashes:
+    if not hashes or not lengths:
         return None
-    n = len(line)
-    for i in range(n):
-        if i and line[i - 1].isalnum() and not (line[i - 2:i] in ('0x', '0X') and (i == 2 or not line[i - 3].isalnum())):
+    shortest, n = lengths[0], len(line)
+    for run in _PRINTABLE.finditer(line):
+        a, b = run.span()
+        if b - a < shortest:
             continue
-        for length in lengths:
-            j = i + length
-            if j > n:
-                break
-            if j < n and line[j].isalnum():
+        for i in range(a, b - shortest + 1):
+            if i and line[i - 1].isalnum() and not (line[i - 2:i] in ('0x', '0X') and (i == 2 or not line[i - 3].isalnum())):
                 continue
-            if hashlib.sha256(line[i:j].encode()).hexdigest() in hashes:
-                return length
+            for length in lengths:
+                j = i + length
+                if j > b:
+                    break
+                if j < n and line[j].isalnum():
+                    continue
+                if hashlib.sha256(line[i:j].encode()).hexdigest() in hashes:
+                    return length
     return None
 
 
