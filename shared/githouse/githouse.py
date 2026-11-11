@@ -413,10 +413,13 @@ def test_branch(repo, branch, commit, etc=None):
         return False
 
 
-def authorized_keys(keys_dir, pushers):
+def authorized_keys(keys_dir, pushers, people=None):
     """sshd's authorized_keys from the relayed public keys: for each container pushers.json names,
     each name it may vouch for whose <name>.pub is there and is one key. A key may only run
-    `githouse auth <name>` (fetch-only where pushers.json says so): no shell, no forwarding."""
+    `githouse auth <name>` (fetch-only where pushers.json says so): no shell, no forwarding.
+    And people, by the key hunter's inventory knows each by (people.json, {name: key}, for the names
+    githouse_people lists): from a laptop, through maybelle (Justin, #ramp, 11 Nov: "add the githouse remote to
+    my local repos"). A person pushes <name>/* as an emergent does, and merges only by a signed order."""
     lines = []
     for container, given in sorted(pushers.items()):
         names = given.get('names', []) if isinstance(given, dict) else given
@@ -433,6 +436,16 @@ def authorized_keys(keys_dir, pushers):
                 continue
             flag = ' --fetch-only' if fetch_only else ''
             lines.append(f'command="{sys.executable} {Path(__file__).resolve()} auth{flag} {name}",restrict {key}')
+    vouched = {line.rsplit(' auth', 1)[1].split('"', 1)[0].split()[-1] for line in lines}
+    for name, key in sorted((people or {}).items()):
+        key = str(key or '').strip()
+        if not NAME.fullmatch(str(name)) or name in vouched:
+            log(f'people.json: {name!r} is not a name, or a container vouches for it already; skipped')
+            continue
+        if '\n' in key or not PUBKEY.match(key):
+            log(f'people.json: {name} has not one public key; skipped')
+            continue
+        lines.append(f'command="{sys.executable} {Path(__file__).resolve()} auth {name}",restrict {key}')
     return '\n'.join(lines) + ('\n' if lines else '')
 
 
@@ -440,7 +453,9 @@ def write_authorized_keys():
     """The keys as relayed now, to the file sshd reads. Nothing kept from before."""
     pushers_file = ETC / 'pushers.json'
     pushers = json.loads(pushers_file.read_text()) if pushers_file.exists() else {}
-    text = authorized_keys(ETC / 'keys', pushers)
+    people_file = ETC / 'people.json'
+    people = json.loads(people_file.read_text()) if people_file.exists() else {}
+    text = authorized_keys(ETC / 'keys', pushers, people)
     path = ROOT / '.authorized_keys'
     if not path.exists() or path.read_text() != text:
         temp = path.with_suffix('.tmp')

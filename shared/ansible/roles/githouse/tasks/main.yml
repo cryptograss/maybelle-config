@@ -16,9 +16,15 @@
 # githouse_device_signer_key (memory-lane's public merge key, for the merge button; unset, no button);
 # githouse_jenkins_url, jenkins_reporter_password (branch tests on Jenkins; unset, none asked for);
 # githouse_brakes_url (memory-lane's /api/brakes/: unset, nothing merges);
-# githouse_orders_url (memory-lane's /api/merge-orders/pending/: unset, no orders by mail).
+# githouse_orders_url (memory-lane's /api/merge-orders/pending/: unset, no orders by mail);
+# githouse_public (true: ssh on every address, so people reach it from their own machines; unset, private only).
 
-- name: githouse listens on the private network only, never 0.0.0.0
+# Private only, at first (Plan, section 3). Public since 11 Nov, by githouse_public (Justin, #ramp: "is it not
+# practical for githouse to function as an ordinary git remote that people can update from?" ... "Go ahead"):
+# a person without root on maybelle had no way in. What's exposed is sshd itself: keys only, the git user only,
+# every key forced to `githouse auth <name>`, no shell, TTY or forwarding (sshd_config). The private address
+# stays, for hunter's mirror and the containers.
+- name: githouse's private address is private, and its port isn't a system one
   assert:
     that:
       - githouse_bind is match('^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.)')
@@ -63,6 +69,19 @@
 # file: only githouse_mergers, by the key hunter's inventory knows them by, in
 # a namespace of its own, so a sign-in signature (magenta-moods) is never a
 # merge. Cryptograss:Moods/ramp/Plan, section 8. Read as maybelle.yml reads
+# People's own keys, from hunter's inventory, for those githouse_people names: each pushes <name>/* from their own
+# machine (githouse.authorized_keys). Not relayed through hunter, and not in keys/, which the relay pulls whole.
+- name: Who may push from their own machine, by the key hunter's inventory knows them by
+  copy:
+    dest: "{{ githouse_dir }}/etc/people.json"
+    mode: '0644'
+    content: |
+      {
+      {% for user in (lookup('file', playbook_dir ~ '/../../hunter/ansible/inventory.yml') | from_yaml).all.vars.people if user.name in (githouse_people | default([])) and (user.ssh_pubkey | default('') | trim) is match('ssh-') %}
+        {{ user.name | to_json }}: {{ user.ssh_pubkey | trim | to_json }}{{ ',' if not loop.last else '' }}
+      {% endfor %}
+      }
+
 # allowed_signers: lookup('file') | from_yaml, the vault templates untouched.
 - name: Who may merge, by their keys (githouse checks merge orders against this, not memory-lane)
   copy:
@@ -146,7 +165,7 @@
             - {{ githouse_dir }}/etc:/etc/githouse:ro
           # ssh on the private network only (githouse_bind is asserted private above).
           ports:
-            - "{{ githouse_bind }}:{{ githouse_port }}:22"
+            - "{{ '0.0.0.0' if githouse_public | default(false) | bool else githouse_bind }}:{{ githouse_port }}:22"
           mem_limit: 512m
           cpus: 0.5
           restart: unless-stopped
@@ -158,14 +177,16 @@
 
 # `docker port githouse 22` prints one "<address>:<port>" line per binding (re's review, 6 Nov: the
 # first check here matched the line's start and failed every correct deploy). Every line must carry the
-# private address, and there must be one.
-- name: githouse's ssh is published on the private address and nowhere else
+# private address, and there must be one. Public (githouse_public): every line is 0.0.0.0 or [::], which the
+# private address is reached through as well.
+- name: githouse's ssh is published where githouse_public says, and nowhere else
   command: docker port githouse 22
   register: githouse_port_check
   changed_when: false
   failed_when: >-
     githouse_port_check.stdout_lines | length == 0
-    or githouse_port_check.stdout_lines | reject('search', (githouse_bind | regex_escape) ~ ':' ~ githouse_port ~ '$') | list | length > 0
+    or githouse_port_check.stdout_lines | reject('search', ('^(0\\.0\\.0\\.0|\\[::\\])' if githouse_public | default(false) | bool
+                                                            else '^' ~ (githouse_bind | regex_escape)) ~ ':' ~ githouse_port ~ '$') | list | length > 0
 
 # Any HTTP answer will do here (memory-lane may not serve /api/brakes/ yet): this is about the network.
 # If githouse can't reach memory-lane at all, every merge order is refused, so say so at the deploy.
