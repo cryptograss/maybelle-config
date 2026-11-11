@@ -286,6 +286,22 @@ def _git_text(repo, *args):
     return done.stdout.decode('utf-8', 'replace')
 
 
+def _git_lines(repo, *args):
+    """git's output a line at a time, as text, never all of it at once. arthel's whole history as diffs is
+    600 MB; held whole, then decoded and split, it outgrew githouse's 512 MB and the kernel killed the scan
+    before it printed a line (Justin's empty scan on maybelle, 11 Nov)."""
+    with tempfile.TemporaryFile() as errors:
+        git_log = subprocess.Popen(['git', '--git-dir', str(repo), *args], stdout=subprocess.PIPE, stderr=errors)
+        try:
+            for raw in git_log.stdout:
+                yield raw.rstrip(b'\n').decode('utf-8', 'replace')
+        finally:
+            git_log.stdout.close()
+            if git_log.wait() > 0:  # not a signal: a pipe we closed early ends git with SIGPIPE
+                errors.seek(0)
+                raise RuntimeError(f"git {' '.join(args)}: {errors.read().decode('utf-8', 'replace').strip()}")
+
+
 def secrets_in(repo, revs, vault):
     """[(commit, where, what)] in the commits revs name: every line of every message, in a pass of its own;
     and every line of every diff but removals, headers too (a file's name), binaries as text (--text), a
@@ -305,8 +321,8 @@ def secrets_in(repo, revs, vault):
                 found.append((commit.strip(), 'its message', what))
     commit = where = ''
     in_header = False
-    for line in _git_text(repo, 'log', '-p', '-U0', '--text', '--remerge-diff', '--no-color', '--no-ext-diff',
-                          '--no-textconv', '--format=commit %H', *revs).split('\n'):
+    for line in _git_lines(repo, 'log', '-p', '-U0', '--text', '--remerge-diff', '--no-color', '--no-ext-diff',
+                           '--no-textconv', '--format=commit %H', *revs):
         if line.startswith('commit ') and SHA.fullmatch(line[7:]):
             commit, where, in_header = line[7:], '', False
             continue
@@ -1016,7 +1032,7 @@ def main(argv):
         found = 0
         for name in names:
             for commit, where, what in scan(ROOT / f'{name}.git'):
-                print(f'{name} {commit[:8]} {where}: {what}')
+                print(f'{name} {commit[:8]} {where}: {what}', flush=True)
                 found += 1
         print(f'{found} found, in {len(names)} repositories' + ('' if secret_hashes()[1] else
               f' (no {SECRETS_FILE} here: shapes only, not the vault\'s values)'))
