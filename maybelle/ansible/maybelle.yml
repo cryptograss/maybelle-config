@@ -17,10 +17,13 @@
     caddy_config_type: "maybelle"  # Use maybelle-specific Caddyfile template
     # githouse, our canonical copies of the repositories (shared/ansible/roles/githouse;
     # Cryptograss:Moods/ramp/Plan, section 3). Reached by hunter's containers on the
-    # private network only: never a public address here.
+    # private network, and by people on the public address too (githouse_public, below).
     githouse_dir: /mnt/persist/githouse
     githouse_bind: "10.0.0.2"
     githouse_port: 2222
+    # On maybelle's public address too, so people push from their own machines without a jump host (Justin,
+    # #ramp, 11 Nov): ssh://git@maybelle.cryptograss.live:2222/<repo>.git. The role says what that exposes.
+    githouse_public: true
     githouse_repos: "{{ lookup('file', playbook_dir + '/../../shared/githouse/repos.txt').splitlines() | select('match', '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$') | list }}"
     # Who may push, and as whom: each hunter container (hunter/ansible/inventory.yml
     # users[].name) and the names its relayed keys may vouch for. The trust anchor:
