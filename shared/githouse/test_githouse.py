@@ -936,6 +936,90 @@ class MergeTest(Repos):
         as_justin = self.order()
         self.assertIn('not signed by justin', self.merge(as_justin, self.sign(as_justin, key='memory-lane'))['why'])
 
+    # --- promotion: main brought up to production (Justin, #ramp, 11 Nov) ---
+
+    def ahead_on_production(self, words='released', file=None):
+        """production moves ahead of main, as merges into it do: a branch cut from production, pushed and merged."""
+        run('git', 'fetch', '--quiet', 'origin', cwd=self.work)
+        run('git', 'checkout', '--quiet', '-B', f'cut-{words}', 'origin/production', cwd=self.work)
+        if file:
+            (self.work / file).write_text(words)
+            run('git', 'add', '.', cwd=self.work)
+            run('git', 'commit', '--quiet', '-m', words, cwd=self.work)
+        else:
+            self.commit(self.work, words)
+        self.assertEqual(self.push('re', f'HEAD:re/{words}')[0], 0)
+        head = githouse.refs(self.repo, 'refs/heads/')[f're/{words}']
+        text = self.order(branch=f're/{words}', commit=head, into='production')
+        self.assertEqual(self.merge(text)['outcome'], 'merged')
+        return self.heads()['production']
+
+    def on_github_at(self, branch):
+        return run('git', '--git-dir', str(self.github), 'rev-parse', branch)[1].strip()
+
+    def test_a_promotion_fast_forwards_main_to_production(self):
+        production = self.ahead_on_production()
+        result = self.merge(self.order(branch='production', commit=production))
+        self.assertEqual((result['outcome'], result['promoted']), ('merged', 'fast-forward'), result)
+        self.assertEqual(self.heads()['main'], production)   # exactly production: no merge commit
+        self.assertEqual(self.on_github_at('main'), production)
+
+    def test_main_s_own_commits_stay_and_its_files_become_production_s(self):
+        production = self.ahead_on_production()
+        mains_own = self.merge(self.order())['merge']   # re/foo merged into main only (pickipedia's #155)
+        result = self.merge(self.order(branch='production', commit=production))
+        self.assertEqual((result['outcome'], result['promoted']), ('merged', 'merge'), result)
+        promoted = self.heads()['main']
+        parents = run('git', '--git-dir', str(self.repo), 'rev-list', '--parents', '-n', '1', promoted)[1].split()
+        self.assertEqual(parents[1:], [mains_own, production])   # never forced: main's line goes on
+        tree = lambda rev: run('git', '--git-dir', str(self.repo), 'rev-parse', f'{rev}^{{tree}}')[1].strip()
+        self.assertEqual(tree(promoted), tree(production))       # what main holds is what deploys
+        self.assertIn('Promote magenta: main to production', run('git', '--git-dir', str(self.repo), 'log', '-1', '--format=%B', promoted)[1])
+        self.assertEqual(self.on_github_at('main'), promoted)
+
+    def test_a_promotion_that_conflicts_still_lands_production_s_files(self):
+        production = self.ahead_on_production('fixed', file='the fix.txt')   # production and main each write it
+        (self.upstream / 'the fix.txt').write_text('something else')
+        run('git', 'add', '.', cwd=self.upstream)
+        run('git', 'commit', '--quiet', '-m', 'on main', cwd=self.upstream)
+        run('git', 'push', '--quiet', 'origin', 'HEAD:main', cwd=self.upstream)
+        githouse.adopt(self.repo, 'main')
+        result = self.merge(self.order(branch='production', commit=production))
+        self.assertEqual(result['outcome'], 'merged', result)
+        shown = run('git', '--git-dir', str(self.repo), 'show', 'main:the fix.txt')[1]
+        self.assertEqual(shown, 'fixed')
+
+    def test_a_promotion_is_of_production_as_it_is_now(self):
+        before = self.ahead_on_production('first')
+        self.ahead_on_production('second')
+        result = self.merge(self.order(branch='production', commit=before))
+        self.assertEqual(result['outcome'], 'refused')
+        self.assertIn('production has moved here', result['why'])
+
+    def test_nothing_to_promote(self):
+        result = self.merge(self.order(branch='production', commit=self.heads()['production']))
+        self.assertIn('main has production already', result['why'])
+
+    def test_only_production_into_main(self):
+        for branch, into in (('main', 'production'), ('production', 'master'), ('master', 'main')):
+            with self.subTest(branch=branch, into=into):
+                result = self.merge(self.order(branch=branch, commit=self.heads()['main'], into=into))
+                self.assertEqual(result['outcome'], 'refused')
+                self.assertIn('not a branch that merges', result['why'])
+
+    def test_a_promotion_is_braked_like_any_merge(self):
+        production = self.ahead_on_production()
+        self.scram = True
+        result = self.merge(self.order(branch='production', commit=production))
+        self.assertIn('AZ5', result['why'])
+        self.assertNotEqual(self.heads()['main'], production)
+
+    def test_root_promotes_by_hand(self):
+        production = self.ahead_on_production()
+        result = githouse.promote(self.repo, production, 'root', 'By root.')
+        self.assertEqual(result['promoted'], 'fast-forward')
+        self.assertEqual(self.heads()['main'], production)
+
     def test_not_an_order(self):
         self.assertEqual(self.merge('merge everything please', 'x')['why'], 'not a merge order')
 
