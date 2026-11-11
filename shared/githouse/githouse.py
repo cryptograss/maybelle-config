@@ -57,6 +57,11 @@ meant to be cheap to lose.
   Orders arrive by mail: memory-lane keeps them, unread, and githouse fetches them every few seconds and
   checks each itself (8 Nov: only Justin has ssh to maybelle). Brakes stop it (section 10): root's freeze (/etc/githouse/frozen), AZ5, or a ban on the signer, the
   last two asked of memory-lane at every order. Its answer can only stop a merge; no answer stops it too.
+* Promotion (Justin, #ramp, 11 Nov): machines run production; main is the primary branch, never
+  forced, brought up to production by a person when things are stable. A signed order with
+  `branch: production` and `into: main` does it (the ramp's button), or root on maybelle, by hand:
+  `docker exec -u git githouse githouse promote <repo>`. A fast-forward where main is behind; where main
+  has commits of its own, a merge whose files are production's, so main's history is kept, never forced.
 * A push that carries a secret is refused, before anything else holds a copy (Skyler and Justin, #ramp,
   10 Nov; re's design): any value from the vault, exactly, as the scrubber has them (/etc/githouse/
   secret-hashes.json: SHA-256 of each, never the values), in any line a commit adds, merges included, or
@@ -88,6 +93,9 @@ from pathlib import Path
 ROOT = Path(os.environ.get('GITHOUSE_ROOT', '/srv/git'))
 ETC = Path(os.environ.get('GITHOUSE_ETC', '/etc/githouse'))
 OWNED = ('main', 'master', 'production', 'release/*')  # the deploy branches: githouse's since the flip
+# Promotion (Justin, #ramp, 11 Nov): machines run production; main is the primary branch, never forced, brought up
+# to production by a person when things are stable. The one deploy branch that goes into another.
+PROMOTES = {'production': 'main'}
 NAME = re.compile(r'[a-z][a-z0-9-]{0,31}')
 BRANCH = re.compile(r'[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*')
 PUBKEY = re.compile(r'^(sk-)?(ssh-ed25519|ecdsa-sha2-nistp\d+|ssh-rsa)(@openssh\.com)? [A-Za-z0-9+/=]+( \S+)?$')
@@ -665,8 +673,10 @@ def parse_order(text):
         raise Refused(f"for: {found[FOR_FIELD]!r} isn't a person's name")
     if not NAME.fullmatch(found['by']) or not NONCE.fullmatch(found['nonce']) or not SHA.fullmatch(found['commit']):
         raise Refused('by, nonce or commit is malformed')
-    if not BRANCH.fullmatch(found['branch']) or owned(found['branch']):
-        raise Refused(f"{found['branch']}: not a branch that merges (the deploy branches don't)")
+    promotion = PROMOTES.get(found['branch']) == found['into']
+    if not BRANCH.fullmatch(found['branch']) or (owned(found['branch']) and not promotion):
+        raise Refused(f"{found['branch']}: not a branch that merges (the deploy branches don't, but production "
+                      f"into main)")
     if not owned(found['into']) or not BRANCH.fullmatch(found['into']):
         raise Refused(f"{found['into']}: a merge goes into one of {', '.join(OWNED)}")
     try:
@@ -755,6 +765,11 @@ def merge(text, signature, now=None, signers=None, brakes_url=None):
 
 def _merge(repo, order):
     branch, commit, into = order['branch'], order['commit'], order['into']
+    if owned(branch):  # parse_order let it through: production into main
+        person = order.get(FOR_FIELD, order['by'])
+        signed = (f"Signed by {order['by']}" if person == order['by'] else
+                  f"Pressed by {person}, signed by {order['by']}")
+        return promote(repo, commit, person, f"{signed} (githouse merge order {order['nonce'][:12]}).", branch, into)
     # The target is githouse's own deploy branch (the flip): GitHub's is only a mirror of it.
     tip = refs(repo, 'refs/heads/').get(into)
     if tip is None:
@@ -807,6 +822,49 @@ def _merge(repo, order):
         publish()
     except RuntimeError as e:
         log(f'{repo.name}: merged {merged[:8]}; {e}')
+    return result
+
+
+def promote(repo, commit, person, why, source='production', into='main'):
+    """main brought up to production, exactly at commit, which must be githouse's production now. A fast-forward
+    where main is behind; where main has commits of its own, a merge whose files are production's: main's own
+    commits stay in its history, never forced away, and what deploys is what main becomes (pickipedia's main
+    held #155, which production has another way). {'outcome': 'merged', 'merge', 'onto', 'promoted': 'fast-forward' or 'merge'}."""
+    if PROMOTES.get(source) != into:
+        raise Refused(f'{source} is not promoted into {into}')
+    heads = refs(repo, 'refs/heads/')
+    tip, now = heads.get(into), heads.get(source)
+    if now is None or tip is None:
+        raise Refused(f'{repo.name[:-4]} has no {source if now is None else into} here')
+    if now != commit:
+        raise Refused(f'{source} has moved here ({now[:8]}); promote what it is now')
+    if _ancestor(repo, commit, tip):
+        raise Refused(f'{into} has {source} already ({commit[:8]})')
+    if _ancestor(repo, tip, commit):
+        promoted, how = commit, 'fast-forward'
+    else:
+        message = (f"Promote {repo.name[:-4]}: {into} to {source} ({commit[:8]})\n\n"
+                   f"{into} had commits of its own; they stay in its history, and its files are {source}'s now.\n"
+                   f"{why}\n")
+        who = {'GIT_AUTHOR_NAME': person, 'GIT_AUTHOR_EMAIL': f'{person}@githouse',
+               'GIT_COMMITTER_NAME': 'githouse', 'GIT_COMMITTER_EMAIL': 'githouse@maybelle'}
+        promoted = git(repo, 'commit-tree', f'{commit}^{{tree}}', '-p', tip, '-p', commit, '-m', message, env=who).strip()
+        how = 'merge'
+    if git(repo, 'update-ref', f'refs/heads/{into}', promoted, tip, check=False) is None:
+        raise Refused(f'{into} moved here meanwhile; promote again')
+    # 'merged', as any merge: memory-lane, the CLI and the Moods read that word; 'promoted' says how.
+    result = {'outcome': 'merged', 'merge': promoted, 'onto': tip, 'promoted': how}
+    pushed = subprocess.run(['git', '--git-dir', str(repo), 'push', '--quiet', 'github', f'{promoted}:refs/heads/{into}'],
+                            capture_output=True, text=True)
+    if pushed.returncode == 0:
+        git(repo, 'update-ref', f'refs/github/{into}', promoted, check=False)
+    else:
+        result['github'] = f'not yet: {pushed.stderr.strip()[:200]}'
+    log(f'{repo.name}: {person} promoted {into} to {source} at {commit[:8]} ({how}){"" if pushed.returncode == 0 else "; GitHub refused it for now"}')
+    try:
+        publish()
+    except RuntimeError as e:
+        log(f'{repo.name}: promoted {promoted[:8]}; {e}')
     return result
 
 
@@ -1051,6 +1109,26 @@ def main(argv):
             sys.stderr.write(f'githouse: {e}\n')
             return 1
         print('\n'.join(taken) if taken else f'{args[2]} is already GitHub\'s; nothing taken')
+        return 0
+    if command == 'promote':  # promote <repo>: root brings main up to production, on maybelle, by hand
+        if os.geteuid() == 0:
+            sys.stderr.write('githouse: promote as git (docker exec -u git), so what it writes stays git\'s\n')
+            return 2
+        if len(args) != 2 or not NAME.fullmatch(args[1]) or not (ROOT / f'{args[1]}.git' / 'HEAD').exists():
+            sys.stderr.write('githouse: promote <repo>, a repository here\n')
+            return 2
+        repo = ROOT / f'{args[1]}.git'
+        try:
+            with MERGING:
+                now = refs(repo, 'refs/heads/').get('production')
+                if now is None:
+                    raise Refused(f'{args[1]} has no production here')
+                done = promote(repo, now, 'root', 'By root on maybelle (githouse promote).')
+        except (Refused, RuntimeError) as e:
+            sys.stderr.write(f'githouse: {e}\n')
+            return 1
+        print(f"main is production now, at {now[:8]} ({done['promoted']}: {done['merge'][:8]})"
+              + (f"; GitHub {done['github']}" if 'github' in done else ''))
         return 0
     if command == 'loop':
         loop()
