@@ -964,18 +964,23 @@ class MergeTest(Repos):
         self.assertEqual(self.heads()['main'], production)   # exactly production: no merge commit
         self.assertEqual(self.on_github_at('main'), production)
 
-    def test_main_s_own_commits_stay_and_its_files_become_production_s(self):
+    def test_main_s_own_commits_join_production_and_main_fast_forwards(self):
         production = self.ahead_on_production()
         mains_own = self.merge(self.order())['merge']   # re/foo merged into main only (pickipedia's #155)
         result = self.merge(self.order(branch='production', commit=production))
         self.assertEqual((result['outcome'], result['promoted']), ('merged', 'merge'), result)
-        promoted = self.heads()['main']
-        parents = run('git', '--git-dir', str(self.repo), 'rev-list', '--parents', '-n', '1', promoted)[1].split()
-        self.assertEqual(parents[1:], [mains_own, production])   # never forced: main's line goes on
+        heads = self.heads()
+        self.assertEqual(heads['main'], heads['production'])      # level: the next promotion fast-forwards
+        self.assertEqual(heads['main'], result['merge'])
+        parents = run('git', '--git-dir', str(self.repo), 'rev-list', '--parents', '-n', '1', result['merge'])[1].split()
+        self.assertEqual(parents[1:], [production, mains_own])    # production's line first; main's commits kept
         tree = lambda rev: run('git', '--git-dir', str(self.repo), 'rev-parse', f'{rev}^{{tree}}')[1].strip()
-        self.assertEqual(tree(promoted), tree(production))       # what main holds is what deploys
-        self.assertIn('Promote magenta: main to production', run('git', '--git-dir', str(self.repo), 'log', '-1', '--format=%B', promoted)[1])
-        self.assertEqual(self.on_github_at('main'), promoted)
+        self.assertEqual(tree(result['merge']), tree(production))   # production's files, unchanged: nothing deploys
+        self.assertTrue(githouse._ancestor(self.repo, mains_own, heads['production']))
+        self.assertEqual((self.on_github_at('main'), self.on_github_at('production')), (result['merge'], result['merge']))
+        # And afterwards, it's a fast-forward every time.
+        later = self.ahead_on_production('later')
+        self.assertEqual(self.merge(self.order(branch='production', commit=later))['promoted'], 'fast-forward')
 
     def test_a_promotion_that_conflicts_still_lands_production_s_files(self):
         production = self.ahead_on_production('fixed', file='the fix.txt')   # production and main each write it

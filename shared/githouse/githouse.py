@@ -61,7 +61,8 @@ meant to be cheap to lose.
   forced, brought up to production by a person when things are stable. A signed order with
   `branch: production` and `into: main` does it (the ramp's button), or root on maybelle, by hand:
   `docker exec -u git githouse githouse promote <repo>`. A fast-forward where main is behind; where main
-  has commits of its own, a merge whose files are production's, so main's history is kept, never forced.
+  has commits of its own, production takes them in first (a merge that changes none of its files) and main
+  fast-forwards to that. Nothing is forced, and main stays an ancestor of production from then on.
 * A push that carries a secret is refused, before anything else holds a copy (Skyler and Justin, #ramp,
   10 Nov; re's design): any value from the vault, exactly, as the scrubber has them (/etc/githouse/
   secret-hashes.json: SHA-256 of each, never the values), in any line a commit adds, merges included, or
@@ -826,10 +827,14 @@ def _merge(repo, order):
 
 
 def promote(repo, commit, person, why, source='production', into='main'):
-    """main brought up to production, exactly at commit, which must be githouse's production now. A fast-forward
-    where main is behind; where main has commits of its own, a merge whose files are production's: main's own
-    commits stay in its history, never forced away, and what deploys is what main becomes (pickipedia's main
-    held #155, which production has another way). {'outcome': 'merged', 'merge', 'onto', 'promoted': 'fast-forward' or 'merge'}."""
+    """main brought up to production, exactly at commit, which must be githouse's production now. Afterwards main
+    and production are the same commit, so the next promotion is a fast-forward, and main is always an ancestor of
+    production (maybelle-config's deploy scripts refuse to deploy otherwise).
+    * main behind production: main fast-forwards to it.
+    * main with commits of its own (pickipedia's #155, which production has another way): production takes main in
+      first, as a merge whose files are production's own, unchanged (parents: production, then main), and main
+      fast-forwards to that. Nothing is forced, main's commits stay in history, and nothing that deploys changes.
+    {'outcome': 'merged', 'merge': main's new head, 'onto': main's old one, 'promoted': 'fast-forward' or 'merge'}."""
     if PROMOTES.get(source) != into:
         raise Refused(f'{source} is not promoted into {into}')
     heads = refs(repo, 'refs/heads/')
@@ -840,28 +845,35 @@ def promote(repo, commit, person, why, source='production', into='main'):
         raise Refused(f'{source} has moved here ({now[:8]}); promote what it is now')
     if _ancestor(repo, commit, tip):
         raise Refused(f'{into} has {source} already ({commit[:8]})')
+    moved = [into]
     if _ancestor(repo, tip, commit):
         promoted, how = commit, 'fast-forward'
     else:
-        message = (f"Promote {repo.name[:-4]}: {into} to {source} ({commit[:8]})\n\n"
-                   f"{into} had commits of its own; they stay in its history, and its files are {source}'s now.\n"
-                   f"{why}\n")
+        message = (f"Promote {repo.name[:-4]}: {into}'s own commits into {source}, files unchanged ({tip[:8]})\n\n"
+                   f"{into} had commits {source} hadn't. They join {source}'s history here, with {source}'s files as they "
+                   f"were, so {into} can fast-forward to {source} ({commit[:8]}) and stay behind it from now on.\n{why}\n")
         who = {'GIT_AUTHOR_NAME': person, 'GIT_AUTHOR_EMAIL': f'{person}@githouse',
                'GIT_COMMITTER_NAME': 'githouse', 'GIT_COMMITTER_EMAIL': 'githouse@maybelle'}
-        promoted = git(repo, 'commit-tree', f'{commit}^{{tree}}', '-p', tip, '-p', commit, '-m', message, env=who).strip()
+        promoted = git(repo, 'commit-tree', f'{commit}^{{tree}}', '-p', commit, '-p', tip, '-m', message, env=who).strip()
         how = 'merge'
+        if git(repo, 'update-ref', f'refs/heads/{source}', promoted, commit, check=False) is None:
+            raise Refused(f'{source} moved here meanwhile; promote again')
+        moved.insert(0, source)
     if git(repo, 'update-ref', f'refs/heads/{into}', promoted, tip, check=False) is None:
+        # production holds the merge already: its files are as they were, and promoting again fast-forwards.
         raise Refused(f'{into} moved here meanwhile; promote again')
     # 'merged', as any merge: memory-lane, the CLI and the Moods read that word; 'promoted' says how.
     result = {'outcome': 'merged', 'merge': promoted, 'onto': tip, 'promoted': how}
-    pushed = subprocess.run(['git', '--git-dir', str(repo), 'push', '--quiet', 'github', f'{promoted}:refs/heads/{into}'],
-                            capture_output=True, text=True)
+    pushed = subprocess.run(['git', '--git-dir', str(repo), 'push', '--quiet', 'github',
+                             *(f'{promoted}:refs/heads/{b}' for b in moved)], capture_output=True, text=True)
     if pushed.returncode == 0:
-        git(repo, 'update-ref', f'refs/github/{into}', promoted, check=False)
-    else:
+        for b in moved:
+            git(repo, 'update-ref', f'refs/github/{b}', promoted, check=False)
+    else:  # the minute's reconcile sends them again
         result['github'] = f'not yet: {pushed.stderr.strip()[:200]}'
     log(f'{repo.name}: {person} promoted {into} to {source} at {commit[:8]} ({how}){"" if pushed.returncode == 0 else "; GitHub refused it for now"}')
     try:
+        retire(repo)
         publish()
     except RuntimeError as e:
         log(f'{repo.name}: promoted {promoted[:8]}; {e}')
@@ -1127,7 +1139,7 @@ def main(argv):
         except (Refused, RuntimeError) as e:
             sys.stderr.write(f'githouse: {e}\n')
             return 1
-        print(f"main is production now, at {now[:8]} ({done['promoted']}: {done['merge'][:8]})"
+        print(f"main is production now, at {done['merge'][:8]} ({done['promoted']})"
               + (f"; GitHub {done['github']}" if 'github' in done else ''))
         return 0
     if command == 'loop':
