@@ -1,0 +1,23 @@
+---
+# Run before the caddy role (tasks_from: vault): the Caddyfile takes the hash. Nothing here needs Caddy,
+# docker or the caddy user, so it holds on a fresh box too (re, #performance, 12 Nov).
+#
+# Checked apart from the Caddyfile that uses it, so a missing key fails with its name rather than as an
+# undefined variable inside a template. The hash, not the password, is what the vault holds: Caddy wants a
+# bcrypt hash, and making it at deploy needs Caddy or docker on the box, neither of which is there yet
+# when a fresh box first reaches this point. So a person makes it once:
+#   caddy hash-password --plaintext '<the password>'          (on a box with Caddy)
+#   docker run --rm caddy caddy hash-password --plaintext '<the password>'
+# and puts the output in secrets/vault.yml as stats_password_hash.
+- name: The traffic dashboard's password hash is in the vault
+  ansible.builtin.assert:
+    that:
+      - stats_password_hash is defined
+      - stats_password_hash is string
+      - stats_password_hash.startswith('$2')
+    quiet: true
+    fail_msg: >-
+      The traffic dashboard's password hash is missing from the vault, or isn't a bcrypt hash. Make one with
+      `caddy hash-password --plaintext '<password>'` (or `docker run --rm caddy caddy hash-password ...`) and
+      add it to secrets/vault.yml (ansible-vault edit secrets/vault.yml) as stats_password_hash. It opens
+      /stats/ on the site, as user "stats".

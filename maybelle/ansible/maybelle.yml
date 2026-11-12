@@ -572,19 +572,25 @@
         glitchtip_dsn_fetch_password_hashed: "{{ glitchtip_dsn_password_hash_result.stdout }}"
       no_log: true
 
-    # The traffic dashboard: GoAccess over Caddy's access log of magenta, at
-    # magenta.cryptograss.live/stats/ (#performance, 12 Nov). Before Caddy, which
-    # takes the password hash it sets.
+    # The traffic dashboard's password hash, which the Caddyfile takes: checked
+    # before Caddy (roles/goaccess, #performance, 12 Nov).
+    - name: The traffic dashboard's hash is in the vault
+      include_role:
+        name: goaccess
+        tasks_from: vault
+
+    - name: Configure Caddy reverse proxy
+      include_role:
+        name: caddy
+
+    # The dashboard itself: GoAccess over Caddy's access log of magenta, at
+    # magenta.cryptograss.live/stats/. After Caddy: its files are the caddy user's.
     - name: GoAccess traffic dashboard for magenta
       include_role:
         name: goaccess
       vars:
         goaccess_site: magenta
         goaccess_public_host: magenta.cryptograss.live
-
-    - name: Configure Caddy reverse proxy
-      include_role:
-        name: caddy
 
     - name: Create .ssh directory for root
       file:

@@ -59,6 +59,13 @@
       timezone:
         name: UTC
 
+    # The Caddyfile takes the traffic dashboard's password hash (roles/goaccess, shared): checked here,
+    # with its name, before anything is written.
+    - name: The traffic dashboard's hash is in the vault
+      import_role:
+        name: goaccess
+        tasks_from: vault
+
     - name: Deploy SSH login banner
       copy:
         dest: /etc/motd
@@ -85,11 +92,11 @@
     - mariadb
     - wiki-secrets       # LocalSettings.local.php, before anything connects to the database
     - docker-wiki        # Apache+PHP in Docker (replaces nginx + php-fpm)
-    - role: goaccess     # Traffic dashboard at /stats/, from Caddy's access log (shared/ansible/roles)
+    - caddy              # SSL termination, reverse proxy to container on :8080
+    - role: goaccess     # Traffic dashboard at /stats/, from Caddy's access log (shared/ansible/roles); after caddy
       vars:
         goaccess_site: pickipedia
         goaccess_public_host: "{{ domain_name }}"
-    - caddy              # SSL termination, reverse proxy to container on :8080
     - rabbithole-shell   # Static files served at /rabbithole/ same-origin with wiki
     - mediawiki
 

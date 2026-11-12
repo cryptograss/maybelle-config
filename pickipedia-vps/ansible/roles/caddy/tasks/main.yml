@@ -65,9 +65,11 @@
           }
 
           # The traffic dashboard: its page, and the WebSocket that keeps it
-          # live. One password, stats_password in the vault, as user "stats".
-          basic_auth /stats/* {
-              stats {{ stats_password_hashed }}
+          # live. The hash is stats_password_hash in the vault; user "stats".
+          # basicauth, the older spelling: every Caddy 2 takes it (2.8 and
+          # later warn), and the Caddy on this box is whatever was installed.
+          basicauth /stats/* {
+              stats {{ stats_password_hash }}
           }
           handle /stats/ws {
               reverse_proxy 127.0.0.1:7890

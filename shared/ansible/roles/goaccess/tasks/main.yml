@@ -3,29 +3,10 @@
 # and day, pages, referers, crawlers apart from people, status codes. Caddy serves the page at /stats/
 # behind basic auth, with the live updates proxied at /stats/ws. Addresses are anonymized before anything
 # is kept (--anonymize-ip); the raw log Caddy writes keeps them for 30 days, then rolls off.
-
-- name: The dashboard password is in the vault
-  ansible.builtin.assert:
-    that:
-      - stats_password is defined
-      - stats_password | length > 0
-    quiet: true
-    fail_msg: >-
-      The traffic dashboard's password is missing from the vault. Add stats_password to secrets/vault.yml
-      (ansible-vault edit secrets/vault.yml): it opens /stats/ on this site, as user "stats".
-
-# Caddy takes a bcrypt hash; `caddy hash-password` makes one. Through the image rather than the host's
-# binary, so it works whether or not Caddy is on the box yet (as maybelle hashes the GlitchTip password).
-- name: Hash the dashboard password for Caddy
-  ansible.builtin.command: docker run --rm caddy caddy hash-password --plaintext '{{ stats_password }}'
-  register: goaccess_hash
-  changed_when: false
-  no_log: true
-
-- name: Keep the hash for the Caddyfile
-  ansible.builtin.set_fact:
-    stats_password_hashed: "{{ goaccess_hash.stdout }}"
-  no_log: true
+#
+# Runs after the caddy role: the log directory and file are the caddy user's, and that user exists once
+# Caddy is installed (re, #performance, 12 Nov: a fresh box has no caddy user before then). The vault
+# check the Caddyfile depends on is tasks_from: vault, run before the caddy role.
 
 - name: Install GoAccess
   ansible.builtin.apt:

@@ -44,9 +44,9 @@ magenta.cryptograss.live {
     }
 
     # The traffic dashboard GoAccess draws from that log (roles/goaccess): its
-    # page, and the WebSocket that keeps it live. One password, from the vault.
+    # page, and the WebSocket that keeps it live. The hash is in the vault.
     basicauth /stats/* {
-        stats {{ stats_password_hashed }}
+        stats {{ stats_password_hash }}
     }
     handle /stats/ws {
         reverse_proxy 127.0.0.1:7890
