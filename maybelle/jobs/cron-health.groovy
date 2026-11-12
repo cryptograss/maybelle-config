@@ -297,6 +297,46 @@ pipelineJob('cron-health') {
                             }
                         }
 
+                        // The vault password belongs on maybelle only while a deploy runs. The host cron
+                        // vault-password-sweep.sh (maybelle.yml) removes it if it finds it otherwise, and logs
+                        // REMOVED; this stays red for a day after, so it's said in #ops and wakes someone.
+                        // Red too if the sweep stops running.
+                        stage('vault password sweep') {
+                            steps {
+                                catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
+                                    sh """
+                                        mkdir -p "\\$WORKSPACE/.alarm"; trap 'echo \\$? > "\\$WORKSPACE/.alarm/vault password sweep"' EXIT
+                                        LOG="/var/log/vault-password-sweep.log"
+                                        STALE_MINUTES=25
+
+                                        echo "=== vault password sweep ==="
+                                        LAST=\\$(tail -1 "\\$LOG" 2>/dev/null || true)
+                                        if [ -z "\\$LAST" ]; then
+                                            echo "FAIL: nothing in \\$LOG: the sweep has never run"
+                                            exit 1
+                                        fi
+                                        LAST_EPOCH=\\$(date -d "\\$(echo "\\$LAST" | cut -d' ' -f1)" +%s 2>/dev/null || echo 0)
+                                        AGE=\\$(( (\\$(date +%s) - LAST_EPOCH) / 60 ))
+                                        echo "Last sweep: \\$LAST (\\$AGE min ago)"
+                                        if [ "\\$AGE" -gt "\\$STALE_MINUTES" ]; then
+                                            echo "FAIL: the sweep hasn't run for \\$AGE min"
+                                            exit 1
+                                        fi
+
+                                        # ISO times sort as text. The week's log and the one before it, so a rotation can't hide one.
+                                        SINCE=\\$(date -u -d '24 hours ago' +%Y-%m-%dT%H:%M:%SZ)
+                                        FOUND=\\$(cat "\\$LOG.1" "\\$LOG" 2>/dev/null | awk -v since="\\$SINCE" '\\$2 ~ /^REMOVE/ && \\$1 >= since')
+                                        if [ -n "\\$FOUND" ]; then
+                                            echo "FAIL: the vault password was on maybelle's volume outside a deploy, and the sweep removed it:"
+                                            echo "\\$FOUND"
+                                            exit 1
+                                        fi
+                                        echo "OK"
+                                    """
+                                }
+                            }
+                        }
+
                         stage('delivery-kid audit') {
                             steps {
                                 catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
