@@ -86,6 +86,10 @@
     - wiki-secrets       # LocalSettings.local.php, before anything connects to the database
     - docker-wiki        # Apache+PHP in Docker (replaces nginx + php-fpm)
     - caddy              # SSL termination, reverse proxy to container on :8080
+    - role: goaccess     # Traffic dashboard at /stats/, from Caddy's access log (shared/ansible/roles); after caddy
+      vars:
+        goaccess_site: pickipedia
+        goaccess_public_host: "{{ domain_name }}"
     - rabbithole-shell   # Static files served at /rabbithole/ same-origin with wiki
     - mediawiki
 

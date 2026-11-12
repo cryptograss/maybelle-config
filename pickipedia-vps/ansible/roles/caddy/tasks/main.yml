@@ -52,6 +52,37 @@
       # {{ domain_name }} would defeat their entire purpose: they exist for
       # readers on networks that block the canonical name outright.
       {{ domain_name }}, {{ www_domain }}{% for alias in alias_domains | default([]) %}, {{ alias }}{% endfor %} {
+          # The access log: who came, from where, for which pages. Kept 30
+          # days, then rolled off. The goaccess role reads it as it grows and
+          # draws the dashboard served at /stats/ below; nothing runs in the
+          # reader's browser for it (Justin, #performance, 12 Nov).
+          log {
+              output file /var/log/caddy/pickipedia-access.log {
+                  roll_size 100mb
+                  roll_keep 10
+                  roll_keep_for 720h
+              }
+          }
+
+          # Links that carry a live token in their path never reach the log,
+          # which the public dashboard shows (re, #performance, 12 Nov):
+          # MediaWiki's email confirmation and invalidation links. Substring
+          # matches, so /index.php/Special:... is caught too; Caddy matches
+          # paths unescaped and without regard to case. skip_log, the older
+          # spelling, which every Caddy 2 from 2.5 takes.
+          @token_in_path path *Special:ConfirmEmail/* *Special:InvalidateEmail/*
+          skip_log @token_in_path
+
+          # The traffic dashboard, public: its page, and the WebSocket that
+          # keeps it live.
+          handle /stats/ws {
+              reverse_proxy 127.0.0.1:7890
+          }
+          handle_path /stats/* {
+              root * /var/lib/goaccess/pickipedia
+              file_server
+          }
+
           # Rabbithole, the installable player: the Vite build in dist/,
           # served same-origin with the wiki so its /api.php calls carry
           # the reader's session. Any path inside /rabbithole/ that is not

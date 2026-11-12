@@ -1,0 +1,9 @@
+---
+# GoAccess: a traffic dashboard built from Caddy's access log, on the box that serves the site.
+# No script in anyone's browser; the server's own log, read as it grows (Justin, #performance, 12 Nov).
+goaccess_site: ""            # the site's short name: the log file, the state directory and the unit are named for it
+goaccess_public_host: ""     # the name the dashboard's page is opened under (its live updates connect back to it)
+goaccess_log: "/var/log/caddy/{{ goaccess_site }}-access.log"   # written by Caddy's `log` in the site's block
+goaccess_dir: "/var/lib/goaccess/{{ goaccess_site }}"            # index.html and the on-disk database
+goaccess_port: 7890          # the live updates' WebSocket, on 127.0.0.1; Caddy proxies /stats/ws to it
+goaccess_user: caddy         # reads Caddy's log (owner-only), so it runs as Caddy

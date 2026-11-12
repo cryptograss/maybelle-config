@@ -1,0 +1,61 @@
+---
+# GoAccess reads the site's Caddy access log as it grows and serves a dashboard: requests, visitors by hour
+# and day, pages, referring sites, crawlers apart from people, status codes. Caddy serves the page at
+# /stats/, public, with the live updates proxied at /stats/ws (Justin, #performance, 12 Nov).
+#
+# Public, so it shows the site and not the people (goaccess.service.j2 says how): no visitor addresses,
+# no query strings, no full referring URLs, no user names. Paths with a live secret in them never reach
+# the log at all (skip_log in each Caddyfile). The raw log Caddy writes keeps addresses for 30 days, on
+# the box only, then rolls off.
+#
+# Runs after the caddy role: the log directory and file are the caddy user's, and that user exists once
+# Caddy is installed (re, #performance, 12 Nov: a fresh box has no caddy user before then).
+
+- name: Install GoAccess
+  ansible.builtin.apt:
+    name: goaccess
+    state: present
+
+- name: Caddy's log directory
+  ansible.builtin.file:
+    path: "{{ goaccess_log | dirname }}"
+    state: directory
+    owner: "{{ goaccess_user }}"
+    group: "{{ goaccess_user }}"
+    mode: '0755'
+
+# Present before GoAccess starts, so it has a file to follow; Caddy appends to it from its next reload.
+- name: The site's access log, present
+  ansible.builtin.file:
+    path: "{{ goaccess_log }}"
+    state: touch
+    owner: "{{ goaccess_user }}"
+    group: "{{ goaccess_user }}"
+    mode: '0600'
+    modification_time: preserve
+    access_time: preserve
+
+- name: GoAccess's state directory
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ goaccess_user }}"
+    group: "{{ goaccess_user }}"
+    mode: '0755'
+  loop:
+    - "{{ goaccess_dir }}"
+    - "{{ goaccess_dir }}/db"
+
+- name: GoAccess as a service
+  ansible.builtin.template:
+    src: goaccess.service.j2
+    dest: "/etc/systemd/system/goaccess-{{ goaccess_site }}.service"
+    mode: '0644'
+  register: goaccess_unit
+
+- name: GoAccess running
+  ansible.builtin.systemd:
+    name: "goaccess-{{ goaccess_site }}"
+    daemon_reload: "{{ goaccess_unit.changed }}"
+    state: "{{ 'restarted' if goaccess_unit.changed else 'started' }}"
+    enabled: yes
