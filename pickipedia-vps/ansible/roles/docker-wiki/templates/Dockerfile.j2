@@ -38,8 +38,22 @@ RUN apt-get update && apt-get install -y \
     && docker-php-ext-enable apcu \
     && rm -rf /var/lib/apt/lists/*
 
+# Apache from Debian's security updates, not only what the php image shipped
+# with: CVE-2026-119618 (mod_http2, RCE) is fixed in 2.4.71, and
+# php:8.2.35-apache still carried 2.4.69 on 12 Nov 2026. The build fails if
+# an older one ever comes back.
+RUN apt-get update \
+    && apt-get install -y --only-upgrade apache2 apache2-bin apache2-data apache2-utils \
+    && rm -rf /var/lib/apt/lists/* \
+    && dpkg --compare-versions "$(dpkg-query -W -f='${Version}' apache2-bin)" ge 2.4.71 \
+    || { echo "apache2 older than 2.4.71" >&2; exit 1; }
+
 # Apache configuration
 RUN a2enmod rewrite headers
+# HTTP/1.1 only. Caddy speaks HTTP/2 to visitors and HTTP/1.1 to us, so
+# mod_http2 has no work here; if it is ever enabled, it still serves no h2.
+RUN a2dismod -f http2 2>/dev/null; echo 'Protocols http/1.1' > /etc/apache2/conf-available/protocols.conf \
+    && a2enconf protocols
 RUN sed -i '/<Directory \/var\/www\/>/,/<\/Directory>/ s/AllowOverride None/AllowOverride All/' /etc/apache2/apache2.conf
 
 # Let encoded slashes through to MediaWiki.
