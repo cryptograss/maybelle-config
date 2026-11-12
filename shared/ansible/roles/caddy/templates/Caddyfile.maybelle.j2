@@ -27,6 +27,11 @@ memory-lane.{{ domain_name }} {
             roll_keep_for 720h
         }
     }
+    # Sign-in links carry a live login code in their path (moods/login/<code>/;
+    # the code is spent by the POST after the GET), so they never reach the log,
+    # which the public dashboard shows (re, #performance, 12 Nov). A new route
+    # with a secret in its path needs its own line here.
+    skip_log /moods/login/*
     reverse_proxy localhost:3000
 }
 
@@ -42,12 +47,14 @@ magenta.cryptograss.live {
             roll_keep_for 720h
         }
     }
+    # Sign-in links carry a live login code in their path (moods/login/<code>/;
+    # the code is spent by the POST after the GET), so they never reach the log,
+    # which the public dashboard shows (re, #performance, 12 Nov). A new route
+    # with a secret in its path needs its own line here.
+    skip_log /moods/login/*
 
-    # The traffic dashboard GoAccess draws from that log (roles/goaccess): its
-    # page, and the WebSocket that keeps it live. The hash is in the vault.
-    basicauth /stats/* {
-        stats {{ stats_password_hash }}
-    }
+    # The traffic dashboard GoAccess draws from that log (roles/goaccess), public:
+    # its page, and the WebSocket that keeps it live.
     handle /stats/ws {
         reverse_proxy 127.0.0.1:7890
     }

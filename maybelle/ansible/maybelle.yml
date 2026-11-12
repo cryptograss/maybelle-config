@@ -572,13 +572,6 @@
         glitchtip_dsn_fetch_password_hashed: "{{ glitchtip_dsn_password_hash_result.stdout }}"
       no_log: true
 
-    # The traffic dashboard's password hash, which the Caddyfile takes: checked
-    # before Caddy (roles/goaccess, #performance, 12 Nov).
-    - name: The traffic dashboard's hash is in the vault
-      include_role:
-        name: goaccess
-        tasks_from: vault
-
     - name: Configure Caddy reverse proxy
       include_role:
         name: caddy

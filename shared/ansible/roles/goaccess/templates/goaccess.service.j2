@@ -9,6 +9,9 @@ Group={{ goaccess_user }}
 # over a WebSocket the browser reaches through Caddy at wss://{{ goaccess_public_host }}/stats/ws.
 # --persist and --restore keep what was counted across restarts and Caddy's log rolls; --anonymize-ip
 # zeroes the last octet (the last 64 bits of an IPv6) before an address is kept anywhere.
+# The page is public (#performance, 12 Nov), so it shows the site, not the people: no visitor list
+# (HOSTS: counts of visitors stay), no full referring URLs (REFERRERS: the referring sites stay), no
+# user names (REMOTE_USER), and no query strings (a sign-in callback's one-time code rides in one).
 ExecStart=/usr/bin/goaccess {{ goaccess_log }} \
     --log-format=CADDY \
     --no-global-config \
@@ -18,6 +21,10 @@ ExecStart=/usr/bin/goaccess {{ goaccess_log }} \
     --output={{ goaccess_dir }}/index.html \
     --persist --restore --db-path={{ goaccess_dir }}/db \
     --anonymize-ip \
+    --no-query-string \
+    --ignore-panel=HOSTS \
+    --ignore-panel=REFERRERS \
+    --ignore-panel=REMOTE_USER \
     --html-report-title="{{ goaccess_public_host }}"
 Restart=on-failure
 RestartSec=5

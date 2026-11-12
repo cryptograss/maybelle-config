@@ -59,13 +59,6 @@
       timezone:
         name: UTC
 
-    # The Caddyfile takes the traffic dashboard's password hash (roles/goaccess, shared): checked here,
-    # with its name, before anything is written.
-    - name: The traffic dashboard's hash is in the vault
-      import_role:
-        name: goaccess
-        tasks_from: vault
-
     - name: Deploy SSH login banner
       copy:
         dest: /etc/motd
