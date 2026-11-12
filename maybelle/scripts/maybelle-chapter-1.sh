@@ -123,6 +123,11 @@ HETZNER_VOLUME_PATH="__HETZNER_VOLUME_PATH__"
 MOUNT_POINT="__MOUNT_POINT__"
 REPO_DIR="__REPO_DIR__"
 VAULT_PASSWORD_FILE="__VAULT_PASSWORD_FILE__"
+# The vault password is copied here for this run only. The playbook removes it
+# near its end, but a run that fails or stops before that task left it on the
+# volume until the next deploy that got that far. This removes it whatever
+# happens. The scrubber's copied secret list goes with it.
+trap 'rm -f "$VAULT_PASSWORD_FILE" /tmp/scrubber-secrets.json' EXIT
 VOLUME_DEVICE="__VOLUME_DEVICE__"
 REBUILD_IMAGES="__REBUILD_IMAGES__"
 
@@ -216,6 +221,8 @@ STATE=$([ "$ANSIBLE_EXIT" -eq 0 ] && echo finished || echo failed)
 printf '{"state": "%s", "took": %d}\n' "$STATE" "$(( $(date +%s) - START_TIME ))" > "$DEPLOY_DONE.tmp"
 mv "$DEPLOY_DONE.tmp" "$DEPLOY_DONE"  # whole, or not at all: the poster is reading for it
 wait "$POSTER" || true
+# Nothing reads the vault from here on; don't leave it for the pause below.
+rm -f "$VAULT_PASSWORD_FILE"
 rm -f "$DEPLOY_DONE"
 # memory-lane may still be coming back up: keep trying for two minutes.
 REPORT_TRIES=12 "$REPO_DIR/maybelle/scripts/report-deploy.sh" maybelle "$STATE" "$DEPLOY_BY" "$(cat "$LOG_URL_FILE" 2>/dev/null)"

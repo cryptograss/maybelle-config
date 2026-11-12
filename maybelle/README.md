@@ -13,7 +13,7 @@ Maybelle uses a Hetzner persistent volume for all stateful data. The volume surv
   └── (symlinked to /mnt/persist)
 
 /mnt/persist/
-  ├── .vault-password         # Ansible vault password (manual one-time setup)
+  ├── .vault-password         # Ansible vault password: present only while a deploy runs
   ├── maybelle-config/        # This repo (cloned once, updated via git pull)
   ├── magenta/
   │   ├── postgres-data/      # PostgreSQL data directory
@@ -84,4 +84,4 @@ Dumps hunter's database, filters vault secrets, places in backups directory. The
 
 ## Secrets
 
-Vault password stored at `/mnt/persist/.vault-password` on the persistent volume.
+The vault password is not kept on maybelle. `maybelle-chapter-1.sh` copies it from your laptop to `/mnt/persist/.vault-password` for one deploy, and removes it when the deploy ends, whether the deploy succeeded or not (the playbook also removes it near its end). People hold it; the encrypted vault is in this repository.

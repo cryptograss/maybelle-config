@@ -11,6 +11,6 @@ mount_point: "/mnt/persist"
 host: "maybelle.cryptograss.live"
 user: "root"
 
-# Vault password file location (on the persistent volume)
-# This file must be created manually: echo 'your-password' > /mnt/persist/.vault-password
+# Where maybelle-chapter-1.sh puts the vault password for the length of one deploy;
+# it copies it from ANSIBLE_VAULT_PASSWORD_FILE on your laptop and removes it after.
 vault_password_file: "/mnt/persist/.vault-password"
