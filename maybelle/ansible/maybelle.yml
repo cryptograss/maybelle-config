@@ -321,6 +321,7 @@
         - /var/log/nfs-deploy.log
         - /var/log/pickipedia-backup.log
         - /var/log/pickipedia-deploy.log
+        - /var/log/vault-password-sweep.log
 
     - name: Remove log paths if they are directories
       file:
@@ -339,6 +340,7 @@
         - /var/log/nfs-deploy.log
         - /var/log/pickipedia-backup.log
         - /var/log/pickipedia-deploy.log
+        - /var/log/vault-password-sweep.log
 
     # Jenkins' git trusts githouse's repositories: a system config file, mounted read-only at /etc/gitconfig
     # (the image has none). githouse's git user owns /srv/git, and git won't read another user's repository
@@ -381,6 +383,7 @@
           - "/var/log/pickipedia-backup.log:/var/log/pickipedia-backup.log:ro"
           - "/var/log/pickipedia-deploy.log:/var/log/pickipedia-deploy.log:ro"
           - "/var/log/delivery-kid-audit.log:/var/log/delivery-kid-audit.log:ro"
+          - "/var/log/vault-password-sweep.log:/var/log/vault-password-sweep.log:ro"
           # githouse's repositories, read-only: the trusted jobs (pickipedia, arthel) build from them, not from
           # GitHub (the flip, Cryptograss:Moods/ramp/Plan, section 6). memory-lane mounts them the same way.
           - "{{ githouse_dir }}/git:/srv/git:ro"
@@ -1881,6 +1884,65 @@
       file:
         path: /mnt/persist/.vault-password
         state: absent
+
+    # The vault password is on the volume only while a deploy runs (maybelle-chapter-1.sh copies it,
+    # and removes it when it exits). Every 10 minutes this looks, and if it's there with no deploy
+    # running, removes it and says so in its log; cron-health's "vault password sweep" stage turns
+    # red on that for a day, which posts to #ops (Justin, #backups, 12 Nov 2026).
+    # Left alone while ansible-playbook runs maybelle.yml, or for 30 minutes after it was copied
+    # (chapter 1 copies it a minute or two before ansible starts); never longer than 3 hours.
+    - name: Vault password sweep script
+      copy:
+        dest: /usr/local/bin/vault-password-sweep.sh
+        mode: '0750'
+        content: |
+          #!/bin/bash
+          F=/mnt/persist/.vault-password
+          LOG=/var/log/vault-password-sweep.log
+          NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          if [ ! -e "$F" ]; then
+              echo "$NOW absent" >> "$LOG"
+              exit 0
+          fi
+          AGE=$(( ($(date +%s) - $(stat -c %Y "$F")) / 60 ))
+          if [ "$AGE" -ge 180 ]; then
+              WHY="over 3 hours, deploy or not"
+          elif [ "$AGE" -lt 30 ]; then
+              echo "$NOW present ${AGE} min, left: copied for a deploy under 30 min ago" >> "$LOG"
+              exit 0
+          elif pgrep -f 'ansible-playbook.*maybelle\.yml' > /dev/null; then
+              echo "$NOW present ${AGE} min, left: a deploy is running" >> "$LOG"
+              exit 0
+          else
+              WHY="no deploy running"
+          fi
+          rm -f "$F"
+          if [ -e "$F" ]; then
+              echo "$NOW REMOVE-FAILED: present ${AGE} min, $WHY, and rm left it" >> "$LOG"
+              exit 1
+          fi
+          echo "$NOW REMOVED: present ${AGE} min, $WHY" >> "$LOG"
+
+    - name: Cronjob for the vault password sweep
+      ansible.builtin.cron:
+        name: "vault password sweep"
+        minute: "*/10"
+        job: "/usr/local/bin/vault-password-sweep.sh"
+
+    - name: Rotate the vault password sweep log
+      copy:
+        dest: /etc/logrotate.d/vault-password-sweep
+        mode: '0644'
+        content: |
+          /var/log/vault-password-sweep.log {
+              weekly
+              rotate 4
+              compress
+              delaycompress
+              missingok
+              notifempty
+              copytruncate
+          }
 
     - name: Clean up old scrubber secrets directory if exists
       file:
