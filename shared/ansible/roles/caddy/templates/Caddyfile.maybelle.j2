@@ -19,12 +19,43 @@
 
 # Memory Lane web UI
 memory-lane.{{ domain_name }} {
+    # Both of magenta's names count in one traffic log (roles/goaccess reads it).
+    log {
+        output file /var/log/caddy/magenta-access.log {
+            roll_size 100mb
+            roll_keep 10
+            roll_keep_for 720h
+        }
+    }
     reverse_proxy localhost:3000
 }
 
 # Magenta: the same memory-lane, under its own name. The bare address is
 # magenta's own front page (magenta#114).
 magenta.cryptograss.live {
+    # The access log: who came, from where, for what. Kept 30 days, then rolled
+    # off; nothing in the browser (Justin, #performance, 12 Nov).
+    log {
+        output file /var/log/caddy/magenta-access.log {
+            roll_size 100mb
+            roll_keep 10
+            roll_keep_for 720h
+        }
+    }
+
+    # The traffic dashboard GoAccess draws from that log (roles/goaccess): its
+    # page, and the WebSocket that keeps it live. One password, from the vault.
+    basicauth /stats/* {
+        stats {{ stats_password_hashed }}
+    }
+    handle /stats/ws {
+        reverse_proxy 127.0.0.1:7890
+    }
+    handle_path /stats/* {
+        root * /var/lib/goaccess/magenta
+        file_server
+    }
+
     reverse_proxy localhost:3000
 }
 

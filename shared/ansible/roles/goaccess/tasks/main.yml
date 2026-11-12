@@ -1,0 +1,77 @@
+---
+# GoAccess reads the site's Caddy access log as it grows and serves a dashboard: requests, visitors by hour
+# and day, pages, referers, crawlers apart from people, status codes. Caddy serves the page at /stats/
+# behind basic auth, with the live updates proxied at /stats/ws. Addresses are anonymized before anything
+# is kept (--anonymize-ip); the raw log Caddy writes keeps them for 30 days, then rolls off.
+
+- name: The dashboard password is in the vault
+  ansible.builtin.assert:
+    that:
+      - stats_password is defined
+      - stats_password | length > 0
+    quiet: true
+    fail_msg: >-
+      The traffic dashboard's password is missing from the vault. Add stats_password to secrets/vault.yml
+      (ansible-vault edit secrets/vault.yml): it opens /stats/ on this site, as user "stats".
+
+# Caddy takes a bcrypt hash; `caddy hash-password` makes one. Through the image rather than the host's
+# binary, so it works whether or not Caddy is on the box yet (as maybelle hashes the GlitchTip password).
+- name: Hash the dashboard password for Caddy
+  ansible.builtin.command: docker run --rm caddy caddy hash-password --plaintext '{{ stats_password }}'
+  register: goaccess_hash
+  changed_when: false
+  no_log: true
+
+- name: Keep the hash for the Caddyfile
+  ansible.builtin.set_fact:
+    stats_password_hashed: "{{ goaccess_hash.stdout }}"
+  no_log: true
+
+- name: Install GoAccess
+  ansible.builtin.apt:
+    name: goaccess
+    state: present
+
+- name: Caddy's log directory
+  ansible.builtin.file:
+    path: "{{ goaccess_log | dirname }}"
+    state: directory
+    owner: "{{ goaccess_user }}"
+    group: "{{ goaccess_user }}"
+    mode: '0755'
+
+# Present before GoAccess starts, so it has a file to follow; Caddy appends to it from its next reload.
+- name: The site's access log, present
+  ansible.builtin.file:
+    path: "{{ goaccess_log }}"
+    state: touch
+    owner: "{{ goaccess_user }}"
+    group: "{{ goaccess_user }}"
+    mode: '0600'
+    modification_time: preserve
+    access_time: preserve
+
+- name: GoAccess's state directory
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ goaccess_user }}"
+    group: "{{ goaccess_user }}"
+    mode: '0755'
+  loop:
+    - "{{ goaccess_dir }}"
+    - "{{ goaccess_dir }}/db"
+
+- name: GoAccess as a service
+  ansible.builtin.template:
+    src: goaccess.service.j2
+    dest: "/etc/systemd/system/goaccess-{{ goaccess_site }}.service"
+    mode: '0644'
+  register: goaccess_unit
+
+- name: GoAccess running
+  ansible.builtin.systemd:
+    name: "goaccess-{{ goaccess_site }}"
+    daemon_reload: "{{ goaccess_unit.changed }}"
+    state: "{{ 'restarted' if goaccess_unit.changed else 'started' }}"
+    enabled: yes
