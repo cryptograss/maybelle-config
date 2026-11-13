@@ -199,6 +199,23 @@ def run_all_checks() -> list[CheckResult]:
     if time_result.passed and time_result.details:
         results.append(check_time_drift(time_result.details))
 
+    # BitTorrent seeder: its own container, so the pinning service can be up
+    # while it's down. /torrent/status reports running=false once the
+    # seeder's status file is over two minutes old.
+    seeder_result = check_endpoint(
+        "seeder_running",
+        f"{BASE_URL}/torrent/status",
+        expected_keys=["running"]
+    )
+    if seeder_result.passed and not (seeder_result.details or {}).get("running"):
+        seeder_result = CheckResult(
+            name="seeder_running",
+            passed=False,
+            message=f"Seeder not running: {(seeder_result.details or {}).get('reason', 'no reason given')}",
+            response_time_ms=seeder_result.response_time_ms,
+        )
+    results.append(seeder_result)
+
     # IPFS gateway - fetch known content
     results.append(check_endpoint(
         "ipfs_gateway",

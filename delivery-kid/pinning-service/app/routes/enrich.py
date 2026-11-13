@@ -7,6 +7,7 @@ Blue Railroad's responsibility.
 Requires API key auth (X-API-Key header).
 """
 
+import asyncio
 import logging
 import shutil
 import subprocess
@@ -21,9 +22,12 @@ from pydantic import BaseModel
 from ..auth import require_auth
 from ..config import get_settings, Settings
 from ..services.torrent import create_torrent, DEFAULT_TRACKERS
-from ..services.seeder import get_seeder
+from ..services.seeding_store import stage_for_seeding
 
 logger = logging.getLogger(__name__)
+
+# CIDs whose torrent is being made right now (generate_torrent).
+_in_progress: set[str] = set()
 
 router = APIRouter(prefix="/enrich", tags=["enrich"])
 
@@ -54,20 +58,27 @@ async def fetch_ipfs_content(cid: str, ipfs_api_url: str) -> Path | None:
     """
     tmpdir = Path(tempfile.mkdtemp(prefix="enrich-"))
     try:
+        # Streamed to disk: a Release can be gigabytes, and held in memory it
+        # all counts against the web service (it was read whole until 8 Nov 2026).
+        tar_path = tmpdir / "archive.tar"
         async with httpx.AsyncClient(timeout=300.0) as client:
-            r = await client.post(
+            async with client.stream(
+                "POST",
                 f"{ipfs_api_url}/api/v0/get",
                 params={"arg": cid, "archive": "true"},
-            )
-            if r.status_code != 200:
-                logger.warning("IPFS get failed for %s: %s", cid, r.status_code)
-                shutil.rmtree(tmpdir)
-                return None
+            ) as r:
+                if r.status_code != 200:
+                    logger.warning("IPFS get failed for %s: %s", cid, r.status_code)
+                    shutil.rmtree(tmpdir)
+                    return None
+                with tar_path.open("wb") as f:
+                    async for chunk in r.aiter_bytes(1024 * 1024):
+                        f.write(chunk)
 
-        # Write and extract tar
-        tar_path = tmpdir / "archive.tar"
-        tar_path.write_bytes(r.content)
-        subprocess.run(
+        # Extract tar, off the event loop: a big Release takes a while, and
+        # every other request waits on a blocked loop (8 Nov 2026).
+        await asyncio.to_thread(
+            subprocess.run,
             ["tar", "xf", str(tar_path), "-C", str(tmpdir)],
             capture_output=True, check=True,
         )
@@ -112,6 +123,19 @@ async def generate_torrent(
     """
     cid = req.cid
 
+    # One at a time per CID. The Blue Railroad job asks every 2 minutes, and with
+    # the work off the event loop a slow Release could otherwise be fetched and
+    # hashed twice at once.
+    if cid in _in_progress:
+        return TorrentResponse(success=False, cid=cid, error="Already being made")
+    _in_progress.add(cid)
+    try:
+        return await _generate_torrent(req, cid, settings)
+    finally:
+        _in_progress.discard(cid)
+
+
+async def _generate_torrent(req: TorrentRequest, cid: str, settings: Settings) -> TorrentResponse:
     album_dir = await fetch_ipfs_content(cid, settings.ipfs_api_url)
     if album_dir is None:
         return TorrentResponse(
@@ -123,7 +147,10 @@ async def generate_torrent(
     try:
         torrent_name = req.name or cid
         base_url = settings.ipfs_gateway_url.replace("ipfs.", "", 1)
-        result = create_torrent(
+        # Hashing every piece of a Release: in a thread, so the web service
+        # keeps answering meanwhile.
+        result = await asyncio.to_thread(
+            create_torrent,
             directory=album_dir,
             name=torrent_name,
             # Multi-file: Caddy rewrites /webseed/{cid}/{name}/{file} → /ipfs/{cid}/{file}
@@ -143,17 +170,17 @@ async def generate_torrent(
                 error=f"Torrent generation failed: {result.error}",
             )
 
-        # Add to BitTorrent seeder (copies content to seeding dir)
+        # Hand the files to the seeder, which runs in its own container: it
+        # lays them out and starts seeding within seconds (seeding_store).
         torrent_url = None
-        seeder = get_seeder()
-        if seeder and result.torrent_bytes:
-            infohash_added = seeder.add_torrent(cid, result.torrent_bytes, album_dir)
-            if infohash_added:
-                base_url = settings.ipfs_gateway_url.replace("ipfs.", "", 1)
-                torrent_url = f"{base_url}/torrent/{result.infohash}.torrent"
-                logger.info("Seeding torrent for %s (infohash %s)", cid, infohash_added)
-            else:
-                logger.warning("Failed to add torrent to seeder for %s", cid)
+        # A move onto the Storage Box is a full copy: in a thread too.
+        if result.torrent_bytes and await asyncio.to_thread(
+            stage_for_seeding, settings.seeding_dir, cid, result.torrent_bytes, album_dir
+        ):
+            torrent_url = f"{base_url}/torrent/{result.infohash}.torrent"
+            logger.info("Handed torrent for %s to the seeder (infohash %s)", cid, result.infohash)
+        else:
+            logger.warning("Failed to hand torrent for %s to the seeder", cid)
 
         return TorrentResponse(
             success=True,
@@ -169,4 +196,4 @@ async def generate_torrent(
 
     finally:
         parent = album_dir.parent
-        shutil.rmtree(parent, ignore_errors=True)
+        await asyncio.to_thread(shutil.rmtree, parent, ignore_errors=True)

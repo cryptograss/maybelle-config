@@ -123,7 +123,7 @@
         name: delivery-kid-net
         state: present
 
-    # Docker Compose for IPFS + Pinning Service
+    # Docker Compose for IPFS + Pinning Service + Seeder
     - name: Get git commit hash
       local_action:
         module: command
@@ -174,13 +174,45 @@
                 - /mnt/storage-box/staging:/staging
               ports:
                 - "127.0.0.1:3001:3001"
-                - "6881:6881"      # BitTorrent TCP
-                - "6881:6881/udp"  # BitTorrent UDP
               networks:
                 - delivery-kid-net
               restart: unless-stopped
               depends_on:
                 - ipfs
+
+            # BitTorrent seeder: the same image, its own process
+            # (app/seeder_main.py). It seeds everything in /staging/seeding and
+            # takes new torrents the pinning service drops in
+            # /staging/seeding/.incoming. Its own container so that libtorrent's
+            # memory and crashes are its own, and a pinning-service deploy or
+            # restart doesn't stop the seeding. If it outgrows mem_limit, the
+            # kernel kills it alone and Docker restarts it.
+            seeder:
+              build:
+                context: .
+                args:
+                  GIT_COMMIT: "{{ git_commit.stdout }}"
+                  BUILD_TIME: "{{ ansible_date_time.iso8601 }}"
+              container_name: seeder
+              command: ["python", "-m", "app.seeder_main"]
+              environment:
+                - STAGING_DIR=/staging
+                - SEEDING_DIR=/staging/seeding
+              volumes:
+                - /mnt/storage-box/staging:/staging
+              ports:
+                - "6881:6881"      # BitTorrent TCP
+                - "6881:6881/udp"  # BitTorrent UDP
+              mem_limit: 768m
+              stop_grace_period: 20s
+              networks:
+                - delivery-kid-net
+              restart: unless-stopped
+              # Started after the pinning service, which held port 6881 until
+              # the seeder moved out of it: on the first deploy of this, the old
+              # container has to let go of the port first.
+              depends_on:
+                - pinning
 
             ipfs:
               image: ipfs/kubo:latest
@@ -298,6 +330,18 @@
       until: pinning_health.status == 200
       retries: 30
       delay: 2
+
+    # The seeder writes /staging/seeding/.status.json once it has loaded every
+    # torrent; the pinning service reports it, with running=false if stale.
+    # Loading hundreds of torrents off the Storage Box can take a while.
+    - name: Wait for the seeder to report itself running
+      uri:
+        url: http://127.0.0.1:3001/torrent/status
+        return_content: yes
+      register: seeder_health
+      until: seeder_health.json is defined and seeder_health.json.running
+      retries: 60
+      delay: 5
 
     # Configure CORS for IPFS WebUI access
     - name: Check if IPFS API CORS is configured
