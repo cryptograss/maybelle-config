@@ -66,17 +66,18 @@
 
     # magenta: agents' instructions (agents/), and memory-lane (memory-lane/: the
     # watcher, faces, the Mood poller), which was a repository of its own until
-    # 18 Oct 2026. {{ base_dir }}/memory-lane-source, its old clone, is no longer updated.
+    # 18 Oct 2026. {{ base_dir }}/memory-lane-source, its old clone, is no longer updated. Its production, as
+    # every repository's since 13 Nov (Justin, #radicle): merged there, run, then promoted to main.
     - name: Clone or update magenta repository (agents' instructions; memory-lane)
       git:
         repo: "{{ source_base }}magenta.git"
         dest: "{{ base_dir }}/magenta-source"
-        version: main
+        version: production
         force: yes
         update: yes
 
-    - name: Force fetch latest magenta changes from main branch
-      shell: git remote set-url origin {{ source_base }}magenta.git && git fetch origin main && git reset --hard origin/main
+    - name: Force fetch latest magenta changes from production branch
+      shell: git remote set-url origin {{ source_base }}magenta.git && git fetch origin production && git reset --hard origin/production
       args:
         chdir: "{{ base_dir }}/magenta-source"
 

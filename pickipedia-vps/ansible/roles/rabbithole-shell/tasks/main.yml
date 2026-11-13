@@ -38,7 +38,8 @@
   git:
     repo: https://github.com/cryptograss/rabbithole.git
     dest: /var/www/rabbithole
-    version: main
+    # production, as every repository since 13 Nov (Justin, #radicle): githouse's, mirrored to GitHub.
+    version: production
     force: yes
   become_user: caddy
   register: rabbithole_source

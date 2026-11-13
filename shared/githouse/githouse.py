@@ -64,6 +64,10 @@ meant to be cheap to lose.
   `docker exec -u git githouse githouse promote <repo>`. A fast-forward where main is behind; where main
   has commits of its own, production takes them in first (a merge that changes none of its files) and main
   fast-forwards to that. Nothing is forced, and main stays an ancestor of production from then on.
+* Every repository runs production (Justin, #radicle, 13 Nov: merge to production, run it, promote to main).
+  A repository with a primary branch (main, or master where it has no main: pickipedia-mcp) and no
+  production gets one, at the primary's own commit: nothing in it that wasn't merged already. Its primary is
+  what a promotion goes into, and what githouse publishes beyond GitHub (Radicle, next).
 * A push that carries a secret is refused, before anything else holds a copy (Skyler and Justin, #ramp,
   10 Nov; re's design): any value from the vault, exactly, as the scrubber has them (/etc/githouse/
   secret-hashes.json: SHA-256 of each, never the values), in any line a commit adds, merges included, or
@@ -97,7 +101,12 @@ ETC = Path(os.environ.get('GITHOUSE_ETC', '/etc/githouse'))
 OWNED = ('main', 'master', 'production', 'release/*')  # the deploy branches: githouse's since the flip
 # Promotion (Justin, #ramp, 11 Nov): machines run production; main is the primary branch, never forced, brought up
 # to production by a person when things are stable. The one deploy branch that goes into another.
-PROMOTES = {'production': 'main'}
+PROMOTES = {'production': ('main', 'master')}  # into the repository's primary: main, or master where it has no main
+
+
+def primary(heads):
+    """The primary branch among a repository's heads: main, or master where there's no main; None if neither."""
+    return next((b for b in PROMOTES['production'] if b in heads), None)
 NAME = re.compile(r'[a-z][a-z0-9-]{0,31}')
 BRANCH = re.compile(r'[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*')
 PUBKEY = re.compile(r'^(sk-)?(ssh-ed25519|ecdsa-sha2-nistp\d+|ssh-rsa)(@openssh\.com)? [A-Za-z0-9+/=]+( \S+)?$')
@@ -499,7 +508,8 @@ def fetch(repo):
             git(repo, 'fetch', '--quiet', '--no-tags', 'github', *wanted[start:start + 200])
         for ref in set(here) - set(there):  # gone from GitHub: GitHub's view of it goes too, nothing of ours
             git(repo, 'update-ref', '-d', ref)
-    taken = reconcile(repo)
+    made = ensure_production(repo)
+    taken = reconcile(repo) or made
     # A clone checks out the default branch GitHub names, if it's one of ours.
     default = re.search(r'^ref: refs/heads/(\S+)\tHEAD$', git(repo, 'ls-remote', '--symref', 'github', 'HEAD'), re.M)
     if default and owned(default.group(1)) and default.group(1) in refs(repo, 'refs/heads/'):
@@ -508,6 +518,20 @@ def fetch(repo):
         retire(repo)
     publish()
     return fetched or taken
+
+
+def ensure_production(repo):
+    """Every repository runs production (Justin, #radicle, 13 Nov): one with a primary branch and no production
+    gets it, at the primary's commit, so it holds nothing that wasn't merged. reconcile sends it to GitHub after.
+    A new githouse, with no deploy branch yet, takes GitHub's first. True if production was made."""
+    heads = refs(repo, 'refs/heads/')
+    base = primary(heads)
+    if 'production' in heads or base is None:
+        return False
+    if git(repo, 'update-ref', 'refs/heads/production', heads[base], ZERO, check=False) is None:
+        return False
+    log(f'{repo.name}: production made at {base}\'s {heads[base][:8]}: every repository runs production')
+    return True
 
 
 # Where GitHub's deploy branches differ from githouse's and stay that way: {repo: {branch: {...}}}, written to
@@ -699,7 +723,7 @@ def parse_order(text):
         raise Refused(f"for: {found[FOR_FIELD]!r} isn't a person's name")
     if not NAME.fullmatch(found['by']) or not NONCE.fullmatch(found['nonce']) or not SHA.fullmatch(found['commit']):
         raise Refused('by, nonce or commit is malformed')
-    promotion = PROMOTES.get(found['branch']) == found['into']
+    promotion = found['into'] in PROMOTES.get(found['branch'], ())
     if not BRANCH.fullmatch(found['branch']) or (owned(found['branch']) and not promotion):
         raise Refused(f"{found['branch']}: not a branch that merges (the deploy branches don't, but production "
                       f"into main)")
@@ -851,7 +875,7 @@ def _merge(repo, order):
     return result
 
 
-def promote(repo, commit, person, why, source='production', into='main'):
+def promote(repo, commit, person, why, source='production', into=None):
     """main brought up to production, exactly at commit, which must be githouse's production now. Afterwards main
     and production are the same commit, so the next promotion is a fast-forward, and main is always an ancestor of
     production (maybelle-config's deploy scripts refuse to deploy otherwise).
@@ -860,9 +884,12 @@ def promote(repo, commit, person, why, source='production', into='main'):
       first, as a merge whose files are production's own, unchanged (parents: production, then main), and main
       fast-forwards to that. Nothing is forced, main's commits stay in history, and nothing that deploys changes.
     {'outcome': 'merged', 'merge': main's new head, 'onto': main's old one, 'promoted': 'fast-forward' or 'merge'}."""
-    if PROMOTES.get(source) != into:
-        raise Refused(f'{source} is not promoted into {into}')
     heads = refs(repo, 'refs/heads/')
+    into = into or primary(heads) or 'main'
+    if into not in PROMOTES.get(source, ()):
+        raise Refused(f'{source} is not promoted into {into}')
+    if primary(heads) not in (None, into):
+        raise Refused(f'{repo.name[:-4]}\'s {source} is promoted into {primary(heads)}, not {into}')
     tip, now = heads.get(into), heads.get(source)
     if now is None or tip is None:
         raise Refused(f'{repo.name[:-4]} has no {source if now is None else into} here')
@@ -1164,7 +1191,7 @@ def main(argv):
         except (Refused, RuntimeError) as e:
             sys.stderr.write(f'githouse: {e}\n')
             return 1
-        print(f"main is production now, at {done['merge'][:8]} ({done['promoted']})"
+        print(f"{primary(refs(repo, 'refs/heads/'))} is production now, at {done['merge'][:8]} ({done['promoted']})"
               + (f"; GitHub {done['github']}" if 'github' in done else ''))
         return 0
     if command == 'loop':

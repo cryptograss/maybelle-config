@@ -104,6 +104,55 @@ class GithouseTest(Repos):
         self.assertEqual(self.differs(), {})
         self.assertFalse(githouse.fetch(self.repo))  # nothing new: nothing fetched, nothing changed
 
+    def other(self, name, primary):
+        """A second repository on the stand-in GitHub, with only its primary branch (no production)."""
+        github = self.tmp / 'github' / 'cryptograss' / f'{name}.git'
+        run('git', 'init', '--quiet', '--bare', '-b', primary, str(github))
+        upstream = self.clone(github, f'{name}-upstream')
+        self.commit(upstream, 'one')
+        run('git', 'push', '--quiet', 'origin', f'HEAD:{primary}', cwd=upstream)
+        githouse.init([f'cryptograss/{name}'], url=str(self.tmp / 'github') + '/{}.git')
+        repo = self.root / f'{name}.git'
+        return github, repo
+
+    def test_every_repository_gets_production(self):
+        # Justin, #radicle, 13 Nov: merge to production, run it, promote to main; magenta, rabbithole and
+        # pickipedia-mcp had only their primary. The first fetch takes GitHub's; the next makes production.
+        for name, primary in (('rabbithole', 'main'), ('pickipedia-mcp', 'master')):
+            with self.subTest(name=name):
+                github, repo = self.other(name, primary)
+                githouse.fetch(repo)
+                tip = githouse.refs(repo, 'refs/heads/')[primary]
+                self.assertTrue(githouse.fetch(repo))
+                self.assertEqual(githouse.refs(repo, 'refs/heads/')['production'], tip)
+                # and on to GitHub, as any deploy branch is
+                self.assertEqual(run('git', '--git-dir', str(github), 'rev-parse', 'production')[1].strip(), tip)
+                self.assertFalse(githouse.fetch(repo))  # made once
+
+    def test_production_is_left_where_it_is(self):
+        before = self.heads()['production']
+        self.commit(self.work, 'merged since')
+        githouse.git(self.repo, 'fetch', '--quiet', str(self.work), 'HEAD')
+        githouse.git(self.repo, 'update-ref', 'refs/heads/main', run('git', 'rev-parse', 'HEAD', cwd=self.work)[1].strip())
+        githouse.fetch(self.repo)
+        self.assertEqual(self.heads()['production'], before)
+
+    def test_a_master_repository_promotes_into_master(self):
+        github, repo = self.other('pickipedia-mcp', 'master')
+        githouse.fetch(repo)
+        githouse.fetch(repo)
+        upstream = self.tmp / 'pickipedia-mcp-upstream'
+        run('git', 'fetch', '--quiet', str(repo), 'refs/heads/production:refs/remotes/h/production', cwd=upstream)
+        run('git', 'checkout', '--quiet', '-B', 'p', 'h/production', cwd=upstream)
+        self.commit(upstream, 'on production')
+        tip = run('git', 'rev-parse', 'HEAD', cwd=upstream)[1].strip()
+        githouse.git(repo, 'fetch', '--quiet', str(upstream), 'HEAD')
+        githouse.git(repo, 'update-ref', 'refs/heads/production', tip)
+        result = githouse.promote(repo, tip, 'root', 'By root.')
+        self.assertEqual(result['promoted'], 'fast-forward')
+        self.assertEqual(githouse.refs(repo, 'refs/heads/')['master'], tip)
+        self.assertNotIn('main', githouse.refs(repo, 'refs/heads/'))
+
     def test_a_push_to_githubs_deploy_branch_is_not_taken(self):
         # The flip (Plan, section 6): main moves only by a merge here. A commit pushed to GitHub's main,
         # around githouse (a token that can push, a GitHub button), never reaches githouse's, so no deploy.
@@ -1037,7 +1086,7 @@ class MergeTest(Repos):
         self.assertIn('main has production already', result['why'])
 
     def test_only_production_into_main(self):
-        for branch, into in (('main', 'production'), ('production', 'master'), ('master', 'main')):
+        for branch, into in (('main', 'production'), ('master', 'main'), ('production', 'release/x')):
             with self.subTest(branch=branch, into=into):
                 result = self.merge(self.order(branch=branch, commit=self.heads()['main'], into=into))
                 self.assertEqual(result['outcome'], 'refused')
@@ -1049,6 +1098,12 @@ class MergeTest(Repos):
         result = self.merge(self.order(branch='production', commit=production))
         self.assertIn('AZ5', result['why'])
         self.assertNotEqual(self.heads()['main'], production)
+
+    def test_production_goes_only_into_the_repositorys_primary(self):
+        # magenta has main: production into master is refused, though master is a primary elsewhere.
+        result = self.merge(self.order(branch='production', commit=self.ahead_on_production(), into='master'))
+        self.assertEqual(result['outcome'], 'refused')
+        self.assertIn('promoted into main, not master', result['why'])
 
     def test_root_promotes_by_hand(self):
         production = self.ahead_on_production()

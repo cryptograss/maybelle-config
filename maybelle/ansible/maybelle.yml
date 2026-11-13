@@ -873,9 +873,10 @@
       vars:
         cgit_port: 8890
         cgit_githouse_host: maybelle.cryptograss.live
-        # The branch each opens on: the one it deploys from (memory-lane's merge_orders.DEPLOYS_FROM).
-        cgit_deploys_from: {magenta: main, maybelle-config: production, pickipedia: production, arthel: production,
-                            rabbithole: main, pickipedia-mcp: master}
+        # The branch each opens on: the one it deploys from (memory-lane's merge_orders.DEPLOYS_FROM). Every
+        # repository runs production since 13 Nov (Justin, #radicle; githouse makes it where there was none).
+        cgit_deploys_from: {magenta: production, maybelle-config: production, pickipedia: production,
+                            arthel: production, rabbithole: production, pickipedia-mcp: production}
 
     - name: Remove old rsync cron if exists
       ansible.builtin.cron:
@@ -1120,11 +1121,12 @@
     # memory-lane is part of magenta since 18 Oct 2026 (magenta/memory-lane/); its
     # services are built from there. /mnt/persist/magenta/source, the old clone of
     # its own repository, is no longer updated or used.
-    # From githouse's copy (the flip, 10 Nov 2026; Cryptograss:Moods/ramp/Plan, section 6), whose main moves
-    # only by a signed merge there: a push to GitHub's main, around githouse, never reaches maybelle. No
-    # GitHub fallback: githouse is set up earlier in this play, and a fresh one has main within minutes.
-    - name: githouse has magenta's main (a fresh githouse fetches it first)
-      command: git --git-dir {{ githouse_dir }}/git/magenta.git rev-parse --verify --quiet refs/heads/main
+    # From githouse's copy (the flip, 10 Nov 2026; Cryptograss:Moods/ramp/Plan, section 6), whose production
+    # moves only by a signed merge there: a push to GitHub's, around githouse, never reaches maybelle. No
+    # GitHub fallback: githouse is set up earlier in this play, and a fresh one has production within minutes
+    # (it makes it from main where there's none: every repository runs production, Justin, #radicle, 13 Nov).
+    - name: githouse has magenta's production (a fresh githouse makes it first)
+      command: git --git-dir {{ githouse_dir }}/git/magenta.git rev-parse --verify --quiet refs/heads/production
       register: githouse_magenta_main
       changed_when: false
       retries: 30
@@ -1135,7 +1137,7 @@
       git:
         repo: "file://{{ githouse_dir }}/git/magenta.git"
         dest: /mnt/persist/magenta/magenta-source
-        version: main
+        version: production
         force: yes
         update: yes
         depth: 1
