@@ -323,12 +323,48 @@ pipelineJob('cron-health') {
                                             exit 1
                                         fi
 
-                                        # ISO times sort as text. The week's log and the one before it, so a rotation can't hide one.
+                                        # ISO times sort as text. The sweep trims this log itself and keeps about two weeks.
                                         SINCE=\\$(date -u -d '24 hours ago' +%Y-%m-%dT%H:%M:%SZ)
-                                        FOUND=\\$(cat "\\$LOG.1" "\\$LOG" 2>/dev/null | awk -v since="\\$SINCE" '\\$2 ~ /^REMOVE/ && \\$1 >= since')
+                                        FOUND=\\$(awk -v since="\\$SINCE" '\\$2 ~ /^REMOVE/ && \\$1 >= since' "\\$LOG")
                                         if [ -n "\\$FOUND" ]; then
                                             echo "FAIL: the vault password was on maybelle's volume outside a deploy, and the sweep removed it:"
                                             echo "\\$FOUND"
+                                            exit 1
+                                        fi
+                                        echo "OK"
+                                    """
+                                }
+                            }
+                        }
+
+                        // The offsite backup (offsite-backup.sh, 05:00 UTC): everything a cold start needs, in one
+                        // restic repository off maybelle. Each run ends with a RESULT line: OK, DEGRADED (sent,
+                        // but a part was stale or missing) or FAILED. Red on anything but OK, or no run in 26 hours.
+                        stage('offsite backup') {
+                            steps {
+                                catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
+                                    sh """
+                                        mkdir -p "\\$WORKSPACE/.alarm"; trap 'echo \\$? > "\\$WORKSPACE/.alarm/offsite backup"' EXIT
+                                        LOG="/var/log/offsite-backup.log"
+                                        STALE_HOURS=26
+
+                                        echo "=== offsite backup ==="
+                                        LAST=\\$(grep ' RESULT ' "\\$LOG" 2>/dev/null | tail -1 || true)
+                                        if [ -z "\\$LAST" ]; then
+                                            echo "FAIL: no result in \\$LOG: the offsite backup has never run"
+                                            exit 1
+                                        fi
+                                        LAST_EPOCH=\\$(date -d "\\$(echo "\\$LAST" | cut -d' ' -f1)" +%s 2>/dev/null || echo 0)
+                                        AGE=\\$(( (\\$(date +%s) - LAST_EPOCH) / 3600 ))
+                                        STATE=\\$(echo "\\$LAST" | cut -d' ' -f3)
+                                        echo "Last run: \\$LAST (\\$AGE hours ago)"
+                                        if [ "\\$AGE" -gt "\\$STALE_HOURS" ]; then
+                                            echo "FAIL: no run for \\$AGE hours"
+                                            exit 1
+                                        fi
+                                        if [ "\\$STATE" != "OK" ] && [ "\\$STATE" != "PENDING" ]; then
+                                            echo "FAIL: the last run was \\$STATE"
+                                            grep ' problem: ' "\\$LOG" | tail -8
                                             exit 1
                                         fi
                                         echo "OK"
