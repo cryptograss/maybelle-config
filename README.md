@@ -81,7 +81,7 @@ This separation means a compromised Jenkins cannot directly push to production -
 
 **Logs:**
 - Deploy log: `/var/log/nfs-deploy.log`
-- Viewable in Jenkins via the backup-memory-lane job
+- Its freshness is checked by the `cron-health` Jenkins job
 
 ## Backup System
 
@@ -90,7 +90,7 @@ Memory Lane database backups run automatically:
 ### Local Backups
 - **Every two hours**, at odd hours (01:00, 03:00 … 23:00), named by Ethereum block height: `magenta_memory_<height>.dump` (`pg_dump -Fc`)
 - **Location**: `/mnt/persist/magenta/backups/`
-- **Retention**: 24 hours
+- **Retention**: 12 hours
 - **Script**: `/mnt/persist/magenta/backup-postgres.sh`
 
 ### Daily Backups
@@ -98,7 +98,7 @@ Memory Lane database backups run automatically:
 - **Location**: `/mnt/persist/magenta/backups/daily/`
 - **Retention**: 7 days
 
-### Offsite Backups
+### The NearlyFreeSpeech mirror (magenta database only)
 - **Schedule**: 04:00 daily
 - **Destination**: NearlyFreeSpeech `/home/private/backups/`
 - **Retention**: a mirror of `daily/` (`rsync --delete`), so the same 7 days
@@ -107,8 +107,48 @@ Memory Lane database backups run automatically:
 
 The live database and every local copy are on the same volume (`/mnt/persist`), so the offsite copy is the only one that survives losing it.
 
+### The offsite backup: everything a cold start needs
+
+`maybelle/scripts/offsite-backup.sh`, daily at 05:00 UTC from root's cron on maybelle, sends one [restic](https://restic.net) snapshot holding:
+
+- the newest daily dump of the magenta database
+- the newest dump of PickiPedia's database
+- all of PickiPedia's uploaded files (mirrored first to `/mnt/persist/pickipedia/files/`)
+- a dump of GlitchTip's database
+- githouse's repositories and its merge log (`/mnt/persist/githouse/git`)
+- hunter's unpushed git work (`/mnt/persist/hunter-vcs/latest`)
+
+**Where**: `offsite_repo` in `maybelle/ansible/maybelle.yml`. For now, the Hetzner Storage Box that delivery-kid mounts, at `/mnt/storage-box/offsite/restic`, reached over SSH through delivery-kid. That is off maybelle but still inside Hetzner, so the NearlyFreeSpeech mirror above stays until `offsite_repo` is a store outside Hetzner.
+
+**Kept**: 7 daily, 4 weekly, 12 monthly snapshots. On Sundays restic reads back a tenth of the repository.
+
+**Password**: restic encrypts everything before it leaves. The password is `offsite_restic_password` in the vault; a person puts it there (`openssl rand -hex 32`). Without it the backup fails and `cron-health` goes red.
+
+**Log**: `/var/log/offsite-backup.log`. Each run ends with a `RESULT` line: `OK`, `DEGRADED` (sent, but a part was stale or missing; the `problem:` lines above it say which) or `FAILED`.
+
+#### Restoring from it
+
+This is written here, not only on the wiki, because the wiki is one of the things being restored. On any machine with root's key for delivery-kid:
+
+```bash
+apt install restic
+ansible-vault view secrets/vault.yml | grep offsite_restic_password    # into a file, say ~/.offsite-pw
+REPO=sftp:root@delivery-kid.cryptograss.live:/mnt/storage-box/offsite/restic
+restic -r $REPO --password-file ~/.offsite-pw snapshots
+restic -r $REPO --password-file ~/.offsite-pw restore latest --target /restore
+```
+
+Everything comes back under `/restore` at the path it had on maybelle, for example `/restore/mnt/persist/magenta/backups/daily/magenta_memory_<block height>.dump`. To take one part only, add `--include <path>`.
+
+If delivery-kid's server is gone but the Storage Box is not, mount the box anywhere (CIFS; `storage_box_host`, `storage_box_user` in `delivery-kid/ansible/inventory.yml`, the password in the vault) and use the local path: `restic -r <mount>/offsite/restic ...`.
+
+Then:
+- **magenta database**: put the dump in `/mnt/persist/magenta/backups/` and run chapter 1; ansible offers it when it finds the database empty (see below).
+- **PickiPedia database and files**: `maybelle/scripts/import-pickipedia.sh` loads a dump; the files go back to `/var/www/pickipedia/images/` on the wiki's server.
+- **githouse**: the repositories go back to `/mnt/persist/githouse/git/` before maybelle's playbook runs; without them a new githouse takes its branches from GitHub.
+
 ### Monitoring
-The `cron-health` Jenkins job (every 5 minutes) checks that the newest dump is under 3 hours old, the newest daily copy under 26 hours, and that the last offsite sync is under 26 hours old and sent something (an empty `daily/` mirrors as "total size is 0").
+The `cron-health` Jenkins job (every 5 minutes) checks that the newest dump is under 3 hours old, the newest daily copy under 26 hours, that the last NearlyFreeSpeech sync is under 26 hours old and sent something (an empty `daily/` mirrors as "total size is 0"), and that the offsite backup's last run is under 26 hours old and ended `OK`. A check that turns red is said in #ops.
 
 ### Manual Backup
 ```bash

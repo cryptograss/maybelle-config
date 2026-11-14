@@ -19,6 +19,12 @@
     # Cryptograss:Moods/ramp/Plan, section 3). Reached by hunter's containers on the
     # private network, and by people on the public address too (githouse_public, below).
     githouse_dir: /mnt/persist/githouse
+    # The offsite backup (maybelle/scripts/offsite-backup.sh): a restic repository. For now the Hetzner
+    # Storage Box, reached through delivery-kid, which mounts it (Justin, #backups, 13 Nov 2026): off
+    # maybelle, not off Hetzner. A store outside Hetzner is a new offsite_repo, an empty offsite_box,
+    # and that store's keys from the vault in /etc/offsite-backup.env.
+    offsite_box: "root@delivery-kid.cryptograss.live:/mnt/storage-box"
+    offsite_repo: "sftp:root@delivery-kid.cryptograss.live:/mnt/storage-box/offsite/restic"
     githouse_bind: "10.0.0.2"
     githouse_port: 2222
     # On maybelle's public address too, so people push from their own machines without a jump host (Justin,
@@ -115,6 +121,8 @@
           - jq
           # Needed by the delivery-kid audit cron's python3 -m venv call
           - python3-venv
+          # The offsite backup (offsite-backup.sh)
+          - restic
         state: present
         update_cache: yes
 
@@ -322,6 +330,7 @@
         - /var/log/pickipedia-backup.log
         - /var/log/pickipedia-deploy.log
         - /var/log/vault-password-sweep.log
+        - /var/log/offsite-backup.log
 
     - name: Remove log paths if they are directories
       file:
@@ -341,6 +350,7 @@
         - /var/log/pickipedia-backup.log
         - /var/log/pickipedia-deploy.log
         - /var/log/vault-password-sweep.log
+        - /var/log/offsite-backup.log
 
     # Jenkins' git trusts githouse's repositories: a system config file, mounted read-only at /etc/gitconfig
     # (the image has none). githouse's git user owns /srv/git, and git won't read another user's repository
@@ -384,6 +394,7 @@
           - "/var/log/pickipedia-deploy.log:/var/log/pickipedia-deploy.log:ro"
           - "/var/log/delivery-kid-audit.log:/var/log/delivery-kid-audit.log:ro"
           - "/var/log/vault-password-sweep.log:/var/log/vault-password-sweep.log:ro"
+          - "/var/log/offsite-backup.log:/var/log/offsite-backup.log:ro"
           # githouse's repositories, read-only: the trusted jobs (pickipedia, arthel) build from them, not from
           # GitHub (the flip, Cryptograss:Moods/ramp/Plan, section 6). memory-lane mounts them the same way.
           - "{{ githouse_dir }}/git:/srv/git:ro"
@@ -1865,6 +1876,49 @@
         minute: "30"
         job: "/usr/local/bin/backup-pickipedia.sh"
 
+    # ----- The offsite backup (host cron) -----
+    # Everything a cold start needs, in one restic repository off maybelle: the newest magenta and
+    # PickiPedia dumps, PickiPedia's uploads, GlitchTip, githouse, hunter's unpushed work. What and why:
+    # the script's header, and Cryptograss:Backups. 05:00, after the day's dumps (03:00, 03:30).
+    # The NearlyFreeSpeech mirror of the magenta dumps above stays until this goes somewhere outside
+    # Hetzner: it is the only copy that is.
+    - name: Deploy the offsite backup script
+      copy:
+        src: "{{ playbook_dir }}/../scripts/offsite-backup.sh"
+        dest: /usr/local/bin/offsite-backup.sh
+        mode: '0750'
+
+    - name: Where the offsite backup goes
+      copy:
+        dest: /etc/offsite-backup.env
+        mode: '0600'
+        content: |
+          OFFSITE_REPO="{{ offsite_repo }}"
+          OFFSITE_BOX="{{ offsite_box }}"
+
+    # From the vault, put there by a person. Without it the backup fails and says so, every day,
+    # and cron-health's "offsite backup" stage is red: nothing here makes one up.
+    - name: The offsite backup's restic password, from the vault
+      copy:
+        dest: /root/.offsite-restic-password
+        mode: '0600'
+        content: "{{ offsite_restic_password }}\n"
+      no_log: true
+      when: offsite_restic_password is defined
+
+    # So cron-health has a line to read before the first 05:00: green for a day, red after if no run followed.
+    - name: Note the offsite backup as installed, until its first run
+      shell: |
+        grep -q ' RESULT ' /var/log/offsite-backup.log || echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) RESULT PENDING installed; the first run is at 05:00 UTC" >> /var/log/offsite-backup.log
+      changed_when: false
+
+    - name: Schedule the offsite backup
+      ansible.builtin.cron:
+        name: "offsite backup"
+        hour: "5"
+        minute: "0"
+        job: "flock -n /tmp/offsite-backup.lock timeout 6h /usr/local/bin/offsite-backup.sh"
+
     - name: Remove old NFS backup cron
       ansible.builtin.cron:
         name: "pickipedia backup from nfs"
@@ -1909,6 +1963,12 @@
           F=/mnt/persist/.vault-password
           LOG=/var/log/vault-password-sweep.log
           NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          # Trims itself, in place: Jenkins is given this one file, so cron-health can't read a rotated
+          # copy, and a logrotate truncation left it nothing to read until the next run.
+          if [ -f "$LOG" ] && [ "$(wc -l < "$LOG")" -gt 3000 ]; then
+              tail -n 2000 "$LOG" > "$LOG.tmp" && cat "$LOG.tmp" > "$LOG"
+              rm -f "$LOG.tmp"
+          fi
           if [ ! -e "$F" ]; then
               echo "$NOW absent" >> "$LOG"
               exit 0
@@ -1938,20 +1998,11 @@
         minute: "*/10"
         job: "/usr/local/bin/vault-password-sweep.sh"
 
-    - name: Rotate the vault password sweep log
-      copy:
-        dest: /etc/logrotate.d/vault-password-sweep
-        mode: '0644'
-        content: |
-          /var/log/vault-password-sweep.log {
-              weekly
-              rotate 4
-              compress
-              delaycompress
-              missingok
-              notifempty
-              copytruncate
-          }
+    # The sweep trims its own log now (see the script).
+    - name: Remove the vault password sweep's logrotate rule
+      file:
+        path: /etc/logrotate.d/vault-password-sweep
+        state: absent
 
     - name: Clean up old scrubber secrets directory if exists
       file:

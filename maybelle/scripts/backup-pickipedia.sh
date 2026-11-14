@@ -23,13 +23,16 @@ BACKUP_FILE="$BACKUP_DIR/pickipedia_$(date +%Y%m%d).sql.gz"
 
 # Run mysqldump on VPS and pipe back
 # The VPS has local MySQL with root access via socket
+# --single-transaction: a consistent dump without locking the wiki's tables while it runs
+# (the VPS's own nightly dump has always used it).
 if ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no "root@${VPS_HOST}" \
-    "mysqldump pickipedia" 2>> "$LOG_FILE" \
+    "mysqldump --single-transaction pickipedia" 2>> "$LOG_FILE" \
     | gzip > "$BACKUP_FILE"; then
 
     log "Backup successful: $BACKUP_FILE ($(stat -c%s "$BACKUP_FILE") bytes)"
 
-    # Keep last 3 days of backups (persistent volume is small, offsite has longer retention)
+    # Keep last 3 days of backups (persistent volume is small; hunter's copy and the offsite
+    # backup, offsite-backup.sh, keep longer)
     find "$BACKUP_DIR" -name "pickipedia_*.sql.gz" -mtime +3 -delete
 
     # Sync to hunter for preview environments
