@@ -1,4 +1,5 @@
-FROM jenkins/jenkins:lts-jdk17
+# jenkins/jenkins:lts-jdk17 froze at 2.541.3 on 18 Mar 2026 when Jenkins LTS moved to Java 21 (re, #security, 15 Nov).
+FROM jenkins/jenkins:lts-jdk21
 
 USER root
 
@@ -66,7 +67,12 @@ RUN jenkins-plugin-cli --plugins \
 ADD --chown=jenkins:jenkins https://github.com/magent-cryptograss/mcp-server-plugin/releases/download/v0.87-reduced-context/mcp-server.hpi /usr/share/jenkins/ref/plugins/mcp-server.hpi
 
 # Create directory for Configuration as Code
-RUN mkdir -p /var/jenkins_home/casc_configs
+RUN mkdir -p /var/jenkins_home/casc_configs \
+    && java -XshowSettings:properties -version 2>&1 | awk -F'= ' '/java\.specification\.version =/{print "java:", $2; ok=($2+0 >= 21)} END{exit !ok}' \
+    && ver=$(java -jar /usr/share/jenkins/jenkins.war --version) && echo "jenkins: $ver" \
+    && awk -v v="$ver" 'BEGIN{split(v, a, "."); exit !(a[1] > 2 || (a[1] == 2 && a[2] >= 580))}'
 
-# Skip initial setup wizard
-ENV JAVA_OPTS -Djenkins.install.runSetupWizard=false
+# Skip initial setup wizard, and upgrade bundled .jpi plugins in JENKINS_HOME when a rebuild brings newer ones
+ENV JAVA_OPTS="-Djenkins.install.runSetupWizard=false" \
+    PLUGINS_FORCE_UPGRADE=true \
+    TRY_UPGRADE_IF_NO_MARKER=true
