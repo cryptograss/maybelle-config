@@ -3,6 +3,7 @@ RESULT line that cron-health reads. Run here against stand-ins for restic, ssh, 
 what they were asked, over a /mnt/persist of our own."""
 
 import os
+import shutil
 import subprocess
 import time
 from pathlib import Path
@@ -25,6 +26,14 @@ case "$(basename "$0") $*" in
 esac
 '''
 
+# The one thing the script asks the clock that changes what it does: the weekday (it checks the repository on
+# Sundays). A test names the day; every other question goes to the real clock. Without this the suite's answer
+# depended on the day it ran: it failed every Sunday.
+CLOCK = '''#!/bin/bash
+[ "$*" = "-u +%u" ] && { echo "${FAKE_WEEKDAY:-3}"; exit 0; }
+exec "$REAL_DATE" "$@"
+'''
+
 
 def aged(path, hours):
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -41,6 +50,8 @@ def maybelle(tmp_path):
     for name in ('restic', 'ssh', 'rsync', 'docker'):
         (fake / 'bin' / name).write_text(STAND_IN)
         (fake / 'bin' / name).chmod(0o755)
+    (fake / 'bin' / 'date').write_text(CLOCK)
+    (fake / 'bin' / 'date').chmod(0o755)
     persist = tmp_path / 'persist'
     aged(persist / 'magenta/backups/daily/magenta_memory_100.dump', 30)
     aged(persist / 'magenta/backups/daily/magenta_memory_200.dump', 2)
@@ -48,7 +59,7 @@ def maybelle(tmp_path):
     aged(persist / 'hunter-vcs/latest/manifest.json', 1)
     (persist / 'githouse/git').mkdir(parents=True)
     (tmp_path / 'password').write_text('not-a-real-one\n')
-    env = {**os.environ, 'PATH': f"{fake / 'bin'}:{os.environ['PATH']}", 'FAKE': str(fake),
+    env = {**os.environ, 'PATH': f"{fake / 'bin'}:{os.environ['PATH']}", 'FAKE': str(fake), 'REAL_DATE': shutil.which('date'),
            'OFFSITE_ENV': str(tmp_path / 'no-env-file'), 'OFFSITE_LOG': str(tmp_path / 'log'),
            'OFFSITE_PERSIST': str(persist), 'OFFSITE_PASSWORD_FILE': str(tmp_path / 'password'),
            'OFFSITE_REPO': 'sftp:root@box:/mnt/storage-box/offsite/restic', 'OFFSITE_BOX': 'root@box:/mnt/storage-box'}
@@ -100,6 +111,14 @@ def test_a_repository_is_made_once(maybelle):
     assert len(the(calls, 'restic')) == 4 and ' init' in the(calls, 'restic')[1]
     _, _, calls = run()
     assert len([call for call in the(calls, 'restic') if call.endswith(' init')]) == 1
+
+
+def test_the_repository_is_checked_on_sundays(maybelle):
+    run, _, _ = maybelle
+    _, _, calls = run(FAKE_WEEKDAY='6')
+    assert not [call for call in the(calls, 'restic') if ' check ' in call]
+    _, _, calls = run(FAKE_WEEKDAY='7')
+    assert len([call for call in the(calls, 'restic') if ' check ' in call]) == 1
 
 
 def test_old_snapshots_are_trimmed_as_one_group(maybelle):
