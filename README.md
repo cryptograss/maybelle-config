@@ -182,13 +182,11 @@ Secrets are stored in `secrets/vault.yml` (ansible-vault encrypted).
 | Variable | Purpose |
 |----------|---------|
 | `memory_lane_postgres_password` | PostgreSQL password for Memory Lane |
-| `ingest_api_key` | API key for watcher to submit conversations |
+| `ingest_api_key` | Key for memory-lane's ingest endpoint, which refuses every request without it (the watcher that used it is retired) |
 | `jenkins_admin_password` | Jenkins admin login |
-| `maybelle_github_token` | GitHub API token for Jenkins |
-| `jenkins_github_ssh_key` | SSH key for Jenkins GitHub access (base64) |
+| `jenkins_github_ssh_key` | SSH key for GitHub (base64): Jenkins has it, and githouse fetches and forwards every push with it |
 | `hunter_root_ssh_key` | SSH key for maybelle→hunter access (base64) |
 | `nfs_ssh_key` | SSH key for production deploys and backups (base64) |
-| `justin_vscode_password` | Justin's code-server password on hunter |
 
 To edit:
 ```bash
