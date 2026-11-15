@@ -11,6 +11,10 @@
 # The bookworm build, whose glibc is older than any base this agent has had. PHP's CLI is for pickipedia's
 # ci/test: its PHP lint and verification-gate checks (re, 9 Nov). Both come in when the image is built on
 # maybelle, not through the agent's proxy.
+#
+# PHP with mbstring, dom and intl (re, 15 Nov): MediaWiki requires them of its PHP, the wiki's extensions call
+# them (mb_substr, DOMDocument), and Debian's php-cli alone has none. pickipedia's first ci/test run here
+# died on mb_strtoupper (branch-tests #272). The build stops if any of the three won't load.
 FROM node:22-bookworm-slim AS node
 FROM jenkins/inbound-agent:latest-jdk17
 USER root
@@ -21,7 +25,7 @@ RUN ln -sf ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
     && ln -sf ../lib/node_modules/corepack/dist/corepack.js /usr/local/bin/corepack
 RUN apt-get update && apt-get install -y --no-install-recommends \
         python3 python3-venv python3-pip python3-dev git openssh-client build-essential \
-        php-cli ca-certificates curl sudo procps \
+        php-cli php-mbstring php-xml php-intl ca-certificates curl sudo procps \
     && rm -rf /var/lib/apt/lists/* \
     && useradd -m -u 1500 -s /bin/sh builder
 COPY run-ci /usr/local/bin/run-ci
@@ -30,5 +34,6 @@ RUN chmod 0755 /usr/local/bin/run-ci && chown root:root /usr/local/bin/run-ci \
     && printf '%s\n' 'Defaults:jenkins env_keep += "http_proxy https_proxy HTTP_PROXY HTTPS_PROXY no_proxy NO_PROXY"' \
                       'jenkins ALL=(root) NOPASSWD: /usr/local/bin/run-ci "", /usr/local/bin/run-ci reclaim' > /etc/sudoers.d/run-ci \
     && chmod 0440 /etc/sudoers.d/run-ci && visudo -cf /etc/sudoers.d/run-ci \
-    && node --version && npm --version && php --version | head -1
+    && node --version && npm --version && php --version | head -1 \
+    && php -r 'foreach (["mbstring", "dom", "intl"] as $e) { if (!extension_loaded($e)) { fwrite(STDERR, "php has no $e\n"); exit(1); } } echo "php: mbstring, dom, intl\n";'
 USER jenkins
