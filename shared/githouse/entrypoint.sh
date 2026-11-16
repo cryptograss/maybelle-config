@@ -11,7 +11,7 @@ chown git:git /srv/git
 if [ "$GITHOUSE_MODE" = "mirror" ]; then
     # Its key to maybelle (hunter's, made by ansible, fetch-only there): GITHOUSE_UPSTREAM is ssh://git@<maybelle>:<port>
     install -o git -g git -m 600 /etc/githouse/mirror_key /srv/git/.mirror_key
-    export GIT_SSH_COMMAND="ssh -i /srv/git/.mirror_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/srv/git/.known_hosts"
+    export GIT_SSH_COMMAND="ssh -i /srv/git/.mirror_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/srv/git/.known_hosts -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=2"
     exec runuser -u git -- python3 /opt/githouse/githouse.py mirror "$GITHOUSE_UPSTREAM" $GITHOUSE_REPOS
 fi
 

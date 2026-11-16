@@ -68,6 +68,8 @@
           volumes:
             - {{ base_dir }}/git:/srv/git
             - {{ base_dir }}/githouse/etc:/etc/githouse:ro
+          init: true
+          pids_limit: 256
           mem_limit: 512m
           cpus: 0.5
           restart: unless-stopped

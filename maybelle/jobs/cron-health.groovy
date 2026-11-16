@@ -373,6 +373,50 @@ pipelineJob('cron-health') {
                             }
                         }
 
+                        // githouse on maybelle (16 Nov: wedged for 35+ min on "Cannot fork" / "Connection reset"
+                        // after PID 1 failed to reap orphans; the banner still printed before KEX failed). Both
+                        // its loop (branches.json rewritten every ~10s) and sshd past KEX ("Permission denied")
+                        // must answer.
+                        stage('githouse') {
+                            steps {
+                                catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
+                                    sh """
+                                        mkdir -p "\\$WORKSPACE/.alarm"; trap 'echo \\$? > "\\$WORKSPACE/.alarm/githouse"' EXIT
+                                        BRANCHES="/srv/git/branches.json"
+                                        LOG="/srv/git/githouse.log"
+                                        GITHOUSE_HOST="10.0.0.2"
+                                        GITHOUSE_PORT="2222"
+                                        STALE_MINUTES=5
+
+                                        echo "=== githouse ==="
+                                        if [ ! -f "\\$BRANCHES" ]; then
+                                            echo "FAIL: \\$BRANCHES missing"
+                                            exit 1
+                                        fi
+                                        AGE=\\$(( (\\$(date +%s) - \\$(stat -c%Y "\\$BRANCHES")) / 60 ))
+                                        echo "branches.json age: \\$AGE min"
+                                        if [ "\\$AGE" -gt "\\$STALE_MINUTES" ]; then
+                                            echo "FAIL: githouse loop stale (>\\$STALE_MINUTES min)"
+                                            tail -15 "\\$LOG" 2>/dev/null || true
+                                            exit 1
+                                        fi
+
+                                        SSH_OUT=\\$(ssh -T -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -p "\\$GITHOUSE_PORT" "git@\\$GITHOUSE_HOST" 2>&1 || true)
+                                        case "\\$SSH_OUT" in
+                                            *"Permission denied"*)
+                                                echo "sshd KEX + auth reachable"
+                                                echo "OK" ;;
+                                            *)
+                                                echo "FAIL: sshd on \\$GITHOUSE_HOST:\\$GITHOUSE_PORT did not reach auth:"
+                                                echo "\\$SSH_OUT"
+                                                tail -15 "\\$LOG" 2>/dev/null || true
+                                                exit 1 ;;
+                                        esac
+                                    """
+                                }
+                            }
+                        }
+
                         stage('delivery-kid audit') {
                             steps {
                                 catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
