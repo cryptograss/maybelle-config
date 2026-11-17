@@ -1076,6 +1076,14 @@ class LimitsTest(unittest.TestCase):
             self.assertEqual(githouse._push_github(Path('/tmp/none.git'), 'HEAD:refs/heads/main', timeout=1),
                              (False, 'timed out after 1s'))
 
+    def test_mirror_init_updates_existing_remote_in_place(self):
+        with tempfile.TemporaryDirectory() as td:
+            with unittest.mock.patch.object(githouse, 'ROOT', Path(td)):
+                githouse.mirror_init(['cryptograss/magenta'], 'ssh://git@10.0.0.2:2222')
+                githouse.mirror_init(['cryptograss/magenta'], 'ssh://git@10.0.0.2:2223')
+                url = githouse.git(Path(td) / 'magenta.git', 'remote', 'get-url', 'maybelle').strip()
+                self.assertEqual(url, 'ssh://git@10.0.0.2:2223/magenta.git')
+
 
 if __name__ == '__main__':
     unittest.main()
