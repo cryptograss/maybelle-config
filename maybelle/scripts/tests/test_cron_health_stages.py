@@ -142,6 +142,45 @@ def test_sweep_waits_for_a_running_deploy_but_not_past_three_hours(sweep):
         deploy.kill()
 
 
+# --- githouse: the stage ---
+
+def githouse_stage(tmp_path, branches_age_min=0, ssh_says='git@10.0.0.2: Permission denied (publickey).'):
+    branches = tmp_path / 'branches.json'
+    if branches_age_min is not None:
+        branches.write_text('{}')
+        then = time.time() - branches_age_min * 60
+        os.utime(branches, (then, then))
+    fake_bin = tmp_path / 'bin'
+    fake_bin.mkdir(exist_ok=True)
+    fake_ssh = fake_bin / 'ssh'
+    fake_ssh.write_text(f'#!/bin/sh\nprintf "%s\\n" {ssh_says!r} >&2\nexit 255\n')
+    fake_ssh.chmod(0o755)
+    start = GROOVY.index('sh """', GROOVY.index("stage('githouse')")) + 6
+    shell = (GROOVY[start:GROOVY.index('"""', start)]
+             .replace('\\\\$', '$')
+             .replace('/srv/git/branches.json', str(branches))
+             .replace('/srv/git/githouse.log', str(tmp_path / 'githouse.log')))
+    env = {**os.environ, 'WORKSPACE': str(tmp_path), 'PATH': f"{fake_bin}:{os.environ.get('PATH', '')}"}
+    done = subprocess.run(['sh', '-c', shell], env=env, capture_output=True, text=True)
+    assert (tmp_path / '.alarm' / 'githouse').read_text().strip() == str(done.returncode)
+    return done.returncode, done.stdout.strip().splitlines()[-1]
+
+
+def test_githouse_green_when_loop_fresh_and_sshd_reaches_auth(tmp_path):
+    assert githouse_stage(tmp_path) == (0, 'OK')
+
+
+def test_githouse_red_when_branches_json_stale_or_missing(tmp_path):
+    assert githouse_stage(tmp_path, branches_age_min=None)[0] == 1
+    code, last = githouse_stage(tmp_path, branches_age_min=8)
+    assert code == 1 and 'stale' in last
+
+
+def test_githouse_red_when_sshd_resets_during_kex(tmp_path):
+    code, last = githouse_stage(tmp_path, ssh_says='Connection reset by 10.0.0.2 port 2222')
+    assert code == 1 and 'Connection reset' in last
+
+
 def test_sweep_trims_its_log_in_place(sweep):
     run, log = sweep
     log.write_text(''.join(f'line {n}\n' for n in range(3500)))

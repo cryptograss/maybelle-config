@@ -1,5 +1,7 @@
 # Only git, only by key, only through githouse auth (the forced command in each key's line, written by
-# githouse.py from the relayed keys and pushers.json). Reached on maybelle's private network only.
+# githouse.py from the relayed keys and pushers.json). Reached on maybelle's private network, and on its
+# public address too when githouse_public is set (so internet SSH scanners hit this port: shed idle
+# pre-auth sockets quickly and cap concurrent startups below the container's PID and memory ceilings).
 Port 22
 HostKey /srv/git/.host-keys/ssh_host_ed25519_key
 AuthorizedKeysFile /srv/git/.authorized_keys
@@ -12,3 +14,7 @@ AllowAgentForwarding no
 X11Forwarding no
 PermitTTY no
 StrictModes no
+LoginGraceTime 20
+MaxStartups 20:30:60
+ClientAliveInterval 30
+ClientAliveCountMax 2

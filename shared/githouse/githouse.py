@@ -103,12 +103,18 @@ BRANCH = re.compile(r'[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*')
 PUBKEY = re.compile(r'^(sk-)?(ssh-ed25519|ecdsa-sha2-nistp\d+|ssh-rsa)(@openssh\.com)? [A-Za-z0-9+/=]+( \S+)?$')
 ZERO = '0' * 40
 EVERY = 60  # seconds between fetches of any one repository
+GIT_TIMEOUT = 120  # seconds before a hung git/ssh child is killed instead of wedging a loop or hook
 
 
-def git(repo, *args, check=True, env=None):
+def git(repo, *args, check=True, env=None, timeout=GIT_TIMEOUT):
     """Its output; on failure, raise -- or, with check=False, None."""
-    done = subprocess.run(['git', '--git-dir', str(repo), *args], capture_output=True, text=True,
-                          env={**os.environ, **(env or {})})
+    try:
+        done = subprocess.run(['git', '--git-dir', str(repo), *args], capture_output=True, text=True,
+                              env={**os.environ, **(env or {})}, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        if check:
+            raise RuntimeError(f"git {' '.join(args)}: timed out after {timeout}s") from None
+        return None
     if done.returncode != 0:
         if check:
             raise RuntimeError(f"git {' '.join(args)}: {done.stderr.strip()}")
@@ -116,10 +122,21 @@ def git(repo, *args, check=True, env=None):
     return done.stdout
 
 
+def _push_github(repo, *specs, timeout=GIT_TIMEOUT):
+    """(ok, detail) of pushing specs to github, bounded by timeout."""
+    try:
+        done = subprocess.run(['git', '--git-dir', str(repo), 'push', '--quiet', 'github', *specs],
+                              capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return False, f'timed out after {timeout}s'
+    return done.returncode == 0, done.stderr.strip()
+
+
 def ssh_with(key):
     """GIT_SSH_COMMAND for a key kept beside the repositories (the deploy key, or the mirror's)."""
     return (f"ssh -i {key} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new "
-            f"-o UserKnownHostsFile={ROOT / '.known_hosts'}")
+            f"-o UserKnownHostsFile={ROOT / '.known_hosts'} "
+            f"-o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=2")
 
 
 def owned(branch):
@@ -197,10 +214,9 @@ def after(repo, user, updates, forward=None):
         forward = bool((git(repo, 'config', '--get', 'githouse.forward', check=False) or '').strip())
     if forward:
         specs = [f':{ref}' if new == ZERO else f'+{ref}:{ref}' for old, new, ref in updates]
-        done = subprocess.run(['git', '--git-dir', str(repo), 'push', '--quiet', 'github', *specs],
-                              capture_output=True, text=True)
-        if done.returncode != 0:
-            log(f'{repo.name}: forwarding {user}\'s push to GitHub failed: {done.stderr.strip()}')
+        ok, err = _push_github(repo, *specs)
+        if not ok:
+            log(f'{repo.name}: forwarding {user}\'s push to GitHub failed: {err}')
         else:  # on GitHub now, where the branches agent clones from: test what was pushed
             for old, new, ref in updates:
                 branch = ref[len('refs/heads/'):]
@@ -546,13 +562,12 @@ def reconcile(repo):
             _say(repo, branch, ('new', gh), f'{branch}: new on GitHub at {gh[:8]}; not taken (root: githouse adopt)')
             continue
         if gh is None or _ancestor(repo, gh, mine):
-            pushed = subprocess.run(['git', '--git-dir', str(repo), 'push', '--quiet', 'github',
-                                     f'{mine}:refs/heads/{branch}'], capture_output=True, text=True)
-            if pushed.returncode == 0:
+            ok, err = _push_github(repo, f'{mine}:refs/heads/{branch}')
+            if ok:
                 git(repo, 'update-ref', f'refs/github/{branch}', mine)
                 _say(repo, branch, None, f'{branch} sent to GitHub at {mine[:8]}')
                 continue
-            state, why = 'behind', f'GitHub refused it: {pushed.stderr.strip()[:200]}'
+            state, why = 'behind', f'GitHub refused it: {err[:200]}'
         elif _ancestor(repo, mine, gh):
             state, why = 'ahead', 'pushed or merged on GitHub, not here: not taken (root: githouse adopt)'
         else:
@@ -836,13 +851,12 @@ def _merge(repo, order):
     result = {'outcome': 'merged', 'merge': merged, 'onto': tip}
     # Then GitHub, the mirror. A refusal there doesn't undo the merge: the minute's reconcile sends it again,
     # or, if GitHub's moved on its own, says so.
-    pushed = subprocess.run(['git', '--git-dir', str(repo), 'push', '--quiet', 'github', f'{merged}:refs/heads/{into}'],
-                            capture_output=True, text=True)
-    if pushed.returncode == 0:
+    ok, err = _push_github(repo, f'{merged}:refs/heads/{into}')
+    if ok:
         git(repo, 'update-ref', f'refs/github/{into}', merged, check=False)
     else:
-        result['github'] = f'not yet: {pushed.stderr.strip()[:200]}'
-        log(f'{repo.name}: merged {merged[:8]} into {into}; GitHub refused it for now: {pushed.stderr.strip()[:200]}')
+        result['github'] = f'not yet: {err[:200]}'
+        log(f'{repo.name}: merged {merged[:8]} into {into}; GitHub refused it for now: {err[:200]}')
     try:
         retire(repo)
         publish()
@@ -889,14 +903,13 @@ def promote(repo, commit, person, why, source='production', into='main'):
         raise Refused(f'{into} moved here meanwhile; promote again')
     # 'merged', as any merge: memory-lane, the CLI and the Moods read that word; 'promoted' says how.
     result = {'outcome': 'merged', 'merge': promoted, 'onto': tip, 'promoted': how}
-    pushed = subprocess.run(['git', '--git-dir', str(repo), 'push', '--quiet', 'github',
-                             *(f'{promoted}:refs/heads/{b}' for b in moved)], capture_output=True, text=True)
-    if pushed.returncode == 0:
+    ok, err = _push_github(repo, *(f'{promoted}:refs/heads/{b}' for b in moved))
+    if ok:
         for b in moved:
             git(repo, 'update-ref', f'refs/github/{b}', promoted, check=False)
     else:  # the minute's reconcile sends them again
-        result['github'] = f'not yet: {pushed.stderr.strip()[:200]}'
-    log(f'{repo.name}: {person} promoted {into} to {source} at {commit[:8]} ({how}){"" if pushed.returncode == 0 else "; GitHub refused it for now"}')
+        result['github'] = f'not yet: {err[:200]}'
+    log(f'{repo.name}: {person} promoted {into} to {source} at {commit[:8]} ({how}){"" if ok else "; GitHub refused it for now"}')
     try:
         retire(repo)
         publish()

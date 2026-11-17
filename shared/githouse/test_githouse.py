@@ -1059,5 +1059,23 @@ class MergeTest(Repos):
     def test_not_an_order(self):
         self.assertEqual(self.merge('merge everything please', 'x')['why'], 'not a merge order')
 
+
+class LimitsTest(unittest.TestCase):
+
+    def test_ssh_command_carries_connect_and_alive_timeouts(self):
+        cmd = githouse.ssh_with(Path('/srv/git/.deploy_key'))
+        for flag in ('ConnectTimeout=15', 'ServerAliveInterval=15', 'ServerAliveCountMax=2'):
+            self.assertIn(flag, cmd)
+
+    def test_hung_git_and_push_time_out_cleanly(self):
+        expired = subprocess.TimeoutExpired(cmd=['git'], timeout=1)
+        with unittest.mock.patch.object(subprocess, 'run', side_effect=expired):
+            self.assertIsNone(githouse.git(Path('/tmp/none.git'), 'ls-remote', 'github', check=False, timeout=1))
+            with self.assertRaisesRegex(RuntimeError, 'timed out after 1s'):
+                githouse.git(Path('/tmp/none.git'), 'ls-remote', 'github', timeout=1)
+            self.assertEqual(githouse._push_github(Path('/tmp/none.git'), 'HEAD:refs/heads/main', timeout=1),
+                             (False, 'timed out after 1s'))
+
+
 if __name__ == '__main__':
     unittest.main()
