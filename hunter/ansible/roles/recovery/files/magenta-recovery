@@ -64,13 +64,20 @@ fi
 fresh=no
 route=""
 read -ra words <<< "${SSH_ORIGINAL_COMMAND:-}"
+# `magenta.sh rescue-disk`: hunter's disk is full. Free Docker's space and
+# leave, with no agent and no tmux, since both need a disk they can write to
+# (17 Nov 2026). The alert still goes, so the team hears someone was here.
+if [ "${words[*]:-}" = "rescue-disk" ]; then
+    setsid /usr/local/bin/recovery-alert "$who" rescue-disk no </dev/null >/dev/null 2>&1 &
+    exec /usr/local/bin/hunter-rescue-disk
+fi
 for word in "${words[@]}"; do
     case "$word" in
         fresh) fresh=yes ;;
         openrouter|subscription) route="$word" ;;
         *)
             echo "magenta-recovery: this login only opens the recovery session" \
-                 "(words: fresh, openrouter, subscription)." >&2
+                 "(words: fresh, openrouter, subscription), or frees disk (rescue-disk, alone)." >&2
             exit 2
             ;;
     esac
