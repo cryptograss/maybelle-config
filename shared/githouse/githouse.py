@@ -1067,8 +1067,9 @@ def mirror_init(full_names, upstream):
         repo = ROOT / f'{name}.git'
         if not (repo / 'HEAD').exists():
             subprocess.run(['git', 'init', '--quiet', '--bare', str(repo)], check=True)
-        git(repo, 'remote', 'remove', 'maybelle', check=False)
-        git(repo, 'remote', 'add', 'maybelle', f'{upstream.rstrip("/")}/{name}.git')
+        remote_url = f'{upstream.rstrip("/")}/{name}.git'
+        if git(repo, 'remote', 'set-url', 'maybelle', remote_url, check=False) is None:
+            git(repo, 'remote', 'add', 'maybelle', remote_url)
         git(repo, 'config', 'uploadpack.allowReachableSHA1InWant', 'true')
 
 

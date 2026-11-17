@@ -120,6 +120,23 @@
     state: directory
     mode: '0755'
 
+# If an earlier deploy built magenta:latest (10.7GB) and stopped before recreating the containers
+# (17 Nov: disk hit 100% right after the build, leaving both the running 10.7GB image and the unused
+# magenta:latest on disk), drop the unused tag first so the rebuild doesn't stack a third 10.7GB copy.
+- name: Reclaim dangling images and any unused magenta:latest before building
+  shell: |
+    set -euo pipefail
+    latest_id=$(docker image inspect --format '{% raw %}{{.Id}}{% endraw %}' magenta:latest 2>/dev/null || true)
+    in_use=$(docker ps -aq | xargs -r docker inspect --format '{% raw %}{{.Image}}{% endraw %}' | sort -u)
+    if [ -n "$latest_id" ] && ! grep -qxF "$latest_id" <<<"$in_use"; then
+      docker image rm -f magenta:latest
+    fi
+    docker image prune -f
+  args:
+    executable: /bin/bash
+  register: pre_build_prune
+  changed_when: "'Untagged:' in pre_build_prune.stdout or 'Total reclaimed space: 0B' not in pre_build_prune.stdout"
+
 - name: Build magenta base image (step by step in /opt/magenta/logs/image-build.log)
   shell: >
     set -o pipefail;
@@ -157,11 +174,8 @@
 # bumps) don't accumulate unbounded. -f only skips the prompt: this removes
 # any cache not in use right now, oldest first, until the cap is left.
 #
-# 20GB, not 3GB (2026-10-16): the image's own cache is about 10GB, and since
-# hunter's 2026-10-15 reboot two builds in a row reused nothing at all (0 of
-# 35 steps, then 0 of 33, the base image unchanged), each costing about six
-# minutes a deploy. A 3GB cap can't hold one build's cache, if that cache is
-# reclaimable. The weekly `builder prune -a` (housekeeping) still clears it
-# all on Sundays; the disk had 43GB free.
-- name: Cap Docker BuildKit cache at 20GB
-  command: docker builder prune -f --keep-storage 20GB
+# 12GB (lowered from 20GB on 17 Nov after 20GB + two 10.7GB magenta images pushed the 150GB disk to 100%):
+# the image's own cache is about 10GB, so 12GB still holds one full build's cache while leaving 8GB more
+# headroom for the rest of the play before the old magenta image is pruned.
+- name: Cap Docker BuildKit cache at 12GB
+  command: docker builder prune -f --keep-storage 12GB
