@@ -179,6 +179,20 @@
         owner: 1000
         group: 1000
 
+    # Jenkins MCP was retired from container startup on 2 Jan 2026 (260e5f1c); remove any leftover
+    # copy of the custom 0.87 .hpi from JENKINS_HOME/plugins so a dead plugin never sits on disk.
+    - name: Remove retired mcp-server plugin from Jenkins home
+      file:
+        path: "{{ jenkins_home }}/plugins/{{ item }}"
+        state: absent
+      loop:
+        - mcp-server.hpi
+        - mcp-server.hpi.pinned
+        - mcp-server.hpi.version_from_image
+        - mcp-server.jpi
+        - mcp-server
+      notify: Restart Jenkins container
+
     - name: Create Jenkins Docker network
       docker_network:
         name: jenkins-network
