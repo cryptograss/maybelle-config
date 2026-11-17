@@ -54,7 +54,7 @@
     # Where merge orders wait to be fetched: memory-lane carries them, githouse checks each.
     githouse_orders_url: "http://10.0.0.2:3000/api/merge-orders/pending/"
     # After a push reaches GitHub, githouse asks Jenkins' branch-tests job to test it, as the reporter (Plan,
-    # section 11). Jenkins publishes 8080 on the host, which githouse reaches as hunter does.
+    # section 11). Jenkins publishes 8080 on localhost and the private address, where githouse reaches it.
     githouse_jenkins_url: "http://10.0.0.2:8080/"
     # memory-lane's merge key, public half: the merge button signs with it, for whoever pressed (Plan, section
     # 10). Made by Justin on 8 Nov, the private half in the vault as memory_lane_merge_key. githouse lists it as
@@ -421,8 +421,13 @@
           DELIVERY_KID_API_KEY: "{{ delivery_kid_api_key }}"
           # report-alarm.sh posts a red or green check to #ops with this; it can do nothing else.
           MOOD_ALARM_KEY: "{{ memory_lane_alarm_key | default('') }}"
+        # Not on the public address: there it was Jenkins in plain HTTP, its login form and every API, around
+        # Caddy's TLS (magent's sweep, #security, 14 Nov). Docker's published ports skip ufw. Caddy and the deploy
+        # scripts come in on localhost; githouse on the private network (githouse_jenkins_url), as memory-lane's
+        # 3000 is published.
         ports:
-          - "8080:8080"
+          - "127.0.0.1:8080:8080"
+          - "10.0.0.2:8080:8080"
         networks:
           - name: jenkins-network
           - name: branches-net
