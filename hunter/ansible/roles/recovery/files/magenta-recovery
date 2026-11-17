@@ -44,8 +44,9 @@ if [ "${1:-}" = "--session" ]; then
             export PATH="$HOME/.local/node/bin:$HOME/.local/pi/bin:$PATH"
             pi_extra=()
             if [ "${FREE_KB:-102400}" -lt 102400 ]; then
-                echo "⚠ / has under 100MB free (${FREE_KB:-0} KB): opening Pi in RAM (--no-session --offline)" >&2
-                pi_extra=(--no-session --offline)
+                install -d -m 700 "$TMPDIR/pi-sessions"
+                echo "⚠ / has under 100MB free (${FREE_KB:-0} KB): writing Pi session in RAM ($TMPDIR/pi-sessions) for audit shipping" >&2
+                pi_extra=(--session-dir "$TMPDIR/pi-sessions" --offline)
             fi
             exec "$HOME/.local/pi/bin/pi" "${pi_extra[@]}" --model openrouter/anthropic/claude-opus-5.5
             ;;
