@@ -60,3 +60,27 @@ def test_the_part_line_goes_when_it_is_whole(ship):
         f.write(b'1}\n')
     ship.step()
     assert ship.received == [b'.claude/projects/p/s.jsonl\t{"a":1}\n']
+
+
+def test_glob_sources_ship_ram_sessions_and_skip_symlinked_roots(ship, tmp_path):
+    ram = tmp_path / 'shm' / 'recovery-tmp-1001' / 'pi-sessions'
+    ram.mkdir(parents=True)
+    (ram / 's.jsonl').write_bytes(b'{"ram":1}\n')
+    evil = tmp_path / 'shm' / 'recovery-tmp-9999'
+    evil.mkdir(parents=True)
+    (evil / 'pi-sessions').symlink_to(ship.transcript.parent)
+    ship.transcript.write_bytes(b'{"secret":1}\n')
+    ship.SOURCES = [str(tmp_path / 'shm' / 'recovery-tmp-*' / 'pi-sessions')]
+    ship.step()
+    assert len(ship.received) == 1
+    assert b'{"ram":1}' in ship.received[0]
+    assert b'secret' not in ship.received[0]
+
+
+def test_full_disk_on_offsets_file_still_ships_once(ship, tmp_path):
+    ship.STATE = str(tmp_path / 'missing-dir' / 'offsets.json')
+    ship.transcript.write_bytes(b'{"a":1}\n')
+    ship.step()
+    ship.step()
+    assert ship.received == [b'.claude/projects/p/s.jsonl\t{"a":1}\n']
+
