@@ -331,6 +331,7 @@
         - /var/log/pickipedia-deploy.log
         - /var/log/vault-password-sweep.log
         - /var/log/offsite-backup.log
+        - /var/log/hunter-disk.log
 
     - name: Remove log paths if they are directories
       file:
@@ -351,6 +352,7 @@
         - /var/log/pickipedia-deploy.log
         - /var/log/vault-password-sweep.log
         - /var/log/offsite-backup.log
+        - /var/log/hunter-disk.log
 
     # Jenkins' git trusts githouse's repositories: a system config file, mounted read-only at /etc/gitconfig
     # (the image has none). githouse's git user owns /srv/git, and git won't read another user's repository
@@ -395,6 +397,7 @@
           - "/var/log/delivery-kid-audit.log:/var/log/delivery-kid-audit.log:ro"
           - "/var/log/vault-password-sweep.log:/var/log/vault-password-sweep.log:ro"
           - "/var/log/offsite-backup.log:/var/log/offsite-backup.log:ro"
+          - "/var/log/hunter-disk.log:/var/log/hunter-disk.log:ro"
           # githouse's repositories, read-only: the trusted jobs (pickipedia, arthel) build from them, not from
           # GitHub (the flip, Cryptograss:Moods/ramp/Plan, section 6). memory-lane mounts them the same way.
           - "{{ githouse_dir }}/git:/srv/git:ro"
@@ -2003,6 +2006,40 @@
       file:
         path: /etc/logrotate.d/vault-password-sweep
         state: absent
+
+    # hunter's disk, watched from here so #ops hears before a deploy fills it (17 Nov: hunter-disk-report
+    # wrote only to hunter's journal and MOTD, so nobody saw 87% -> 100%). Writes nothing on hunter, so a
+    # 100%-full hunter still reports 100% rather than failing to write its own status file.
+    - name: Hunter disk check script
+      copy:
+        dest: /usr/local/bin/check-hunter-disk.sh
+        mode: '0750'
+        content: |
+          #!/bin/bash
+          LOG=/var/log/hunter-disk.log
+          NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          if [ -f "$LOG" ] && [ "$(wc -l < "$LOG")" -gt 3000 ]; then
+              tail -n 2000 "$LOG" > "$LOG.tmp" && cat "$LOG.tmp" > "$LOG"
+              rm -f "$LOG.tmp"
+          fi
+          if RAW=$(ssh -o BatchMode=yes -o ConnectTimeout=10 root@hunter.cryptograss.live 'df -Ph /' 2>&1) \
+              && LINE=$(printf '%s\n' "$RAW" | awk 'NR==2 {gsub("%","",$5); printf "pct=%s used=%s avail=%s size=%s", $5, $3, $4, $2}') \
+              && [ -n "$LINE" ]; then
+              echo "$NOW OK $LINE" >> "$LOG"
+          else
+              echo "$NOW UNREACHABLE $(printf '%s' "$RAW" | tr '\r\n' '  ')" >> "$LOG"
+          fi
+
+    - name: Cronjob to check hunter's disk
+      ansible.builtin.cron:
+        name: "check hunter disk"
+        minute: "*/5"
+        job: "/usr/local/bin/check-hunter-disk.sh"
+
+    - name: Run hunter disk check once now so cron-health has a reading
+      command: /usr/local/bin/check-hunter-disk.sh
+      changed_when: false
+      failed_when: false
 
     - name: Clean up old scrubber secrets directory if exists
       file:

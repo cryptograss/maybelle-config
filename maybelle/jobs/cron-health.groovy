@@ -200,6 +200,50 @@ pipelineJob('cron-health') {
                             }
                         }
 
+                        // hunter's root filesystem (150GB): above 85% (~22GB free), an uncached 10.7GB magenta
+                        // image build + BuildKit cache risks hitting ENOSPC mid-deploy (17 Nov).
+                        stage('hunter disk') {
+                            steps {
+                                catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
+                                    sh """
+                                        mkdir -p "\\$WORKSPACE/.alarm"; trap 'echo \\$? > "\\$WORKSPACE/.alarm/hunter disk"' EXIT
+                                        LOG="/var/log/hunter-disk.log"
+                                        STALE_MINUTES=15
+                                        ALARM=85
+
+                                        echo "=== hunter disk ==="
+                                        LAST=\\$(tail -1 "\\$LOG" 2>/dev/null || true)
+                                        if [ -z "\\$LAST" ]; then
+                                            echo "FAIL: nothing in \\$LOG: check-hunter-disk.sh has never run"
+                                            exit 1
+                                        fi
+                                        LAST_EPOCH=\\$(date -d "\\$(echo "\\$LAST" | cut -d' ' -f1)" +%s 2>/dev/null || echo 0)
+                                        AGE=\\$(( (\\$(date +%s) - LAST_EPOCH) / 60 ))
+                                        echo "Last check: \\$LAST (\\$AGE min ago)"
+                                        if [ "\\$AGE" -gt "\\$STALE_MINUTES" ]; then
+                                            echo "FAIL: check-hunter-disk.sh hasn't run for \\$AGE min"
+                                            exit 1
+                                        fi
+                                        case "\\$LAST" in
+                                            *" UNREACHABLE "*)
+                                                echo "FAIL: hunter unreachable from maybelle"
+                                                exit 1 ;;
+                                        esac
+                                        PCT=\\$(echo "\\$LAST" | sed -n 's/.*pct=\\([0-9][0-9]*\\).*/\\1/p')
+                                        if [ -z "\\$PCT" ]; then
+                                            echo "FAIL: malformed hunter disk line: \\$LAST"
+                                            exit 1
+                                        fi
+                                        if [ "\\$PCT" -ge "\\$ALARM" ]; then
+                                            echo "FAIL: hunter / at \\${PCT}% (alarm at \\${ALARM}%)"
+                                            exit 1
+                                        fi
+                                        echo "OK"
+                                    """
+                                }
+                            }
+                        }
+
                         stage('memory-lane backup') {
                             steps {
                                 catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {

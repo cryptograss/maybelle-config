@@ -181,6 +181,32 @@ def test_githouse_red_when_sshd_resets_during_kex(tmp_path):
     assert code == 1 and 'Connection reset' in last
 
 
+# --- hunter disk: the stage ---
+
+def hunter_disk(tmp_path, *lines):
+    (tmp_path / 'log').write_text(''.join(line + '\n' for line in lines))
+    return stage('hunter disk', '/var/log/hunter-disk.log', tmp_path)
+
+
+def test_hunter_disk_green_below_85_percent(tmp_path):
+    assert hunter_disk(tmp_path, f'{iso(0.05)} OK pct=84 used=120G avail=25G size=150G') == (0, 'OK')
+
+
+def test_hunter_disk_red_at_or_above_85_percent(tmp_path):
+    code, last = hunter_disk(tmp_path, f'{iso(0.05)} OK pct=85 used=122G avail=23G size=150G')
+    assert code == 1 and '85%' in last
+    code, last = hunter_disk(tmp_path, f'{iso(0.05)} OK pct=100 used=145G avail=0B size=150G')
+    assert code == 1 and '100%' in last
+
+
+def test_hunter_disk_red_when_unreachable_stale_or_empty(tmp_path):
+    code, last = hunter_disk(tmp_path, f'{iso(0.05)} UNREACHABLE ssh: connect to host hunter port 22: Operation timed out')
+    assert code == 1 and 'unreachable' in last
+    assert hunter_disk(tmp_path, f'{iso(0.5)} OK pct=70 used=100G avail=50G size=150G')[0] == 1
+    code, last = hunter_disk(tmp_path)
+    assert code == 1 and 'never run' in last
+
+
 def test_sweep_trims_its_log_in_place(sweep):
     run, log = sweep
     log.write_text(''.join(f'line {n}\n' for n in range(3500)))
