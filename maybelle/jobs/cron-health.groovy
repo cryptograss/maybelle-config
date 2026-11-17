@@ -229,11 +229,12 @@ pipelineJob('cron-health') {
                                                 echo "FAIL: hunter unreachable from maybelle"
                                                 exit 1 ;;
                                         esac
-                                        PCT=\\$(echo "\\$LAST" | sed -n 's/.*pct=\\([0-9][0-9]*\\).*/\\1/p')
-                                        if [ -z "\\$PCT" ]; then
-                                            echo "FAIL: malformed hunter disk line: \\$LAST"
-                                            exit 1
-                                        fi
+                                        PCT=\\$(for w in \\$LAST; do case "\\$w" in pct=*) echo "\\${w#pct=}" ;; esac; done)
+                                        case "\\$PCT" in
+                                            ''|*[!0-9]*)
+                                                echo "FAIL: malformed hunter disk line: \\$LAST"
+                                                exit 1 ;;
+                                        esac
                                         if [ "\\$PCT" -ge "\\$ALARM" ]; then
                                             echo "FAIL: hunter / at \\${PCT}% (alarm at \\${ALARM}%)"
                                             exit 1
