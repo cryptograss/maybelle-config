@@ -1,0 +1,55 @@
+#!/bin/bash
+# hunter-rescue-disk: free Docker's space on hunter when its disk is full.
+# `magenta.sh rescue-disk` lands here, through recovery@hunter (the word
+# rescue-disk in magenta-recovery). No agent, no model, no tmux: nothing that
+# needs to write to a disk that's already full. Justin, #ops, 17 Nov 2026,
+# after a deploy filled the disk and recovery couldn't open.
+#
+# Safest first, and stops as soon as TARGET_GB are free:
+#   1. the build cache (costs only a slower next build)
+#   2. dangling images (<none>, left by earlier builds)
+#   3. images no container uses, running or stopped (a deploy rebuilds them)
+# It never touches volumes, containers, or anything under /opt/magenta.
+#
+# The recovery agent's rules (files/CLAUDE.md) forbid it any prune and any
+# BuildKit call, after dockerd panicked on 15 Oct 2026. This is not the agent:
+# a person chose this word. Step 1 is the same command the weekly housekeeping
+# timer already runs as root (docker-builder-prune.service).
+# The procedure for people: Cryptograss:Hunter/Disk full on PickiPedia.
+set -u
+
+TARGET_GB=${HUNTER_RESCUE_TARGET_GB:-25}
+
+free_gb() { df -P -BG / | awk 'NR==2 {gsub("G", "", $4); print $4}'; }
+say() { echo "rescue-disk: $*"; }
+enough() {
+    local now; now=$(free_gb)
+    say "/ has ${now}G free (stopping at ${TARGET_GB}G)"
+    [ "$now" -ge "$TARGET_GB" ]
+}
+
+say "before: $(df -h --output=pcent,used,avail,size / | tail -1)"
+if enough; then
+    say "nothing to do"
+    exit 0
+fi
+
+say "1/3 build cache: docker builder prune -a -f"
+docker builder prune -a -f | tail -1
+enough && { say "done"; exit 0; }
+
+say "2/3 dangling images: docker image prune -f"
+docker image prune -f | tail -1
+enough && { say "done"; exit 0; }
+
+say "3/3 images no container uses: docker image prune -a -f"
+docker image prune -a -f | tail -1
+if enough; then
+    say "done"
+    exit 0
+fi
+
+say "still under ${TARGET_GB}G free after all three steps. Stop here, and ask in #ops"
+say "before deleting anything else (Cryptograss:Hunter/Disk full). Largest directories:"
+du -xhd1 /opt /var/lib/docker 2>/dev/null | sort -rh | head -5 | sed 's/^/    /'
+exit 1

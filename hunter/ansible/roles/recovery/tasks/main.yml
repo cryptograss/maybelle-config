@@ -51,6 +51,16 @@
     group: root
     mode: '0755'
 
+# `magenta.sh rescue-disk`: the same login, one word, no agent. Frees Docker's
+# space when hunter's disk is full, which is when the session above can't open.
+- name: The disk rescue (rescue-disk)
+  copy:
+    src: hunter-rescue-disk
+    dest: /usr/local/bin/hunter-rescue-disk
+    owner: root
+    group: root
+    mode: '0755'
+
 - name: Its rules and permissions
   copy:
     src: "{{ item.src }}"
