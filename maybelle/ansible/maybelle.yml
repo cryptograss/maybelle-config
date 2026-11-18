@@ -1210,6 +1210,10 @@
           MOOD_ALLOWED_SIGNERS=/etc/magenta/allowed_signers
           MAGENTA_COMMIT={{ (memory_lane_source.after | default(''))[:12] }}
           MAGENTA_BACKUP_DIR=/mnt/persist/magenta/backups
+          {% if ALCHEMY_API_KEY | default('') %}
+          # The chain head's second node (chain-head, below): asked when the public one doesn't answer.
+          ETH_RPC_FALLBACK_URL=https://eth-mainnet.g.alchemy.com/v2/{{ ALCHEMY_API_KEY }}
+          {% endif %}
           # Each person's PickiPedia name, shown in magenta (memory-lane wiki_auth.py).
           MOOD_WIKI_NAMES=/etc/magenta/wiki_names
           # Who may kick, ban, scram (magenta.sh AZ5) and lift, with their SSH
@@ -1440,6 +1444,22 @@
               stdin_open: true
               tty: true
               command: python manage.py run_mcp_server_v2 --port 8000
+
+            # The chain's head as each block lands (memory-lane conversations/services/chain_head.py; Justin,
+            # 17 Nov, #interfaces): a newHeads subscription on a public node, polling every 12 s when that drops.
+            # magenta's pages, the narrator's "15 blocks in" and /api/block/ (PickiPedia's too) read what it keeps.
+            chain-head:
+              build:
+                context: .
+                dockerfile: Dockerfile.services
+              container_name: chain-head
+              env_file: .env
+              environment:
+                - DJANGO_SETTINGS_MODULE=memory_viewer.settings
+              networks:
+                - memory-lane-net
+              restart: unless-stopped
+              command: python manage.py watch_head
 
             scrubber:
               build:

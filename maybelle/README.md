@@ -30,6 +30,7 @@ This allows maybelle to be wiped and rebuilt quickly - just reattach the volume 
 - **Memory Lane**: https://memory-lane.maybelle.cryptograss.live - Web UI for magent conversation history
 - **MCP Server**: http://10.0.0.2:8000 - Memory MCP server (private network, used by hunter containers)
 - **PostgreSQL**: magenta-postgres container on memory-lane-net network
+- **chain-head**: keeps Ethereum's head as each block lands (`manage.py watch_head`: a public node's newHeads socket, polling every 12 s when that drops); magenta's pages and `/api/block/` read it
 
 ### Network
 
