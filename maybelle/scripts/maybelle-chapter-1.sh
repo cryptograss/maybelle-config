@@ -15,24 +15,30 @@
 #   - ANSIBLE_VAULT_PASSWORD_FILE env var set on your laptop
 #
 # Usage:
-#   ./maybelle/scripts/maybelle-chapter-1.sh [--rebuild]
+#   ./maybelle/scripts/maybelle-chapter-1.sh [--rebuild] [--ssh]
 #
 # Options:
 #   --rebuild    Force rebuild of docker images (no cache)
+#   --ssh        Attach via TCP ssh instead of mosh (mosh also falls back to ssh automatically if UDP is blocked)
 
 set -e
 
 # Parse command line arguments
 REBUILD_IMAGES=""
+USE_SSH=""
 while [[ $# -gt 0 ]]; do
     case $1 in
         --rebuild)
             REBUILD_IMAGES="true"
             shift
             ;;
+        --ssh)
+            USE_SSH="true"
+            shift
+            ;;
         *)
             echo "Unknown option: $1"
-            echo "Usage: $0 [--rebuild]"
+            echo "Usage: $0 [--rebuild] [--ssh]"
             exit 1
             ;;
     esac
@@ -78,9 +84,33 @@ if [ ! -f "$ANSIBLE_VAULT_PASSWORD_FILE" ]; then
     exit 1
 fi
 
-# Mount volume if needed (before copying files)
+# Mount volume if needed, and if a deploy is already running, reattach instead of overwriting its files.
 echo "Ensuring volume is mounted..."
+if ssh "${USER}@${HOST}" "pgrep -f 'ansible-playbook.*maybelle\\.yml' >/dev/null"; then
+    echo "A maybelle deploy is already running; attaching to tmux session '$SESSION_NAME'..."
+    if [ -z "$USE_SSH" ] && command -v mosh >/dev/null 2>&1; then
+        mosh "${USER}@${HOST}" -- tmux attach-session -t "$SESSION_NAME" || ssh -t "${USER}@${HOST}" "tmux attach-session -t '$SESSION_NAME'"
+    else
+        ssh -t "${USER}@${HOST}" "tmux attach-session -t '$SESSION_NAME'"
+    fi
+    exit 0
+fi
 ssh "${USER}@${HOST}" "mkdir -p ${HETZNER_VOLUME_PATH} && (mountpoint -q ${HETZNER_VOLUME_PATH} || mount ${VOLUME_DEVICE} ${HETZNER_VOLUME_PATH})"
+
+# Until the detached tmux session starts on maybelle and arms its own EXIT trap, this laptop script
+# owns removing the copied vault password and scrubber secrets if anything fails or is interrupted
+# (19 Nov: mosh failed on venue Wi-Fi after scp, stranding .vault-password until the 30-min sweep).
+REMOTE_ARMED=0
+REMOTE_SCRIPT_PATH="/tmp/chapter-1-script.sh"
+cleanup_unarmed() {
+    if [ "$REMOTE_ARMED" -eq 0 ]; then
+        echo "" >&2
+        echo "Removing copied vault files from maybelle before exiting..." >&2
+        ssh -o ConnectTimeout=10 "${USER}@${HOST}" \
+            "rm -f '${HETZNER_VOLUME_PATH}/.vault-password' /tmp/scrubber-secrets.json '${REMOTE_SCRIPT_PATH}'" 2>/dev/null || true
+    fi
+}
+trap cleanup_unarmed EXIT
 
 echo "Copying vault password to maybelle..."
 scp "$ANSIBLE_VAULT_PASSWORD_FILE" "${USER}@${HOST}:${HETZNER_VOLUME_PATH}/.vault-password"
@@ -100,8 +130,6 @@ print(json.dumps(secrets))
 echo "$SECRETS_JSON" | ssh "${USER}@${HOST}" "cat > /tmp/scrubber-secrets.json && chmod 600 /tmp/scrubber-secrets.json"
 echo "Extracted $(echo "$SECRETS_JSON" | python3 -c 'import sys,json; print(len(json.load(sys.stdin)))') secrets for scrubber"
 
-echo ""
-echo "Connecting via mosh..."
 echo ""
 
 # Commands to run on maybelle
@@ -127,7 +155,7 @@ VAULT_PASSWORD_FILE="__VAULT_PASSWORD_FILE__"
 # near its end, but a run that fails or stops before that task left it on the
 # volume until the next deploy that got that far. This removes it whatever
 # happens. The scrubber's copied secret list goes with it.
-trap 'rm -f "$VAULT_PASSWORD_FILE" /tmp/scrubber-secrets.json' EXIT
+trap 'rm -f "$VAULT_PASSWORD_FILE" /tmp/scrubber-secrets.json /tmp/chapter-1-script.sh' EXIT
 VOLUME_DEVICE="__VOLUME_DEVICE__"
 REBUILD_IMAGES="__REBUILD_IMAGES__"
 
@@ -245,9 +273,19 @@ REMOTE_SCRIPT="${REMOTE_SCRIPT//__VOLUME_DEVICE__/$VOLUME_DEVICE}"
 REMOTE_SCRIPT="${REMOTE_SCRIPT//__REBUILD_IMAGES__/$REBUILD_IMAGES}"
 REMOTE_SCRIPT="${REMOTE_SCRIPT//__DEPLOY_BY__/$DEPLOY_BY}"
 
-# Copy script to maybelle and run it via mosh/tmux
-REMOTE_SCRIPT_PATH="/tmp/chapter-1-script.sh"
-echo "$REMOTE_SCRIPT" | ssh "${USER}@${HOST}" "cat > ${REMOTE_SCRIPT_PATH} && chmod +x ${REMOTE_SCRIPT_PATH}"
+# Upload script and start the tmux session detached over TCP ssh first so its EXIT trap owns
+# .vault-password and /tmp/scrubber-secrets.json before mosh even attempts UDP.
+echo "$REMOTE_SCRIPT" | ssh "${USER}@${HOST}" "cat > ${REMOTE_SCRIPT_PATH} && chmod 700 ${REMOTE_SCRIPT_PATH}"
+ssh "${USER}@${HOST}" "tmux kill-session -t '$SESSION_NAME' 2>/dev/null || true; tmux new-session -d -s '$SESSION_NAME' '${REMOTE_SCRIPT_PATH}'"
+REMOTE_ARMED=1
 
-# Connect via mosh, create tmux session, run script
-mosh "${USER}@${HOST}" -- tmux new-session -A -s "$SESSION_NAME" "${REMOTE_SCRIPT_PATH}"
+if [ -z "$USE_SSH" ] && command -v mosh >/dev/null 2>&1; then
+    echo "Attaching via mosh (pass --ssh on networks that block UDP)..."
+    mosh "${USER}@${HOST}" -- tmux attach-session -t "$SESSION_NAME" || {
+        echo "mosh did not connect (UDP blocked?); attaching over ssh instead..."
+        ssh -t "${USER}@${HOST}" "tmux attach-session -t '$SESSION_NAME'"
+    }
+else
+    echo "Attaching via ssh..."
+    ssh -t "${USER}@${HOST}" "tmux attach-session -t '$SESSION_NAME'"
+fi
