@@ -9,7 +9,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from .config import get_settings
-from .routes import health, albums, drafts, content, enrich, torrent, staging, peaks, repackage
+from .routes import health, albums, drafts, content, enrich, torrent, staging, peaks, repackage, upload
 from .routes.content import log_pre_handler_failure
 
 # Configure logging
@@ -112,6 +112,7 @@ app.include_router(health.router)
 app.include_router(albums.router)
 app.include_router(drafts.router)
 app.include_router(content.router)
+app.include_router(upload.router)
 app.include_router(enrich.router)
 app.include_router(torrent.router)
 app.include_router(staging.router)
