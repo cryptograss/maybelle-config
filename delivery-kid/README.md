@@ -126,6 +126,7 @@ Routed by Caddy to the pinning service. The code is the reference: `pinning-serv
 | `GET /health`, `/version`, `/time` | Health (with IPFS reachability), build commit, server clock |
 | `POST /draft-album`, `GET`/`DELETE /draft-album/{id}`, `POST /draft-album/{id}/finalize` | Album drafts |
 | `POST /draft-content/init`, `POST /draft-content`, `POST /draft-content/from-url`, `GET`/`DELETE /draft-content/{id}`, `POST /draft-content/{id}/finalize` | Video and other single-item drafts |
+| `GET`/`POST /draft-content/{id}/upload`, `POST /draft-content/{id}/upload/complete` | A draft's file sent in pieces that carry on from where they stopped: after `init`, bytes are appended from an `offset`, `GET` says how much is here, and `complete` analyses it. What a phone uses, so a dropped connection loses nothing (`routes/upload.py`) |
 | `GET /staging/drafts/{id}/{filename}` | A draft's staged file |
 | `POST /pin/{cid}`, `DELETE /unpin/{cid}`, `GET /local-pins`, `GET /album-tracks/{cid}` | Pins |
 | `POST /enrich/torrent` | Build a Release's torrent and hand it to the seeder (API key) |
