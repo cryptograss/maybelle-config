@@ -94,6 +94,25 @@
               file_server
           }
 
+          # One shell (Justin, #connectome, 19 Nov 2026: "I want to be sure
+          # that we don't have parallel logical paths happening"): the bacon
+          # graph's address is Rabbithole's app too. /bacon, a kept graph
+          # (/bacon/<id>) and a challenge (/bacon/challenge/<name>) get the
+          # app's index.html, at their own address; its files are asked for
+          # under /rabbithole/, above. The app holds the graph's own page
+          # in a frame in its pane, and a frame asks for that page by naming
+          # its host (?host=rabbithole; a wiki page's card, ?host=page):
+          # those go on to the wiki, which serves it as it always has.
+          @bacon_shell {
+              path /bacon /bacon/*
+              not query host=*
+          }
+          handle @bacon_shell {
+              root * /var/www/rabbithole/dist
+              rewrite * /index.html
+              file_server
+          }
+
           # XML sitemap, regenerated on a cron by the mediawiki role. Served
           # straight off disk from outside the MediaWiki tree — Jenkins rsyncs
           # deploys over {{ mediawiki_root }}, so anything generated in there
