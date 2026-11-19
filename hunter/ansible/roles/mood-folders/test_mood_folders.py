@@ -126,3 +126,78 @@ def test_unchanged_run_rewrites_nothing(dirs):
     before = (out / 'm' / 'index.html').stat().st_mtime_ns
     mf.build(base, out, DOMAIN)
     assert (out / 'm' / 'index.html').stat().st_mtime_ns == before
+
+
+# Whatever runs in a Mood's container can change its folder while the script runs. magent's race (#uploads-and-embeds,
+# 19 Nov): the walk sees a regular file, then it's swapped for a symlink before it's placed, and Caddy, which follows
+# symlinks, serves whatever it points at. Each swap below happens at that moment: after the walk looked, before place.
+
+def swap_before_place(monkeypatch, swap):
+    real = mf.place
+
+    def place(dir_fd, name, dest, st):
+        swap()
+        return real(dir_fd, name, dest, st)
+    monkeypatch.setattr(mf, 'place', place)
+
+
+def no_link(monkeypatch):
+    def refuse(*a, **k):
+        raise OSError(errno.EXDEV, 'cross-device')
+    monkeypatch.setattr(mf.os, 'link', refuse)
+
+
+@pytest.fixture
+def secret(tmp_path):
+    return put(tmp_path / 'host' / 'secret.png', b'not for the public')
+
+
+def to_symlink(path, target):
+    def swap():
+        if not path.is_symlink():
+            path.unlink()
+            os.symlink(target, path)
+    return swap
+
+
+@pytest.mark.parametrize('cross_device', [False, True], ids=['linked', 'copied'])
+def test_file_swapped_for_a_symlink_is_left_out(dirs, secret, monkeypatch, cross_device):
+    base, out = dirs
+    shot = put(base / 'moods' / 'm' / 'shot.png')
+    swap_before_place(monkeypatch, to_symlink(shot, secret))
+    if cross_device:
+        no_link(monkeypatch)
+
+    assert mf.build(base, out, DOMAIN) == {'m': 0}
+    assert not os.path.lexists(out / 'm' / 'shot.png')
+
+
+def test_directory_swapped_for_a_symlink_is_not_entered(dirs, secret, monkeypatch):
+    base, out = dirs
+    m = base / 'moods' / 'm'
+    put(m / 'a.png')
+    put(m / 'sub' / 'secret.png', b'mine')    # the walk lists sub as a directory...
+
+    def swap():                               # ...and by the time it goes in, sub leads to the host's files
+        if not (m / 'sub').is_symlink():
+            (m / 'sub').rename(m / 'sub.old')
+            os.symlink(secret.parent, m / 'sub')
+    swap_before_place(monkeypatch, swap)
+
+    assert mf.build(base, out, DOMAIN) == {'m': 1}
+    assert not os.path.lexists(out / 'm' / 'sub')
+
+
+def test_file_swapped_for_a_fifo_does_not_hang_the_copy(dirs, monkeypatch):
+    base, out = dirs
+    shot = put(base / 'moods' / 'm' / 'shot.png')
+
+    def swap():
+        if not shot.is_fifo():
+            shot.unlink()
+            os.mkfifo(shot)
+    swap_before_place(monkeypatch, swap)
+    no_link(monkeypatch)
+
+    assert mf.build(base, out, DOMAIN) == {'m': 0}
+    assert not os.path.lexists(out / 'm' / 'shot.png')

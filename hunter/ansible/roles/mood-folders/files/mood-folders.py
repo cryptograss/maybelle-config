@@ -27,6 +27,7 @@ import html
 import os
 import re
 import shutil
+import stat
 import sys
 import time
 from pathlib import Path
@@ -52,56 +53,99 @@ def kind(name):
 
 
 def shown(mood):
-    """[(relative path, stat)] of what this Mood's gallery shows."""
-    found = []
-    for root, dirs, files in os.walk(mood, followlinks=False):
-        here = Path(root)
-        depth = len(here.relative_to(mood).parts)
+    """Yield (relative path, lstat, dir_fd, name) for each file this Mood's gallery shows, while dir_fd is open.
+
+    Anything in a Mood's folder can be changed while this runs, by whatever runs in its container. So the walk
+    holds each directory open (os.fwalk: lstat, open, fstat, and the two must match), and a directory swapped
+    for a symlink is never entered; each file is judged by one lstat, relative to its directory's descriptor,
+    and placed through that same descriptor (place), never through a path that could lead elsewhere by then."""
+    for root, dirs, files, dir_fd in os.fwalk(mood, follow_symlinks=False):
+        here = Path(root).relative_to(mood)
         # Not into dot-directories, git checkouts, symlinked directories, or too deep.
-        dirs[:] = [] if depth >= DEPTH else sorted(
-            d for d in dirs
-            if not d.startswith('.') and d not in SKIP and not (here / d).is_symlink()
-            and not (here / d / '.git').exists())
+        dirs[:] = [] if len(here.parts) >= DEPTH else [
+            d for d in sorted(dirs)
+            if not d.startswith('.') and d not in SKIP and is_type(d, dir_fd, stat.S_ISDIR)
+            and not is_type(f'{d}/.git', dir_fd, lambda mode: True)]
         for name in files:
             if name.startswith('.') or not kind(name):
                 continue
-            path = here / name
             try:
-                st = path.lstat()
+                st = os.stat(name, dir_fd=dir_fd, follow_symlinks=False)
             except OSError:
                 continue
-            if not os.path.isfile(path) or path.is_symlink():
-                continue
-            found.append((path.relative_to(mood), st))
-    found.sort(key=lambda f: (-f[1].st_mtime, str(f[0])))
-    return found
+            if stat.S_ISREG(st.st_mode):
+                yield here / name, st, dir_fd, name
 
 
-def place(src, dest, st):
-    """Hard-link src at dest (or copy a small one). True if dest is now src's content."""
+def is_type(name, dir_fd, test):
+    try:
+        return test(os.stat(name, dir_fd=dir_fd, follow_symlinks=False).st_mode)
+    except OSError:
+        return False
+
+
+def same(a, b):
+    """The same regular file: a symlink (or anything else) that took its inode number since is not."""
+    return stat.S_ISREG(a.st_mode) and (a.st_ino, a.st_dev) == (b.st_ino, b.st_dev)
+
+
+def place(dir_fd, name, dest, st):
+    """Hard-link the file the walk saw (name in dir_fd, whose lstat was st) at dest, or copy a small one.
+
+    True if dest is now that file's content. What is at name by now may not be what the walk saw (swapped
+    for a symlink, a FIFO, another file): whatever lands at dest is checked against st, and if it isn't the
+    same file it's removed and left out. Caddy follows symlinks, so nothing but a regular file stays here."""
     try:
         have = dest.lstat()
-        if have.st_ino == st.st_ino and have.st_dev == st.st_dev:
+        if same(have, st):
             return True
         # A copy (another filesystem) keeps the original's mtime to the nanosecond: the same size and
         # mtime is the same file. A stale link to a replaced original has the old one's, and is relinked.
-        if have.st_nlink == 1 and have.st_size == st.st_size and have.st_mtime_ns == st.st_mtime_ns:
+        if (stat.S_ISREG(have.st_mode) and have.st_nlink == 1 and have.st_size == st.st_size
+                and have.st_mtime_ns == st.st_mtime_ns):
             return True
         dest.unlink()
     except FileNotFoundError:
         pass
     dest.parent.mkdir(parents=True, exist_ok=True)
     try:
-        os.link(src, dest, follow_symlinks=False)
-        return True
+        os.link(name, dest, src_dir_fd=dir_fd, follow_symlinks=False)
     except OSError as e:
         if e.errno != errno.EXDEV or st.st_size > COPY_MAX:
             return False
+        return copy(dir_fd, name, dest, st)
     try:
-        shutil.copy2(src, dest, follow_symlinks=False)
-        return True
+        if same(dest.lstat(), st):
+            return True
     except OSError:
         return False
+    dest.unlink(missing_ok=True)
+    return False
+
+
+def copy(dir_fd, name, dest, st):
+    """Copy what the walk saw at name to dest, keeping its mtime; at most COPY_MAX, however it has grown."""
+    try:
+        # O_NOFOLLOW: a symlink at name fails here. O_NONBLOCK: a FIFO there doesn't hang the run.
+        fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dir_fd)
+    except OSError:
+        return False
+    try:
+        if not same(os.fstat(fd), st):
+            return False
+        with os.fdopen(fd, 'rb', closefd=False) as f, open(dest, 'xb') as out:
+            data = f.read(COPY_MAX + 1)
+            if len(data) > COPY_MAX:
+                raise OSError(errno.EFBIG, 'grew past COPY_MAX')
+            out.write(data)
+        os.chmod(dest, stat.S_IMODE(st.st_mode))
+        os.utime(dest, ns=(st.st_atime_ns, st.st_mtime_ns))
+        return True
+    except OSError:
+        dest.unlink(missing_ok=True)
+        return False
+    finally:
+        os.close(fd)
 
 
 def size(n):
@@ -205,10 +249,10 @@ def build(base_dir, out, domain, now=None):
         if root.is_dir() else []
     counts = {}
     for mood in moods:
-        files = shown(mood)
         out_mood = out / mood.name
         out_mood.mkdir(exist_ok=True)
-        placed = [(rel, st) for rel, st in files if place(mood / rel, out_mood / rel, st)]
+        placed = [(rel, st) for rel, st, dir_fd, name in shown(mood) if place(dir_fd, name, out_mood / rel, st)]
+        placed.sort(key=lambda f: (-f[1].st_mtime, str(f[0])))
         sweep(out_mood, {rel for rel, _ in placed})
         write_if_changed(out_mood / 'index.html', gallery(mood.name, placed, domain, now))
         counts[mood.name] = len(placed)
