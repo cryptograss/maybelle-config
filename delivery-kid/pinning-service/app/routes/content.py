@@ -40,6 +40,21 @@ ALLOWED_EXTENSIONS = (
 )
 
 
+def safe_upload_name(name: str | None) -> str:
+    """An uploaded file's own name: no directory on it, and of a kind we take.
+
+    The name is the sender's to choose, and it is joined onto the draft's
+    upload directory, so "../../../x.mp4" used to be written three
+    directories up. ValueError says why a name is refused.
+    """
+    bare = Path(str(name or "").replace("\\", "/")).name.strip()
+    if not bare or bare.startswith(".") or "\0" in bare:
+        raise ValueError("That file has no usable name")
+    if Path(bare).suffix.lower() not in ALLOWED_EXTENSIONS:
+        raise ValueError(f"Invalid file type: {bare}. Allowed extensions: {sorted(ALLOWED_EXTENSIONS)}")
+    return bare
+
+
 def preserved_original_record(originals_dir: Path, draft_id: str,
                               filenames: list[str]) -> Optional[dict]:
     """What a release should say about an original we kept.
@@ -513,14 +528,13 @@ async def create_content_draft(
     if not files:
         raise fail(400, "No files provided")
 
-    # Validate file types
+    # Validate file types, and take each file's bare name: a name that came
+    # with a directory on it ("../../x.mp4") was written wherever it pointed.
     for file in files:
-        ext = Path(file.filename).suffix.lower()
-        if ext not in ALLOWED_EXTENSIONS:
-            raise fail(
-                400,
-                f"Invalid file type: {file.filename}. Allowed extensions: {sorted(ALLOWED_EXTENSIONS)}"
-            )
+        try:
+            file.filename = safe_upload_name(file.filename)
+        except ValueError as e:
+            raise fail(400, str(e))
 
     # Check total size
     max_size = settings.max_file_size_mb * 1024 * 1024
