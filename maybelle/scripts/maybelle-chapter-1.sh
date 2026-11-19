@@ -86,7 +86,7 @@ fi
 
 # Mount volume if needed, and if a deploy is already running, reattach instead of overwriting its files.
 echo "Ensuring volume is mounted..."
-if ssh "${USER}@${HOST}" "pgrep -f 'ansible-playbook.*maybelle\\.yml' >/dev/null"; then
+if ssh "${USER}@${HOST}" "pgrep -f 'ansible-playbook.*maybelle\\.yml' >/dev/null || ([ -e /tmp/chapter-1.running ] && pgrep -f '[/]tmp/chapter-1-script\\.sh' >/dev/null)"; then
     echo "A maybelle deploy is already running; attaching to tmux session '$SESSION_NAME'..."
     if [ -z "$USE_SSH" ] && command -v mosh >/dev/null 2>&1; then
         mosh "${USER}@${HOST}" -- tmux attach-session -t "$SESSION_NAME" || ssh -t "${USER}@${HOST}" "tmux attach-session -t '$SESSION_NAME'"
@@ -95,7 +95,23 @@ if ssh "${USER}@${HOST}" "pgrep -f 'ansible-playbook.*maybelle\\.yml' >/dev/null
     fi
     exit 0
 fi
-ssh "${USER}@${HOST}" "mkdir -p ${HETZNER_VOLUME_PATH} && (mountpoint -q ${HETZNER_VOLUME_PATH} || mount ${VOLUME_DEVICE} ${HETZNER_VOLUME_PATH})"
+
+# Kill any finished chapter-1 session (e.g. still sitting at "Press enter to exit") and wait for
+# its EXIT trap to finish BEFORE uploading the new run's files; killing it after upload lets SIGHUP
+# run the old trap's rm -f against the newly uploaded files (re's catch, #security, 19 Nov).
+ssh "${USER}@${HOST}" "
+    tmux kill-session -t '$SESSION_NAME' 2>/dev/null || true
+    for _ in \$(seq 1 50); do
+        pgrep -f '[/]tmp/chapter-1-script\\.sh' >/dev/null || break
+        sleep 0.2
+    done
+    if pgrep -f '[/]tmp/chapter-1-script\\.sh' >/dev/null; then
+        pkill -9 -f '[/]tmp/chapter-1-script\\.sh' 2>/dev/null || true
+        while pgrep -f '[/]tmp/chapter-1-script\\.sh' >/dev/null; do sleep 0.1; done
+    fi
+    rm -f /tmp/chapter-1.running
+    mkdir -p '${HETZNER_VOLUME_PATH}' && (mountpoint -q '${HETZNER_VOLUME_PATH}' || mount '${VOLUME_DEVICE}' '${HETZNER_VOLUME_PATH}')
+"
 
 # Until the detached tmux session starts on maybelle and arms its own EXIT trap, this laptop script
 # owns removing the copied vault password and scrubber secrets if anything fails or is interrupted
@@ -107,14 +123,13 @@ cleanup_unarmed() {
         echo "" >&2
         echo "Removing copied vault files from maybelle before exiting..." >&2
         ssh -o ConnectTimeout=10 "${USER}@${HOST}" \
-            "rm -f '${HETZNER_VOLUME_PATH}/.vault-password' /tmp/scrubber-secrets.json '${REMOTE_SCRIPT_PATH}'" 2>/dev/null || true
+            "rm -f '${HETZNER_VOLUME_PATH}/.vault-password' /tmp/scrubber-secrets.json '${REMOTE_SCRIPT_PATH}' /tmp/chapter-1.running" 2>/dev/null || true
     fi
 }
 trap cleanup_unarmed EXIT
 
 echo "Copying vault password to maybelle..."
-scp "$ANSIBLE_VAULT_PASSWORD_FILE" "${USER}@${HOST}:${HETZNER_VOLUME_PATH}/.vault-password"
-ssh "${USER}@${HOST}" "chmod 600 ${HETZNER_VOLUME_PATH}/.vault-password"
+ssh "${USER}@${HOST}" "umask 077 && cat > '${HETZNER_VOLUME_PATH}/.vault-password'" < "$ANSIBLE_VAULT_PASSWORD_FILE"
 
 # Extract secrets locally and copy only the JSON list to maybelle
 # This keeps the vault password off maybelle for the scrubber
@@ -126,8 +141,8 @@ secrets = [v for v in data.values() if isinstance(v, str) and len(v) > 4]
 print(json.dumps(secrets))
 ")
 
-# Copy secrets to temp file on maybelle (will be moved into scrubber container by ansible)
-echo "$SECRETS_JSON" | ssh "${USER}@${HOST}" "cat > /tmp/scrubber-secrets.json && chmod 600 /tmp/scrubber-secrets.json"
+# Copy secrets to temp file on maybelle with umask 077 so it is 0600 from creation
+echo "$SECRETS_JSON" | ssh "${USER}@${HOST}" "umask 077 && cat > /tmp/scrubber-secrets.json"
 echo "Extracted $(echo "$SECRETS_JSON" | python3 -c 'import sys,json; print(len(json.load(sys.stdin)))') secrets for scrubber"
 
 echo ""
@@ -136,6 +151,26 @@ echo ""
 REMOTE_SCRIPT=$(cat <<'OUTER_EOF'
 #!/usr/bin/env bash
 set -e
+umask 077
+
+HETZNER_VOLUME_PATH="__HETZNER_VOLUME_PATH__"
+MOUNT_POINT="__MOUNT_POINT__"
+REPO_DIR="__REPO_DIR__"
+VAULT_PASSWORD_FILE="__VAULT_PASSWORD_FILE__"
+VOLUME_DEVICE="__VOLUME_DEVICE__"
+REBUILD_IMAGES="__REBUILD_IMAGES__"
+
+: > /tmp/chapter-1.running
+
+# The vault password and extracted scrubber secrets are copied here for this run
+# only. Remove them on normal completion, on EXIT, and at the start of ERR before
+# waiting on /dev/tty — otherwise a pre-ansible failure (apt, git fetch) in a
+# detached session leaves them on disk until the 30-minute sweep.
+cleanup_secrets() {
+    rm -f "$VAULT_PASSWORD_FILE" /tmp/scrubber-secrets.json /tmp/chapter-1.running
+}
+trap 'cleanup_secrets; rm -f /tmp/chapter-1-script.sh' EXIT
+
 # Pauses read from /dev/tty rather than inherited stdin. A bare `read` depends
 # on whatever stdin tmux hands the script; when that isn't a terminal it returns
 # non-zero at once, and with `set -e` the ERR trap below fires and announces a
@@ -145,19 +180,7 @@ set -e
 # `2>/dev/null` goes BEFORE `</dev/tty` on purpose. Redirections apply left to
 # right, so with the usual ordering bash reports a failed /dev/tty open using
 # the stderr it still has, and the message escapes anyway.
-trap 'echo ""; echo "ERROR: Script failed at line $LINENO. Press enter to exit."; read -r _ 2>/dev/null </dev/tty || true' ERR
-
-HETZNER_VOLUME_PATH="__HETZNER_VOLUME_PATH__"
-MOUNT_POINT="__MOUNT_POINT__"
-REPO_DIR="__REPO_DIR__"
-VAULT_PASSWORD_FILE="__VAULT_PASSWORD_FILE__"
-# The vault password is copied here for this run only. The playbook removes it
-# near its end, but a run that fails or stops before that task left it on the
-# volume until the next deploy that got that far. This removes it whatever
-# happens. The scrubber's copied secret list goes with it.
-trap 'rm -f "$VAULT_PASSWORD_FILE" /tmp/scrubber-secrets.json /tmp/chapter-1-script.sh' EXIT
-VOLUME_DEVICE="__VOLUME_DEVICE__"
-REBUILD_IMAGES="__REBUILD_IMAGES__"
+trap 'cleanup_secrets; echo ""; echo "ERROR: Script failed at line $LINENO. Press enter to exit."; read -r _ 2>/dev/null </dev/tty || true' ERR
 
 # Mount volume if not already mounted
 echo "Checking Hetzner volume..."
@@ -249,8 +272,8 @@ STATE=$([ "$ANSIBLE_EXIT" -eq 0 ] && echo finished || echo failed)
 printf '{"state": "%s", "took": %d}\n' "$STATE" "$(( $(date +%s) - START_TIME ))" > "$DEPLOY_DONE.tmp"
 mv "$DEPLOY_DONE.tmp" "$DEPLOY_DONE"  # whole, or not at all: the poster is reading for it
 wait "$POSTER" || true
-# Nothing reads the vault from here on; don't leave it for the pause below.
-rm -f "$VAULT_PASSWORD_FILE"
+# Nothing reads the vault or scrubber copy from here on; don't leave them for the pause below.
+cleanup_secrets
 rm -f "$DEPLOY_DONE"
 # memory-lane may still be coming back up: keep trying for two minutes.
 REPORT_TRIES=12 "$REPO_DIR/maybelle/scripts/report-deploy.sh" maybelle "$STATE" "$DEPLOY_BY" "$(cat "$LOG_URL_FILE" 2>/dev/null)"
@@ -275,8 +298,8 @@ REMOTE_SCRIPT="${REMOTE_SCRIPT//__DEPLOY_BY__/$DEPLOY_BY}"
 
 # Upload script and start the tmux session detached over TCP ssh first so its EXIT trap owns
 # .vault-password and /tmp/scrubber-secrets.json before mosh even attempts UDP.
-echo "$REMOTE_SCRIPT" | ssh "${USER}@${HOST}" "cat > ${REMOTE_SCRIPT_PATH} && chmod 700 ${REMOTE_SCRIPT_PATH}"
-ssh "${USER}@${HOST}" "tmux kill-session -t '$SESSION_NAME' 2>/dev/null || true; tmux new-session -d -s '$SESSION_NAME' '${REMOTE_SCRIPT_PATH}'"
+echo "$REMOTE_SCRIPT" | ssh "${USER}@${HOST}" "umask 077 && cat > '${REMOTE_SCRIPT_PATH}' && chmod 700 '${REMOTE_SCRIPT_PATH}'"
+ssh "${USER}@${HOST}" "tmux new-session -d -s '$SESSION_NAME' '${REMOTE_SCRIPT_PATH}'"
 REMOTE_ARMED=1
 
 if [ -z "$USE_SSH" ] && command -v mosh >/dev/null 2>&1; then
