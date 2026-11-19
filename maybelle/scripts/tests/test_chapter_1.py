@@ -4,6 +4,7 @@ import os
 import shutil
 import subprocess
 import time
+import uuid
 from pathlib import Path
 
 import pytest
@@ -143,7 +144,9 @@ def test_leftover_session_at_press_enter_is_reaped_before_new_upload(tmp_path):
         'user: "root"\n'
         'vault_password_file: "/mnt/persist/.vault-password"\n'
     )
+    play_id = f'chapter1-test-{uuid.uuid4().hex}'
     text = CHAPTER_1.read_text()
+    text = text.replace('maybelle\\\\.yml', f'{play_id}\\\\.yml')
     text = text.replace('/mnt/HC_Volume_${VOLUME_ID}', str(vol))
     text = text.replace('/mnt/persist/.vault-password', str(vol / '.vault-password'))
     text = text.replace('/tmp/scrubber-secrets.json', str(rdir / 'scrubber-secrets.json'))
@@ -292,3 +295,14 @@ def test_err_trap_deletes_secrets_before_waiting_on_tty(tmp_path):
         assert not self_path.exists()
     finally:
         subprocess.run([tmux, '-S', str(sock), 'kill-server'], capture_output=True)
+
+
+def test_remote_script_preserves_default_umask_and_creates_log_0600():
+    """REMOTE_SCRIPT must not set a script-wide umask 077 (git checkouts and ansible tasks inherit it,
+    breaking non-root container builds), while still creating $LOG_FILE mode 0600."""
+    text = CHAPTER_1.read_text()
+    start = text.index("#!/usr/bin/env bash\nset -e")
+    end = text.index("\nOUTER_EOF\n)", start)
+    remote_script = text[start:end]
+    assert 'umask 077' not in remote_script
+    assert 'install -m 600 /dev/null "$LOG_FILE"' in remote_script

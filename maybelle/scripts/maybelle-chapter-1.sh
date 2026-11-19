@@ -151,7 +151,6 @@ echo ""
 REMOTE_SCRIPT=$(cat <<'OUTER_EOF'
 #!/usr/bin/env bash
 set -e
-umask 077
 
 HETZNER_VOLUME_PATH="__HETZNER_VOLUME_PATH__"
 MOUNT_POINT="__MOUNT_POINT__"
@@ -249,6 +248,7 @@ if [ -n "$REBUILD_IMAGES" ]; then
 fi
 
 LOG_FILE="/tmp/ansible-deploy-$(date +%Y%m%d-%H%M%S).log"
+install -m 600 /dev/null "$LOG_FILE"
 echo "Running ansible playbook..."
 echo "Log file: $LOG_FILE"
 cd "$REPO_DIR/maybelle/ansible"
