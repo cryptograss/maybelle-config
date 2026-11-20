@@ -92,21 +92,23 @@ def test_sweep_stage_red_when_the_sweep_stops_or_never_ran(tmp_path):
 def sweep(tmp_path):
     tasks = [task for play in PLAYBOOK for task in play.get('tasks', [])]
     script = next(task for task in tasks if task.get('name') == 'Vault password sweep script')['copy']['content']
-    password, log = tmp_path / 'vault-password', tmp_path / 'log'
+    password, scrubber, log = tmp_path / 'vault-password', tmp_path / 'scrubber-secrets.json', tmp_path / 'log'
     # A playbook name of this test's own: pgrep -f reads every command line on the machine, and a shell that
     # merely mentions ansible-playbook and maybelle.yml would otherwise count as a deploy (it did, once, here).
     assert "'ansible-playbook.*maybelle\\.yml'" in script
     (tmp_path / 'sweep.sh').write_text(script.replace('/mnt/persist/.vault-password', str(password))
+                                       .replace('/tmp/scrubber-secrets.json', str(scrubber))
                                        .replace('/var/log/vault-password-sweep.log', str(log))
                                        .replace('maybelle\\.yml', f'{PLAY}\\.yml'))
 
-    def run(minutes_old=None):
+    def run(minutes_old=None, scrubber_only=False):
         if minutes_old is not None:
-            password.write_text('x')
+            target = scrubber if scrubber_only else password
+            target.write_text('x')
             then = time.time() - minutes_old * 60
-            os.utime(password, (then, then))
+            os.utime(target, (then, then))
         subprocess.run(['bash', str(tmp_path / 'sweep.sh')])
-        return password.exists(), log.read_text().splitlines()[-1]
+        return (password.exists() or scrubber.exists()), log.read_text().splitlines()[-1]
 
     return run, log
 
@@ -125,6 +127,12 @@ def test_sweep_leaves_a_password_just_copied(sweep):
 def test_sweep_removes_one_with_no_deploy_running(sweep):
     run, _ = sweep
     there, said = run(minutes_old=40)
+    assert not there and 'REMOVED: present 40 min, no deploy running' in said
+
+
+def test_sweep_also_removes_stranded_scrubber_secrets(sweep):
+    run, _ = sweep
+    there, said = run(minutes_old=40, scrubber_only=True)
     assert not there and 'REMOVED: present 40 min, no deploy running' in said
 
 

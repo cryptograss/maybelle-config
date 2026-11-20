@@ -1990,12 +1990,13 @@
         path: /mnt/persist/.vault-password
         state: absent
 
-    # The vault password is on the volume only while a deploy runs (maybelle-chapter-1.sh copies it,
-    # and removes it when it exits). Every 10 minutes this looks, and if it's there with no deploy
-    # running, removes it and says so in its log; cron-health's "vault password sweep" stage turns
-    # red on that for a day, which posts to #ops (Justin, #backups, 12 Nov 2026).
-    # Left alone while ansible-playbook runs maybelle.yml, or for 30 minutes after it was copied
-    # (chapter 1 copies it a minute or two before ansible starts); never longer than 3 hours.
+    # The vault password and extracted scrubber secrets are on maybelle only while a deploy runs
+    # (maybelle-chapter-1.sh copies them, and removes them when it exits). Every 10 minutes this looks,
+    # and if either is there with no deploy running, removes both and says so in its log; cron-health's
+    # "vault password sweep" stage turns red on that for a day, which posts to #ops (Justin, #backups,
+    # 12 Nov 2026; /tmp/scrubber-secrets.json added 19 Nov after an interrupted mosh left both).
+    # Left alone while ansible-playbook runs maybelle.yml, or for 30 minutes after they were copied
+    # (chapter 1 copies them a minute or two before ansible starts); never longer than 3 hours.
     - name: Vault password sweep script
       copy:
         dest: /usr/local/bin/vault-password-sweep.sh
@@ -2003,6 +2004,7 @@
         content: |
           #!/bin/bash
           F=/mnt/persist/.vault-password
+          S=/tmp/scrubber-secrets.json
           LOG=/var/log/vault-password-sweep.log
           NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           # Trims itself, in place: Jenkins is given this one file, so cron-health can't read a rotated
@@ -2011,11 +2013,13 @@
               tail -n 2000 "$LOG" > "$LOG.tmp" && cat "$LOG.tmp" > "$LOG"
               rm -f "$LOG.tmp"
           fi
-          if [ ! -e "$F" ]; then
+          if [ ! -e "$F" ] && [ ! -e "$S" ]; then
               echo "$NOW absent" >> "$LOG"
               exit 0
           fi
-          AGE=$(( ($(date +%s) - $(stat -c %Y "$F")) / 60 ))
+          TARGET="$F"
+          [ -e "$F" ] || TARGET="$S"
+          AGE=$(( ($(date +%s) - $(stat -c %Y "$TARGET")) / 60 ))
           if [ "$AGE" -ge 180 ]; then
               WHY="over 3 hours, deploy or not"
           elif [ "$AGE" -lt 30 ]; then
@@ -2027,8 +2031,8 @@
           else
               WHY="no deploy running"
           fi
-          rm -f "$F"
-          if [ -e "$F" ]; then
+          rm -f "$F" "$S"
+          if [ -e "$F" ] || [ -e "$S" ]; then
               echo "$NOW REMOVE-FAILED: present ${AGE} min, $WHY, and rm left it" >> "$LOG"
               exit 1
           fi
