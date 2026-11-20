@@ -168,6 +168,10 @@
       include_role:
         name: mood-previews
 
+    - name: Include mood-folders role (each Mood's folder as a gallery, folders.<domain>)
+      include_role:
+        name: mood-folders
+
     - name: Display deployment summary
       debug:
         msg: |

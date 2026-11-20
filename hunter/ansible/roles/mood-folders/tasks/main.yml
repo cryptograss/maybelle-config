@@ -1,0 +1,54 @@
+---
+# Each Mood's folder as a gallery, https://folders.{{ base_domain }}/<slug>/ (Justin,
+# #uploads-and-embeds, 19 Nov). Every minute, a script reads the Mood directories under
+# /opt/magenta/moods and hard-links the pictures, video, sound and PDFs it finds (not in
+# a git checkout, not under a dot-name) into /var/lib/mood-folders, with a page for each
+# Mood. Caddy serves that directory and nothing else (Caddyfile.hunter.j2).
+- name: Install the Mood folders script
+  copy:
+    src: mood-folders.py
+    dest: /usr/local/sbin/hunter-mood-folders
+    mode: "0755"
+
+- name: Mood folders output directory
+  file:
+    path: /var/lib/mood-folders
+    state: directory
+    mode: "0755"
+
+- name: Mood folders service
+  copy:
+    dest: /etc/systemd/system/hunter-mood-folders.service
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=Each Mood's folder as a gallery, for folders.{{ base_domain }}
+
+      [Service]
+      Type=oneshot
+      Nice=10
+      IOSchedulingClass=idle
+      ExecStart=/usr/local/sbin/hunter-mood-folders --base-dir {{ base_dir }} --out /var/lib/mood-folders --domain {{ base_domain }}
+      TimeoutStartSec=5min
+
+- name: Mood folders timer
+  copy:
+    dest: /etc/systemd/system/hunter-mood-folders.timer
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=Each Mood's folder as a gallery, each minute
+
+      [Timer]
+      OnBootSec=1min
+      OnUnitActiveSec=1min
+
+      [Install]
+      WantedBy=timers.target
+
+- name: Start the Mood folders timer
+  systemd:
+    name: hunter-mood-folders.timer
+    enabled: yes
+    state: started
+    daemon_reload: yes
