@@ -107,9 +107,19 @@
               path /bacon /bacon/*
               not query host=*
           }
+          # The card a shared link shows (Justin, #connectome, 20 Nov 2026:
+          # "we need better social cards for bacon"): a crawler reads the
+          # head as served and runs no script, so the head is written here,
+          # per address. The app's build carries bacon.html, a Caddy
+          # template that reads index.html and puts this address's title,
+          # description and picture in its head (rabbithole:
+          # public/bacon.html says which). Until a build with that file is
+          # deployed, try_files falls through to index.html, which has
+          # nothing for `templates` to do, and /bacon is as it was.
           handle @bacon_shell {
               root * /var/www/rabbithole/dist
-              rewrite * /index.html
+              try_files /bacon.html /index.html
+              templates
               file_server
           }
 
