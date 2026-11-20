@@ -432,6 +432,13 @@
           GITHUB_REPO_URL: "{{ github_repo_url }}"
           BLUERAILROAD_BOT_USERNAME: "{{ BLUERAILROAD_BOT_USERNAME }}"
           BLUERAILROAD_BOT_PASSWORD: "{{ BLUERAILROAD_BOT_PASSWORD }}"
+          # The connectome walk's own login for PickiPedia (pickipedia tools/connectome_walk.py, run by
+          # pickipedia-build): a bot password with "Edit existing pages" and "High-volume (bot) access". With it
+          # the walk does one thing to the wiki: where a site has several artists of a picker's name, it puts a
+          # {{Which picker|status=proposed}} box at the top of that picker's page. Not in the vault: both are
+          # empty, the walk edits nothing, and its question waits in walked.json (Justin, #connectome, 20 Nov 2026).
+          CONNECTOME_WALK_BOT_USER: "{{ connectome_walk_bot_user | default('') }}"
+          CONNECTOME_WALK_BOT_PASSWORD: "{{ connectome_walk_bot_password | default('') }}"
           DELIVERY_KID_API_KEY: "{{ delivery_kid_api_key }}"
           # report-alarm.sh posts a red or green check to #ops with this; it can do nothing else.
           MOOD_ALARM_KEY: "{{ memory_lane_alarm_key | default('') }}"
