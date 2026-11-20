@@ -47,26 +47,34 @@
 
     # ondrej/php's PPA, left from the php-fpm role, which the playbook no longer runs (PHP is in the
     # wiki's container now). On 20 Nov 2026 the PPA relabelled itself "PPA for PHP (deprecated)", and apt
-    # refuses a changed Label until it's accepted: this first apt update failed. Matched by what a file
-    # says, not its name, since the failure named two hosts (ppa.launchpad.net, ppa.launchpadcontent.net).
-    # Nothing here installs from it; packages it gave stay installed until removed on purpose.
-    - name: Find ondrej/php's PPA sources
-      find:
-        paths: /etc/apt/sources.list.d
-        patterns: "*.list,*.sources"
-        contains: "ondrej/php"
+    # refuses a changed Label until it's accepted: every apt update failed. The first try looked only for
+    # *.list and *.sources files in sources.list.d and found none (deploy log 26458169), so this looks in
+    # sources.list too, by what each says, following links (grep -R): a file there is removed, and a line
+    # in sources.list itself. Nothing installs from it; packages it gave stay until removed on purpose.
+    - name: Find every apt source that names ondrej/php
+      command: grep -RlE 'ondrej/php' /etc/apt/sources.list /etc/apt/sources.list.d
       register: ondrej_sources
+      changed_when: false
+      failed_when: ondrej_sources.rc > 1
 
-    - name: Drop ondrej/php's PPA sources
-      file:
-        path: "{{ item.path }}"
+    - name: Drop ondrej/php's lines from sources.list
+      lineinfile:
+        path: /etc/apt/sources.list
+        regexp: 'ondrej/php'
         state: absent
-      loop: "{{ ondrej_sources.files }}"
+      when: "'/etc/apt/sources.list' in ondrej_sources.stdout_lines"
 
+    - name: Drop ondrej/php's files from sources.list.d
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop: "{{ ondrej_sources.stdout_lines | reject('equalto', '/etc/apt/sources.list') | list }}"
+
+    # cache_valid_time let the first try's update pass on an old cache, so the failure surfaced later, at
+    # docker-wiki's install. Every update now runs, so a bad source stops the deploy here, by name.
     - name: Update apt cache
       apt:
         update_cache: yes
-        cache_valid_time: 3600
 
     - name: Install system packages
       apt:
