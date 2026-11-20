@@ -45,6 +45,24 @@
         path: /etc/apt/sources.list.d/caddy-stable.list
         state: absent
 
+    # ondrej/php's PPA, left from the php-fpm role, which the playbook no longer runs (PHP is in the
+    # wiki's container now). On 20 Nov 2026 the PPA relabelled itself "PPA for PHP (deprecated)", and apt
+    # refuses a changed Label until it's accepted: this first apt update failed. Matched by what a file
+    # says, not its name, since the failure named two hosts (ppa.launchpad.net, ppa.launchpadcontent.net).
+    # Nothing here installs from it; packages it gave stay installed until removed on purpose.
+    - name: Find ondrej/php's PPA sources
+      find:
+        paths: /etc/apt/sources.list.d
+        patterns: "*.list,*.sources"
+        contains: "ondrej/php"
+      register: ondrej_sources
+
+    - name: Drop ondrej/php's PPA sources
+      file:
+        path: "{{ item.path }}"
+        state: absent
+      loop: "{{ ondrej_sources.files }}"
+
     - name: Update apt cache
       apt:
         update_cache: yes
