@@ -89,12 +89,33 @@ def same(a, b):
     return stat.S_ISREG(a.st_mode) and (a.st_ino, a.st_dev) == (b.st_ino, b.st_dev)
 
 
-def place(dir_fd, name, dest, st):
-    """Hard-link the file the walk saw (name in dir_fd, whose lstat was st) at dest, or copy a small one.
+def clear_way(top, rel):
+    """Make room under top for a file at rel: what was a file may be a directory now, or the reverse
+    (take.png, then take.png/frame.png). A file where a directory goes, or a directory where the file
+    goes, is removed. Only <out> is touched here, and nothing in it is a symlink."""
+    for part in reversed(rel.parents[:-1]):
+        p = top / part
+        try:
+            if not stat.S_ISDIR(p.lstat().st_mode):
+                p.unlink()
+        except FileNotFoundError:
+            break
+    dest = top / rel
+    try:
+        if stat.S_ISDIR(dest.lstat().st_mode):
+            shutil.rmtree(dest)
+    except FileNotFoundError:
+        pass
+
+
+def place(dir_fd, name, top, rel, st):
+    """Hard-link the file the walk saw (name in dir_fd, whose lstat was st) at top/rel, or copy a small one.
 
     True if dest is now that file's content. What is at name by now may not be what the walk saw (swapped
     for a symlink, a FIFO, another file): whatever lands at dest is checked against st, and if it isn't the
     same file it's removed and left out. Caddy follows symlinks, so nothing but a regular file stays here."""
+    clear_way(top, rel)
+    dest = top / rel
     try:
         have = dest.lstat()
         if same(have, st):
@@ -241,7 +262,10 @@ def sweep(out_mood, keep):
                 pass
 
 
-def build(base_dir, out, domain, now=None):
+def build(base_dir, out, domain, now=None, failed=None):
+    """Each Mood's gallery, and the index. A Mood that fails is logged, put in failed, and taken down
+    whole until it builds again, rather than left serving what it served before; the rest carry on."""
+    failed = [] if failed is None else failed
     now = time.time() if now is None else now
     root = base_dir / 'moods'
     out.mkdir(parents=True, exist_ok=True)
@@ -250,12 +274,16 @@ def build(base_dir, out, domain, now=None):
     counts = {}
     for mood in moods:
         out_mood = out / mood.name
-        out_mood.mkdir(exist_ok=True)
-        placed = [(rel, st) for rel, st, dir_fd, name in shown(mood) if place(dir_fd, name, out_mood / rel, st)]
-        placed.sort(key=lambda f: (-f[1].st_mtime, str(f[0])))
-        sweep(out_mood, {rel for rel, _ in placed})
-        write_if_changed(out_mood / 'index.html', gallery(mood.name, placed, domain, now))
-        counts[mood.name] = len(placed)
+        try:
+            out_mood.mkdir(exist_ok=True)
+            placed = [(rel, st) for rel, st, dir_fd, name in shown(mood) if place(dir_fd, name, out_mood, rel, st)]
+            placed.sort(key=lambda f: (-f[1].st_mtime, str(f[0])))
+            sweep(out_mood, {rel for rel, _ in placed})
+            write_if_changed(out_mood / 'index.html', gallery(mood.name, placed, domain, now))
+            counts[mood.name] = len(placed)
+        except Exception as e:  # one Mood's folder must not stop the others, nor keep its stale files public
+            print(f'mood-folders: {mood.name}: {type(e).__name__}: {e}', file=sys.stderr)
+            failed.append(mood.name)
     for gone in out.iterdir():
         if gone.is_dir() and gone.name not in counts:
             shutil.rmtree(gone, ignore_errors=True)
@@ -269,8 +297,9 @@ def main(argv=None):
     ap.add_argument('--out', default='/var/lib/mood-folders', type=Path)
     ap.add_argument('--domain', default='hunter.cryptograss.live')
     args = ap.parse_args(argv)
-    build(args.base_dir, args.out, args.domain)
-    return 0
+    failed = []
+    build(args.base_dir, args.out, args.domain, failed=failed)
+    return 1 if failed else 0  # systemd shows the run as failed; the other Moods were still built
 
 
 if __name__ == '__main__':

@@ -135,9 +135,9 @@ def test_unchanged_run_rewrites_nothing(dirs):
 def swap_before_place(monkeypatch, swap):
     real = mf.place
 
-    def place(dir_fd, name, dest, st):
+    def place(dir_fd, name, top, rel, st):
         swap()
-        return real(dir_fd, name, dest, st)
+        return real(dir_fd, name, top, rel, st)
     monkeypatch.setattr(mf, 'place', place)
 
 
@@ -201,3 +201,56 @@ def test_file_swapped_for_a_fifo_does_not_hang_the_copy(dirs, monkeypatch):
 
     assert mf.build(base, out, DOMAIN) == {'m': 0}
     assert not os.path.lexists(out / 'm' / 'shot.png')
+
+
+# A name can change kind between runs (magent, #uploads-and-embeds, 20 Nov): before, either way raised out of build()
+# on every run, so the Moods after it never rebuilt and files deleted meanwhile stayed public.
+
+def test_a_file_that_becomes_a_directory(dirs):
+    base, out = dirs
+    m = base / 'moods' / 'm'
+    put(m / 'take.png', b'one')
+    mf.build(base, out, DOMAIN)
+    (m / 'take.png').unlink()
+    put(m / 'take.png' / 'frame.png', b'two')
+
+    assert mf.build(base, out, DOMAIN) == {'m': 1}
+    assert (out / 'm' / 'take.png' / 'frame.png').read_bytes() == b'two'
+
+
+def test_a_directory_that_becomes_a_file(dirs):
+    base, out = dirs
+    m = base / 'moods' / 'm'
+    put(m / 'take.png' / 'frame.png', b'one')
+    mf.build(base, out, DOMAIN)
+    (m / 'take.png' / 'frame.png').unlink()
+    (m / 'take.png').rmdir()
+    put(m / 'take.png', b'two')
+
+    assert mf.build(base, out, DOMAIN) == {'m': 1}
+    assert (out / 'm' / 'take.png').read_bytes() == b'two'
+
+
+def test_one_mood_failing_takes_down_only_its_own_gallery(dirs, monkeypatch, capsys):
+    base, out = dirs
+    put(base / 'moods' / 'a' / 'x.png')
+    put(base / 'moods' / 'b' / 'y.png')
+    put(base / 'moods' / 'c' / 'z.png')
+    mf.build(base, out, DOMAIN)
+    (base / 'moods' / 'c' / 'z.png').unlink()  # deleted meanwhile: must still go, though b fails
+
+    real = mf.shown
+
+    def shown(mood):
+        if mood.name == 'b':
+            raise OSError('b is broken')
+        return real(mood)
+    monkeypatch.setattr(mf, 'shown', shown)
+    failed = []
+
+    assert mf.build(base, out, DOMAIN, failed=failed) == {'a': 1, 'c': 0}
+    assert failed == ['b']
+    assert not (out / 'b').exists()                     # not left serving what it served before
+    assert not (out / 'c' / 'z.png').exists()
+    assert 'b is broken' in capsys.readouterr().err
+    assert mf.main(['--base-dir', str(base), '--out', str(out)]) == 1
