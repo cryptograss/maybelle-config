@@ -243,6 +243,20 @@ def find_cid_from_history(wiki, page_title: str) -> Optional[str]:
     return None
 
 
+def cid_from_draft(data: dict) -> Optional[str]:
+    """The CID a finalized draft carries in its own YAML (final_cid), if it says it's finalized.
+
+    The history's edit summary was the only place this bot looked, and a summary is easy to lose: on
+    21 Nov delivery-kid's own write failed (a lapsed wiki session) and the edit that put final_cid on
+    ReleaseDraft:21408374… by hand had no summary, so a pinned video got no Release page. The YAML is
+    what both delivery-kid and the draft page write; the summary stays as the fallback.
+    """
+    if not isinstance(data, dict) or data.get('status') != 'finalized':
+        return None
+    cid = data.get('final_cid')
+    return cid.strip() if isinstance(cid, str) and cid.strip() else None
+
+
 IPFS_GATEWAY = 'https://ipfs.delivery-kid.cryptograss.live/ipfs'
 
 
@@ -313,7 +327,7 @@ def process_release_drafts(
     """Process completed ReleaseDraft pages into Release pages.
 
     For each ReleaseDraft:
-    1. Check edit history for a finalization CID
+    1. Take the CID from the draft's final_cid, or else from its edit history
     2. If CID found and no Release:{CID} page exists, create it
     3. Skip drafts that haven't been finalized yet
 
@@ -331,7 +345,7 @@ def process_release_drafts(
         title = draft['title']
         data = draft['data']
 
-        cid = find_cid_from_history(wiki, title)
+        cid = cid_from_draft(data) or find_cid_from_history(wiki, title)
 
         if not cid:
             no_cid += 1
