@@ -199,3 +199,8 @@ This repo consolidates deployment configuration from:
 - `magenta/hunter/` → `hunter/`
 - `arthel/deployment/` → `maybelle/`
 - Scattered secrets → `secrets/vault.yml`
+
+## License
+
+This repository is under the Rabbithole Bacon License — see [LICENSE.MD](LICENSE.MD).
+
