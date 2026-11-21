@@ -127,6 +127,32 @@ def _get_site(force_relogin: bool = False):
             return None
 
 
+def _with_relogin(attempt):
+    """attempt(site), and if the wiki refuses it as logged-out, log in again and attempt once more.
+
+    mwclient's logged_in flag can still read true after the server has dropped the session, so
+    _get_site's own check passes and the save fails anyway. Every write to the wiki goes through
+    here: the CID write once didn't, and on 21 Nov a finalized video (ReleaseDraft:21408374…)
+    got no Release page because its session had lapsed, while the diagnostics snapshot beside it,
+    which did retry, saved two seconds later. Raises whatever the attempt raises; anything failing
+    twice is a real problem. Raises LookupError if there are no credentials.
+    """
+    site = _get_site()
+    if site is None:
+        raise LookupError("no wiki credentials")
+    try:
+        return attempt(site)
+    except Exception as first:
+        if "logged in" not in str(first).lower():
+            raise
+        logger.warning("pickipedia_client: save refused as logged-out; "
+                       "re-authenticating and retrying once")
+        site = _get_site(force_relogin=True)
+        if site is None:
+            raise
+        return attempt(site)
+
+
 def _build_snapshot_payload(state) -> dict:
     """Project a ContentDraftState into the JSON payload we write to the wiki.
 
@@ -152,8 +178,7 @@ def snapshot_diagnostics(draft_id: str, payload: dict) -> bool:
     raises — terminal-state hooks call this fire-and-forget; we don't want
     a wiki blip to mask the underlying upload outcome.
     """
-    site = _get_site()
-    if site is None:
+    if _get_site() is None:
         return False
 
     title = f"ReleaseDraft:{draft_id}/diagnostics"
@@ -172,21 +197,7 @@ def snapshot_diagnostics(draft_id: str, payload: dict) -> bool:
         return True
 
     try:
-        try:
-            ok = _attempt(site)
-        except Exception as first:
-            # mwclient's logged_in flag can still read true after the server
-            # has dropped the session, in which case the flag check upstream
-            # passes and the save fails anyway. One forced re-login and retry
-            # covers that; anything failing twice is a real problem.
-            if "logged in" not in str(first).lower():
-                raise
-            logger.warning("pickipedia_client: save refused as logged-out; "
-                           "re-authenticating and retrying once")
-            site = _get_site(force_relogin=True)
-            if site is None:
-                raise
-            ok = _attempt(site)
+        ok = _with_relogin(_attempt)
         _consecutive_failures = 0
         return ok
     except Exception as e:
@@ -259,8 +270,7 @@ def write_finalized_to_releasedraft(
     Returns True if the edit succeeded, False if creds are missing or the
     write failed. Never raises.
     """
-    site = _get_site()
-    if site is None:
+    if _get_site() is None:
         return False
 
     try:
@@ -270,7 +280,8 @@ def write_finalized_to_releasedraft(
         return False
 
     title = f"ReleaseDraft:{draft_id}"
-    try:
+
+    def _attempt(site) -> bool:
         page = site.pages[title]
         if not page.exists:
             logger.warning("pickipedia_client: %s does not exist; cannot mark finalized", title)
@@ -300,6 +311,9 @@ def write_finalized_to_releasedraft(
         page.save(new_text, summary=summary)
         logger.info("pickipedia_client: marked %s finalized (final_cid=%s)", title, final_cid)
         return True
+
+    try:
+        return _with_relogin(_attempt)
     except Exception as e:
         logger.error("pickipedia_client: failed to mark %s finalized: %s", title, e)
         return False
