@@ -435,8 +435,14 @@ def configure_mcp_server():
                     "password": pickipedia_bot_password,
                     "private": False
                 }
-            }
+            },
+            # upload-file reads local files only from here; with none set, the server
+            # refuses every upload ("uploads are disabled on this server").
+            "uploadDirs": ["/home/magent/uploads"]
         }
+        uploads = Path("/home/magent/uploads")
+        uploads.mkdir(parents=True, exist_ok=True)
+        shutil.chown(uploads, user='magent', group='magent')
         with open(mw_config_file, 'w') as f:
             json.dump(mw_config, f, indent=2)
 
