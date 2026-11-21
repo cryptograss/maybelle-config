@@ -345,3 +345,70 @@ class TestOnThePipe:
 
         with patch.dict("os.environ", {"PICKIPEDIA_BOT_PASSWORD": ""}, clear=False):
             assert pickipedia_client._get_site() is not stale
+
+
+MWCLIENT_LOGGED_OUT = ("By default, mwclient protects you from accidentally editing without being logged in. "
+                       "If you actually want to edit without logging in, you can set force_login on the Site "
+                       "object to False.")
+
+DRAFT_YAML = """draft_id: 21408374-b2cc-4bd5-83de-9822f3488bbc
+type: video
+uploader: JMyles
+content:
+    title: "Fellow musicians: if we're going to criticize \\"making music with AI\\""
+    performers:
+"""
+
+
+class TestASessionThatLapsedUnnoticed:
+    """The session expired, but the cached Site still said logged_in, so the first save is refused.
+
+    21 Nov, delivery-kid: ReleaseDraft:21408374… pinned at 00:35:42, and the CID write was refused
+    with mwclient's logged-out message at 00:35:43 and gave up; no Release page was ever made.
+    The diagnostics snapshot, which retried after logging in again, saved at 00:35:45. Every write
+    to the wiki has to survive this, not just the one that happened to be fixed first.
+    """
+
+    def _wikis(self):
+        stale = _FakeWiki(fail_with=MWCLIENT_LOGGED_OUT)   # says logged_in, but the wiki disagrees
+        fresh = _FakeWiki()
+        stale.pages_written = fresh.pages_written          # the same wiki, seen through two sessions
+        fresh.pages_written["ReleaseDraft:21408374-b2cc-4bd5-83de-9822f3488bbc"] = DRAFT_YAML
+        return stale, fresh
+
+    def test_the_cid_still_reaches_the_draft(self):
+        stale, fresh = self._wikis()
+        with patch.object(pickipedia_client, "_get_site",
+                          side_effect=lambda force_relogin=False: fresh if force_relogin else stale):
+            assert pickipedia_client.write_finalized_to_releasedraft(
+                "21408374-b2cc-4bd5-83de-9822f3488bbc",
+                "QmT5VW5kJTdbcSYk4wZfb3ep8UbmjP4QGL3aCJAxNFZS6u",
+                "2026-11-21T00:35:42+00:00",
+            ) is True
+
+        import yaml
+        page = yaml.safe_load(fresh.pages_written["ReleaseDraft:21408374-b2cc-4bd5-83de-9822f3488bbc"])
+        assert page["final_cid"] == "QmT5VW5kJTdbcSYk4wZfb3ep8UbmjP4QGL3aCJAxNFZS6u"
+        assert page["status"] == "finalized"
+        assert page["uploader"] == "JMyles"                 # the rest of the draft kept
+
+    def test_the_diagnostics_still_reach_the_wiki(self):
+        stale, fresh = self._wikis()
+        with patch.object(pickipedia_client, "_get_site",
+                          side_effect=lambda force_relogin=False: fresh if force_relogin else stale):
+            assert pickipedia_client.snapshot_diagnostics(
+                "21408374-b2cc-4bd5-83de-9822f3488bbc", {"status": "finalized"}) is True
+        assert "ReleaseDraft:21408374-b2cc-4bd5-83de-9822f3488bbc/diagnostics" in fresh.pages_written
+
+    def test_any_other_refusal_is_not_retried(self):
+        """Only a logged-out refusal earns a second try; the wiki saying no to the edit itself is final."""
+        calls = []
+        wiki = _FakeWiki(fail_with="abusefilter-disallowed")
+        wiki.pages_written["ReleaseDraft:x"] = DRAFT_YAML
+
+        def get_site(force_relogin=False):
+            calls.append(force_relogin)
+            return wiki
+        with patch.object(pickipedia_client, "_get_site", side_effect=get_site):
+            assert pickipedia_client.write_finalized_to_releasedraft("x", "Qm", "now") is False
+        assert True not in calls
