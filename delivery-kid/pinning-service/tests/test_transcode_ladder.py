@@ -55,8 +55,8 @@ class TestLadder:
         assert [r["name"] for r in _ladder_for(720)] == ["720p", "360p"]
 
     def test_scale_filter_follows_orientation(self):
-        assert _scale_filter(1080, portrait=True) == "scale=1080:-2"
-        assert _scale_filter(1080, portrait=False) == "scale=-2:1080"
+        assert _scale_filter(1080, portrait=True) == "scale=1080:-2:out_range=tv"
+        assert _scale_filter(1080, portrait=False) == "scale=-2:1080:out_range=tv"
 
 
 needs_encoder = pytest.mark.skipif(
