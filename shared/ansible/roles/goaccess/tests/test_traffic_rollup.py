@@ -131,12 +131,39 @@ def test_the_first_run_reads_the_rolled_logs_beside_the_live_one(tmp_path, now):
     assert third['windows']['7d']['requests']['people'] == 8
 
 
-def test_a_gzipped_rolled_log_is_read_too(tmp_path, now):
-    with gzip.open(tmp_path / 'access.log.1.gz', 'wb') as f:
+@pytest.mark.parametrize('name', ['access.log.1.gz',                            # logrotate's
+                                  'access-2026-11-21T06-00-00.000-size.log.gz',  # Caddy's own
+                                  'access-2026-11-21T06-00-00.000-time.log.gz'])
+def test_a_gzipped_rolled_log_is_read_too(tmp_path, now, name):
+    """Caddy gzips a rolled log unless roll_uncompressed is set, so on both our boxes every rolled
+    file ends .log.gz. A backfill that only looked for .log would find nothing at all."""
+    with gzip.open(tmp_path / name, 'wb') as f:
         f.write(''.join(line(now - 5 * 3600, '/wiki/Doc_Watson') for _ in range(3)).encode())
     (tmp_path / 'access.log').write_text(line(now - 60, '/wiki/Merle_Watson'))
     body = run(tmp_path)
     assert body['windows']['24h']['requests']['people'] == 4
+
+
+def test_the_tail_of_a_log_that_rolled_and_was_gzipped_is_counted_once(tmp_path, now):
+    """The gzipped copy is a different file from the one we were reading, so its inode can't find it.
+    What we hadn't counted is found by time instead -- and nothing before it is counted twice."""
+    first, second = line(now - 600, '/wiki/Doc_Watson'), line(now - 300, '/wiki/Merle_Watson')
+    (tmp_path / 'access.log').write_text(first)
+    assert run(tmp_path)['read'] == 1
+
+    # Caddy writes the second line, rolls the file away and gzips it, and starts a new one. The new
+    # one is made beside the old and moved over it, so it is a different file and not the same inode
+    # handed back (which is what Caddy's rename does: the old inode lives on inside the rolled file).
+    with gzip.open(tmp_path / 'access-2026-11-22T02-00-00.000-size.log.gz', 'wb') as f:
+        f.write((first + second).encode())
+    (tmp_path / 'access.log.new').write_text(line(now - 120, '/wiki/Watson_Family'))
+    (tmp_path / 'access.log.new').replace(tmp_path / 'access.log')
+
+    body = run(tmp_path)
+    assert body['windows']['3h']['requests']['people'] == 3     # not 4: the first line isn't re-counted
+    assert [row['what'] for row in body['windows']['3h']['pages']] == [
+        '/wiki/Doc_Watson', '/wiki/Merle_Watson', '/wiki/Watson_Family']
+    assert run(tmp_path)['windows']['3h']['requests']['people'] == 3
 
 
 def test_nothing_beside_the_log_is_read_twice_when_the_live_file_rolls(tmp_path, now):

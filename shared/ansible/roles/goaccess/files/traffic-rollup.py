@@ -172,11 +172,13 @@ ROLLED = re.compile(r'\.\d+(\.gz)?$')      # logrotate's name for a rolled log, 
 
 def rolled_logs(log):
     """The rolled copies of our log, beside it, oldest first by when each was last written: Caddy's
-    own (<stem>-<when>.log, which lumberjack never touches again) and logrotate's (<name>.1, .1.gz),
-    since a box may have either. Anything older than HOURS_KEPT is left alone -- every line in it
-    would be dropped from the buckets anyway."""
+    own (<stem>-<when>.log, and <stem>-<when>.log.gz, since lumberjack gzips a rolled file unless
+    roll_uncompressed is set) and logrotate's (<name>.1, .1.gz), since a box may have either.
+    Anything older than HOURS_KEPT is left alone -- every line in it would be dropped from the
+    buckets anyway."""
     oldest = time.time() - HOURS_KEPT * 3600
     beside = set(log.parent.glob(log.stem + '-*' + log.suffix))
+    beside |= set(log.parent.glob(log.stem + '-*' + log.suffix + '.gz'))
     beside |= {p for p in log.parent.glob(log.name + '.*') if ROLLED.search(p.name)}
     found = []
     for path in beside:
@@ -206,14 +208,14 @@ def lines_of(path, start=0):
             yield raw.decode('utf-8', 'replace')
 
 
-def catch_up(log, state, take, take_old):
+def catch_up(log, state, take, take_old, take_after):
     """Every line not counted yet, handed over one at a time, oldest first; returns (how many, state).
     Nothing is held in a list: a minute's worth is nothing, but a catch-up is a whole 100 MB log.
 
     Three sources, in this order: a rolled log never read (`backfill`), what was left in the file our
-    path pointed at before it rolled, and the live file from where we stopped. `take_old` counts the
-    backfill, because it reads hours already past and must not be told a visitor was heard a moment
-    ago by a line from today."""
+    path pointed at before it rolled (`tail_of_rolled`, which uses `take_after`), and the live file
+    from where we stopped. `take_old` counts the backfill, because it reads hours already past and
+    must not be told a visitor was heard a moment ago by a line from today."""
     log = Path(log)
     where = dict(state)
     read = backfill(log, where, take_old)
@@ -224,11 +226,7 @@ def catch_up(log, state, take, take_old):
     rolled = where.get('inode') not in (None, now.st_ino)
     if rolled or now.st_size < where.get('offset', 0):
         if rolled:
-            was = rolled_as(log, where.get('inode'))
-            if was is not None:
-                for line in lines_of(was, where.get('offset', 0)):
-                    take(line)
-                    read += 1
+            read += tail_of_rolled(log, where, take, take_after)
         where['offset'] = 0
     at = min(where.get('offset', 0), now.st_size)
     with log.open('rb') as f:
@@ -243,6 +241,9 @@ def catch_up(log, state, take, take_old):
                 break
     where['offset'] = at
     where['inode'] = now.st_ino
+    # The newest line counted from the live file: after a roll, the file we were reading is gzipped
+    # into a new one within moments, and this is the only thing that says where we had got to in it.
+    where['last_ts'] = max(where.get('last_ts') or 0, take.newest[0])
     return read, where
 
 
@@ -268,21 +269,41 @@ def backfill(log, where, take):
     return read
 
 
-def rolled_as(log, inode):
-    """The file our path pointed at before it rolled, found by its inode among the rolled ones."""
-    for other in reversed(rolled_logs(log)):
+def tail_of_rolled(log, where, take, take_after):
+    """What was left unread in the file our path pointed at before it rolled, counted now.
+
+    Two ways to find it, because lumberjack gzips a rolled file moments after renaming it, and the
+    gzipped copy is a different file: by the inode we were reading, if it is still there, and in that
+    case we know the byte we stopped at; otherwise the newest rolled file, read whole with everything
+    we have already counted skipped by its timestamp. Without the second way, every roll would lose
+    the minute between our last run and it."""
+    inode, read = where.get('inode'), 0
+    rolled = rolled_logs(log)
+    for other in reversed(rolled):
         try:
             if inode is not None and other.stat().st_ino == inode:
-                return other
+                for line in lines_of(other, where.get('offset', 0)):
+                    take(line)
+                    read += 1
+                return read
         except OSError:
             continue
-    return None
+    if rolled and where.get('last_ts'):
+        after = take_after(where['last_ts'])
+        for line in lines_of(rolled[-1]):
+            after(line)
+            read += 1
+    return read
 
 
-def counter(hours, seen, state_dir, host):
-    """A function that puts one log line into its hour's bucket. `seen` is the last time each visitor
-    was heard, so a request after VISIT_GAP of quiet counts as a new visit; the backfill is given a
-    `seen` of its own (catch_up says why)."""
+def counter(hours, seen, state_dir, host, after=0):
+    """A function that puts one log line into its hour's bucket, and remembers the newest line's time
+    in `take.newest`. `seen` is the last time each visitor was heard, so a request after VISIT_GAP of
+    quiet counts as a new visit; the backfill is given a `seen` of its own (catch_up says why).
+    `after` skips lines already counted, which is how the tail of a gzipped rolled log is read
+    without counting any of it twice."""
+    newest = [0.0]
+
     def take(line):
         try:
             row = json.loads(line)
@@ -292,8 +313,10 @@ def counter(hours, seen, state_dir, host):
             return
         req = row.get('request') or {}
         ts = row.get('ts')
-        if not isinstance(ts, (int, float)):
+        if not isinstance(ts, (int, float)) or ts <= after:
             return
+        if ts > newest[0]:
+            newest[0] = ts
         headers = req.get('headers') or {}
         agent = (headers.get('User-Agent') or [''])[0]
         group = who_is_it(agent)
@@ -324,6 +347,8 @@ def counter(hours, seen, state_dir, host):
                     bucket[kind][what] = bucket[kind].get(what, 0) + 1
         if max(len(bucket[name]) for name in KEEP) > BIG:
             trim(bucket)
+
+    take.newest = newest
     return take
 
 
@@ -380,7 +405,8 @@ def main():
 
     read, state = catch_up(args.log, state,
                            counter(hours, seen, args.state, host),
-                           counter(hours, old_seen, args.state, host))
+                           counter(hours, old_seen, args.state, host),
+                           lambda after: counter(hours, seen, args.state, host, after=after))
     for bucket in hours.values():
         trim(bucket)
 
