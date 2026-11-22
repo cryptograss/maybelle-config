@@ -97,6 +97,20 @@ def test_each_window_says_how_far_back_it_reaches(tmp_path, now):
     assert body['since'] == body['windows']['7d']['since']
 
 
+def test_an_hour_nobody_came_is_still_an_hour_counted(tmp_path, now):
+    """Seen live on maybelle mid-catch-up: the three hours said "not full" while the day said
+    "full", because the hour exactly three back held nothing yet. How far back the count reaches is
+    not the same question as which hours hold something."""
+    (tmp_path / 'access.log').write_text(line(now - 5 * 3600, '/wiki/Doc_Watson')
+                                         + line(now - 60, '/wiki/Merle_Watson'))
+    body = run(tmp_path)
+    three = body['windows']['3h']
+    assert three['full'] is True                 # the count began five hours ago, before this window
+    assert three['hours'] == 1                   # and only this hour holds anything
+    assert three['since'] == body['windows']['24h']['since'] == body['since']
+    assert body['windows']['24h']['full'] is False
+
+
 def test_a_window_with_history_behind_it_is_full(tmp_path, now):
     hours = [now - h * 3600 for h in range(0, 5)]
     (tmp_path / 'access.log').write_text(''.join(line(ts, '/wiki/Doc_Watson') for ts in hours))

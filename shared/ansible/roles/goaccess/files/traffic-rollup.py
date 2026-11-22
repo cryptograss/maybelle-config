@@ -355,11 +355,17 @@ def counter(hours, seen, state_dir, host, after=0):
     return take
 
 
-def window(hours, back):
-    """The last `back` hours, added up, and how far back it actually reaches: `since` is the oldest
-    hour counted in it, `hours` how many hours hold anything, and `full` whether the count goes all
-    the way back. Without those, a window with an hour of history in it reads exactly like a quiet
-    week (Justin, #performance, 22 Nov: "I'm not seeing a difference when I click the timeframes")."""
+def window(hours, back, oldest=None):
+    """The last `back` hours, added up, and how far back it actually reaches: `since` is the first
+    hour this box has counted at all, `full` whether that is older than the window's own start, and
+    `hours` how many hours inside the window hold anything. Without those, a window with an hour of
+    history in it reads exactly like a quiet week (Justin, #performance, 22 Nov: "I'm not seeing a
+    difference when I click the timeframes").
+
+    `since` and `full` are about the box's reach, not about the oldest hour that happens to hold
+    something: an hour with nothing in it is an hour we counted and nobody came. Reading it the other
+    way made the three hours say "not full" while the day said "full", during a catch-up that hadn't
+    yet reached the hour in between."""
     first = hour_of(time.time() - back * 3600)
     req, visits, status = dict.fromkeys(WHO, 0), dict.fromkeys(WHO, 0), defaultdict(int)
     lists = {name: defaultdict(int) for name in MOST}
@@ -378,9 +384,10 @@ def window(hours, back):
         for name in lists:
             for what, n in bucket.get(name, {}).items():
                 lists[name][what] += n
+    reaches = oldest or (min(held) if held else None)
     out = {'requests': req, 'visits': visits, 'bytes': size, 'status': dict(sorted(status.items())),
-           'since': (min(held) + ':00:00+00:00') if held else None,
-           'hours': len(held), 'full': bool(held) and min(held) <= first}
+           'since': (reaches + ':00:00+00:00') if reaches else None,
+           'hours': len(held), 'full': bool(reaches) and reaches <= first}
     for name, rows in lists.items():
         out[name] = [{'what': what, 'n': n} for what, n in sorted(rows.items(), key=lambda kv: -kv[1])[:MOST[name]]]
     return out
@@ -432,7 +439,8 @@ def main():
         'read': read,
         'since': (min(hours) + ':00:00+00:00') if hours else None,
         'catching_up': left,
-        'windows': {name: window(hours, back) for name, back in WINDOWS},
+        'windows': {name: window(hours, back, min(hours) if hours else None)
+                    for name, back in WINDOWS},
     })
     print(f'{args.site}: {read} lines, {len(hours)} hours kept, {left} rolled logs left to read')
 
