@@ -7,3 +7,6 @@ goaccess_log: "/var/log/caddy/{{ goaccess_site }}-access.log"   # written by Cad
 goaccess_dir: "/var/lib/goaccess/{{ goaccess_site }}"            # index.html and the on-disk database
 goaccess_port: 7890          # the live updates' WebSocket, on 127.0.0.1; Caddy proxies /stats/ws to it
 goaccess_user: caddy         # reads Caddy's log (owner-only), so it runs as Caddy
+# The rollup beside it: hourly counts from the same log, so the stats page can show the last three
+# hours, day or week. Its state holds the day's salt, so it lives where nothing is served from.
+traffic_state_dir: "/var/lib/traffic-rollup/{{ goaccess_site }}"
