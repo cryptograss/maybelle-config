@@ -23,7 +23,12 @@ memory-lane.{{ domain_name }} {
     log {
         output file /var/log/caddy/magenta-access.log {
             roll_size 100mb
-            roll_keep 10
+            # 48, not Caddy's 10: the rollup beside this fills the day and the week by reading the
+            # rolled logs, and can only reach as far back as they are kept. At the volume of 22 Nov
+            # these roll every hour or two, so ten of them is half a day and a 24-hour window could
+            # never be real (re and magent, #performance, 22 Nov; Justin picked the number). About
+            # half a gigabyte a site, gzipped, and less whenever it's quieter.
+            roll_keep 48
             roll_keep_for 720h
         }
     }
@@ -38,12 +43,17 @@ memory-lane.{{ domain_name }} {
 # Magenta: the same memory-lane, under its own name. The bare address is
 # magenta's own front page (magenta#114).
 magenta.cryptograss.live {
-    # The access log: who came, from where, for what. Kept 30 days, then rolled
-    # off; nothing in the browser (Justin, #performance, 12 Nov).
+    # The access log: who came, from where, for what. Rolled at 100 MB and kept 48 rolls or 30
+    # days, whichever runs out first; nothing in the browser (Justin, #performance, 12 Nov).
     log {
         output file /var/log/caddy/magenta-access.log {
             roll_size 100mb
-            roll_keep 10
+            # 48, not Caddy's 10: the rollup beside this fills the day and the week by reading the
+            # rolled logs, and can only reach as far back as they are kept. At the volume of 22 Nov
+            # these roll every hour or two, so ten of them is half a day and a 24-hour window could
+            # never be real (re and magent, #performance, 22 Nov; Justin picked the number). About
+            # half a gigabyte a site, gzipped, and less whenever it's quieter.
+            roll_keep 48
             roll_keep_for 720h
         }
     }

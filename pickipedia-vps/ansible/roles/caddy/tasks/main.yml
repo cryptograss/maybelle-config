@@ -43,6 +43,7 @@
     mode: '0755'
 
 - name: Create Caddyfile
+  register: caddyfile
   copy:
     dest: /etc/caddy/Caddyfile
     content: |
@@ -52,14 +53,20 @@
       # {{ domain_name }} would defeat their entire purpose: they exist for
       # readers on networks that block the canonical name outright.
       {{ domain_name }}, {{ www_domain }}{% for alias in alias_domains | default([]) %}, {{ alias }}{% endfor %} {
-          # The access log: who came, from where, for which pages. Kept 30
-          # days, then rolled off. The goaccess role reads it as it grows and
-          # draws the dashboard served at /stats/ below; nothing runs in the
-          # reader's browser for it (Justin, #performance, 12 Nov).
+          # The access log: who came, from where, for which pages. Rolled at
+          # 100 MB, and 48 rolls or 30 days kept, whichever runs out first;
+          # the traffic rollup reads those rolls to fill its day and week.
+          # GoAccess reads the live one as it grows and draws the dashboard
+          # served at /stats/ below; nothing runs in the reader's browser for
+          # it (Justin, #performance, 12 Nov).
           log {
               output file /var/log/caddy/pickipedia-access.log {
                   roll_size 100mb
-                  roll_keep 10
+                  # 48, not Caddy's 10: the rollup fills the day and the week by
+                  # reading the rolled logs and reaches back only as far as they
+                  # are kept; at 22 Nov's volume ten is half a day. About half a
+                  # gigabyte, gzipped (#performance, 22 Nov).
+                  roll_keep 48
                   roll_keep_for 720h
               }
           }
@@ -194,10 +201,16 @@
     cmd: caddy validate --config /etc/caddy/Caddyfile
   changed_when: false
 
-- name: Reload Caddy
+# Restarted rather than reloaded when the file itself changed: Caddy keeps the log file it already
+# opened across a reload, so a change to roll_size or roll_keep is written into the Caddyfile and
+# never reaches the writer ("A server restart is required to apply configuration changes to a given
+# output file" -- Caddy's docs on `log`). That is a change that looks applied and isn't, which is the
+# thing this box has already cost us an afternoon of. A restart is a second of refused connections,
+# only on a run that changed the file; every other run reloads as before.
+- name: Reload Caddy, or restart it when the Caddyfile changed
   ansible.builtin.systemd:
     name: caddy
-    state: reloaded
+    state: "{{ 'restarted' if caddyfile.changed else 'reloaded' }}"
 
 - name: Start and enable Caddy
   systemd:

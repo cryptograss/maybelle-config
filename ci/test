@@ -23,7 +23,7 @@ echo '--- the playbooks parse'
 # ansible splits a task's words when it loads the playbook, before anything runs: the first deploy of the
 # branches agent died there on an apostrophe (9 Nov), and nothing above would have seen it. Without the
 # vault, which nothing here can open.
-for playbook in maybelle/ansible/maybelle.yml hunter/ansible/playbook.yml delivery-kid/ansible/playbook.yml; do
+for playbook in maybelle/ansible/maybelle.yml hunter/ansible/playbook.yml delivery-kid/ansible/playbook.yml pickipedia-vps/ansible/playbook.yml; do
     check=$(mktemp -p "$(dirname "$playbook")" .syntax-XXXXXX.yml)
     grep -v 'vault\.yml' "$playbook" > "$check"
     if ! out=$(ansible-playbook --syntax-check -i localhost, "$check" 2>&1); then
@@ -34,4 +34,4 @@ done
 echo '--- every task takes what it says'
 # --syntax-check never asks a module what it takes: mem_limit on docker_container parsed fine and failed the
 # deploy halfway (9 Nov).
-python scripts/check_task_options.py maybelle/ansible/maybelle.yml hunter/ansible/playbook.yml delivery-kid/ansible/playbook.yml
+python scripts/check_task_options.py maybelle/ansible/maybelle.yml hunter/ansible/playbook.yml delivery-kid/ansible/playbook.yml pickipedia-vps/ansible/playbook.yml
