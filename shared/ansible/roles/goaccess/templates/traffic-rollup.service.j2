@@ -1,0 +1,21 @@
+[Unit]
+Description=Traffic rollup for {{ goaccess_site }}: hourly counts from Caddy's access log
+After=caddy.service
+
+[Service]
+Type=oneshot
+User={{ goaccess_user }}
+Group={{ goaccess_user }}
+# Reads the same log GoAccess reads and keeps its own hourly count, so the stats page can be asked
+# for the last three hours, day or week (#performance, 22 Nov). Its state, which holds the day's
+# salt, lives where nothing serves it; only traffic.json goes into the served directory.
+ExecStart=/usr/local/bin/traffic-rollup.py \
+    --log {{ goaccess_log }} \
+    --state {{ traffic_state_dir }} \
+    --out {{ goaccess_dir }}/traffic.json \
+    --site {{ goaccess_site }} \
+    --host {{ goaccess_public_host }}
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths={{ traffic_state_dir }} {{ goaccess_dir }}
+PrivateTmp=yes
