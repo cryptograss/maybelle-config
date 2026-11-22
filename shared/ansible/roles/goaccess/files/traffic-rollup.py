@@ -263,9 +263,9 @@ def backfill(log, where, take):
             for line in lines_of(path):
                 take(line)
                 read += 1
-        except OSError:                      # gone, or not ours to read: on to the next
-            pass
-    where['old'] = left
+        except (OSError, EOFError):          # gone, not ours to read, or a gzip still being written
+            pass                             # keep what it gave and go on: a file that can never be
+    where['old'] = left                      # read must not stop every run from here to forever
     return read
 
 
@@ -286,13 +286,16 @@ def tail_of_rolled(log, where, take, take_after):
                     take(line)
                     read += 1
                 return read
-        except OSError:
+        except (OSError, EOFError):
             continue
     if rolled and where.get('last_ts'):
         after = take_after(where['last_ts'])
-        for line in lines_of(rolled[-1]):
-            after(line)
-            read += 1
+        try:
+            for line in lines_of(rolled[-1]):
+                after(line)
+                read += 1
+        except (OSError, EOFError):   # still being gzipped: keep its first lines and let the rest go,
+            pass                      # rather than fail this run and every run after it (re, 22 Nov)
     return read
 
 

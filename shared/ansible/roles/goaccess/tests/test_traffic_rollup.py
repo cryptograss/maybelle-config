@@ -166,6 +166,21 @@ def test_the_tail_of_a_log_that_rolled_and_was_gzipped_is_counted_once(tmp_path,
     assert run(tmp_path)['windows']['3h']['requests']['people'] == 3
 
 
+def test_a_half_written_gzip_costs_its_own_lines_and_nothing_else(tmp_path, now):
+    """re, 22 Nov: gzip.open raises EOFError on a truncated stream, which isn't an OSError. If that
+    ends the run, a rolled file that is broken for good stops every run after it, and the served
+    file never changes again. It must cost that one file and no more."""
+    whole = ''.join(line(now - 4 * 3600, f'/wiki/Page_{n}') for n in range(200))
+    cut = gzip.compress(whole.encode())[:-60]
+    (tmp_path / 'access-2026-11-21T22-00-00.000-size.log.gz').write_bytes(cut)
+    (tmp_path / 'access.log').write_text(line(now - 60, '/wiki/Doc_Watson'))
+
+    body = run(tmp_path)                       # the run finishes, and the live line is counted
+    assert body['windows']['3h']['requests']['people'] == 1
+    assert body['catching_up'] == 0            # the broken file is behind us, not tried forever
+    assert run(tmp_path)['windows']['24h']['requests']['people'] >= 1
+
+
 def test_nothing_beside_the_log_is_read_twice_when_the_live_file_rolls(tmp_path, now):
     (tmp_path / 'access.log').write_text(line(now - 600, '/wiki/Doc_Watson'))
     run(tmp_path)
