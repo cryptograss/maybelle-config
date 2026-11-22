@@ -16,6 +16,12 @@ The log has all of it. This reads the same file, a minute at a time, and keeps i
   - traffic.json, written into the directory Caddy serves at /stats/: the three windows, made from
     those buckets, small enough to hand a browser.
 
+The first run also reads the rolled logs sitting beside the live one, one a run, oldest first. The
+live file is only as old as the last roll -- at our volume on 22 Nov that was 72 minutes, which is
+why the day and the week showed the same numbers as the three hours (Justin, #performance) -- so
+without that the longer windows would take a week to mean anything. Each window says how far back it
+actually reaches (`since`, `hours`, `full`), and the page says so where anyone can read it.
+
 What it will not keep, which is the same line the dashboard holds (and why this is safe to serve in
 the open):
 
@@ -35,6 +41,7 @@ Run as the caddy user, once a minute, by the timer beside this.  Usage:
 """
 
 import argparse
+import gzip
 import hashlib
 import json
 import os
@@ -52,7 +59,9 @@ WINDOWS = (('3h', 3), ('24h', 24), ('7d', 24 * 7))
 VISIT_GAP = 30 * 60           # seconds of quiet that make the next request a new visit
 MOST = {'pages': 25, 'from': 15, 'followed': 12, 'missing': 6}   # rows a window shows, per list
 KEEP = {'pages': 300, 'from': 120, 'followed': 120, 'missing': 40}  # rows an hour keeps, per list
-MAX_LINES = 400_000           # lines read in one run: a minute's worth is ~250, so this is a long catch-up
+BIG = 20 * max(KEEP.values())  # rows an hour holds mid-run before it keeps only its busiest: a crawler
+                               # walking a wiki would otherwise fill memory with one-ask paths
+MAX_LINES = 400_000           # lines read from the live log in one run: a minute's worth is ~400
 
 # What a page's query string may keep: enough to say which page it is, and nothing else. MediaWiki's
 # own (title, curid, oldid, diff, action), and the search box's.
@@ -158,63 +167,159 @@ def trim(bucket):
             bucket[name] = dict(sorted(rows.items(), key=lambda kv: -kv[1])[:keep])
 
 
-def read_lines(log, state):
-    """The lines written since last time. Caddy rolls the log by renaming it and starting a new one
-    (lumberjack), so when the file under our path is a different one, what was left in the old one is
-    read first, by the name it was rolled to."""
+ROLLED = re.compile(r'\.\d+(\.gz)?$')      # logrotate's name for a rolled log, if the box has it
+
+
+def rolled_logs(log):
+    """The rolled copies of our log, beside it, oldest first by when each was last written: Caddy's
+    own (<stem>-<when>.log, and <stem>-<when>.log.gz, since lumberjack gzips a rolled file unless
+    roll_uncompressed is set) and logrotate's (<name>.1, .1.gz), since a box may have either.
+    Anything older than HOURS_KEPT is left alone -- every line in it would be dropped from the
+    buckets anyway."""
+    oldest = time.time() - HOURS_KEPT * 3600
+    beside = set(log.parent.glob(log.stem + '-*' + log.suffix))
+    beside |= set(log.parent.glob(log.stem + '-*' + log.suffix + '.gz'))
+    beside |= {p for p in log.parent.glob(log.name + '.*') if ROLLED.search(p.name)}
+    found = []
+    for path in beside:
+        try:
+            about = path.stat()
+        except OSError:
+            continue
+        if path != log and path.is_file() and about.st_mtime >= oldest:
+            found.append((about.st_mtime, path))
+    return [path for _, path in sorted(found)]
+
+
+def lines_of(path, start=0):
+    """Each whole line of a file, from a byte offset, as text. A line still being written is left for
+    next time. A gzipped rolled log is read from the top: there is no useful byte offset into one."""
+    if path.suffix == '.gz':
+        with gzip.open(path, 'rb') as f:
+            for raw in f:
+                if raw.endswith(b'\n'):
+                    yield raw.decode('utf-8', 'replace')
+        return
+    with path.open('rb') as f:
+        f.seek(start)
+        for raw in f:
+            if not raw.endswith(b'\n'):
+                break
+            yield raw.decode('utf-8', 'replace')
+
+
+def catch_up(log, state, take, take_old, take_after):
+    """Every line not counted yet, handed over one at a time, oldest first; returns (how many, state).
+    Nothing is held in a list: a minute's worth is nothing, but a catch-up is a whole 100 MB log.
+
+    Three sources, in this order: a rolled log never read (`backfill`), what was left in the file our
+    path pointed at before it rolled (`tail_of_rolled`, which uses `take_after`), and the live file
+    from where we stopped. `take_old` counts the backfill, because it reads hours already past and
+    must not be told a visitor was heard a moment ago by a line from today."""
     log = Path(log)
-    lines, where = [], dict(state)
+    where = dict(state)
+    read = backfill(log, where, take_old)
     try:
         now = log.stat()
     except FileNotFoundError:
-        return lines, where
+        return read, where
     rolled = where.get('inode') not in (None, now.st_ino)
     if rolled or now.st_size < where.get('offset', 0):
         if rolled:
-            lines += tail_of_rolled(log, where)
+            read += tail_of_rolled(log, where, take, take_after)
         where['offset'] = 0
-    with log.open('r', errors='replace') as f:
-        f.seek(min(where.get('offset', 0), now.st_size))
-        for line in f:
-            if not line.endswith('\n'):      # a line still being written: next time
+    at = min(where.get('offset', 0), now.st_size)
+    with log.open('rb') as f:
+        f.seek(at)
+        for n, raw in enumerate(f, 1):
+            if not raw.endswith(b'\n'):      # a line still being written: next time
                 break
-            lines.append(line)
-            if len(lines) >= MAX_LINES:
+            take(raw.decode('utf-8', 'replace'))
+            at += len(raw)
+            read += 1
+            if n >= MAX_LINES:
                 break
-        where['offset'] = f.tell()
+    where['offset'] = at
     where['inode'] = now.st_ino
-    return lines, where
+    # The newest line counted from the live file: after a roll, the file we were reading is gzipped
+    # into a new one within moments, and this is the only thing that says where we had got to in it.
+    where['last_ts'] = max(where.get('last_ts') or 0, take.newest[0])
+    return read, where
 
 
-def tail_of_rolled(log, where):
-    """What was left unread in the file our path used to point at, found by its inode among the rolled
-    ones beside it (caddy writes <name>-<when>.log)."""
-    for other in sorted(log.parent.glob(log.stem + '-*' + log.suffix), reverse=True):
+def backfill(log, where, take):
+    """One rolled log a run, oldest first, until none are left unread. The live file is only as old as
+    the last roll, so without this the day and the week would hold the same hour or two as the three
+    hours and take a week to fill (Justin, #performance, 22 Nov). A file at a time, rather than all of
+    them: a whole log is some seconds of this process's own time, and the site comes first (Nice, in
+    the unit beside this)."""
+    left = where.get('old')
+    if left is None:                         # the first run: everything beside the live log
+        left = [path.name for path in rolled_logs(log)]
+    read = 0
+    while left and not read:
+        path = log.parent / left.pop(0)
         try:
-            if other.stat().st_ino != where.get('inode'):
-                continue
-            with other.open('r', errors='replace') as f:
-                f.seek(where.get('offset', 0))
-                return f.readlines()
-        except OSError:
-            return []
-    return []
+            for line in lines_of(path):
+                take(line)
+                read += 1
+        except (OSError, EOFError):          # gone, not ours to read, or a gzip still being written
+            pass                             # keep what it gave and go on: a file that can never be
+    where['old'] = left                      # read must not stop every run from here to forever
+    return read
 
 
-def count(lines, hours, seen, state_dir, host):
-    """Each line into its hour's bucket. `seen` is the last time each visitor was heard, so a request
-    after VISIT_GAP of quiet counts as a new visit."""
-    for line in lines:
+def tail_of_rolled(log, where, take, take_after):
+    """What was left unread in the file our path pointed at before it rolled, counted now.
+
+    Two ways to find it, because lumberjack gzips a rolled file moments after renaming it, and the
+    gzipped copy is a different file: by the inode we were reading, if it is still there, and in that
+    case we know the byte we stopped at; otherwise the newest rolled file, read whole with everything
+    we have already counted skipped by its timestamp. Without the second way, every roll would lose
+    the minute between our last run and it."""
+    inode, read = where.get('inode'), 0
+    rolled = rolled_logs(log)
+    for other in reversed(rolled):
+        try:
+            if inode is not None and other.stat().st_ino == inode:
+                for line in lines_of(other, where.get('offset', 0)):
+                    take(line)
+                    read += 1
+                return read
+        except (OSError, EOFError):
+            continue
+    if rolled and where.get('last_ts'):
+        after = take_after(where['last_ts'])
+        try:
+            for line in lines_of(rolled[-1]):
+                after(line)
+                read += 1
+        except (OSError, EOFError):   # still being gzipped: keep its first lines and let the rest go,
+            pass                      # rather than fail this run and every run after it (re, 22 Nov)
+    return read
+
+
+def counter(hours, seen, state_dir, host, after=0):
+    """A function that puts one log line into its hour's bucket, and remembers the newest line's time
+    in `take.newest`. `seen` is the last time each visitor was heard, so a request after VISIT_GAP of
+    quiet counts as a new visit; the backfill is given a `seen` of its own (catch_up says why).
+    `after` skips lines already counted, which is how the tail of a gzipped rolled log is read
+    without counting any of it twice."""
+    newest = [0.0]
+
+    def take(line):
         try:
             row = json.loads(line)
         except ValueError:
-            continue
+            return
         if row.get('logger') != 'http.log.access' and 'request' not in row:
-            continue
+            return
         req = row.get('request') or {}
         ts = row.get('ts')
-        if not isinstance(ts, (int, float)):
-            continue
+        if not isinstance(ts, (int, float)) or ts <= after:
+            return
+        if ts > newest[0]:
+            newest[0] = ts
         headers = req.get('headers') or {}
         agent = (headers.get('User-Agent') or [''])[0]
         group = who_is_it(agent)
@@ -233,30 +338,37 @@ def count(lines, hours, seen, state_dir, host):
 
         uri = req.get('uri') or '/'
         if FURNITURE.search(uri.split('?')[0]):
-            continue
+            return
         page = page_of(uri)
         if int(row.get('status') or 0) == 404:
             bucket['missing'][page] = bucket['missing'].get(page, 0) + 1
-            continue
-        bucket['pages'][page] = bucket['pages'].get(page, 0) + 1
-        if group != 'people':      # where a crawler says it came from is no use to anyone
-            continue
-        kind, what = referrer_of((headers.get('Referer') or [''])[0], host)
-        if kind:
-            bucket[kind][what] = bucket[kind].get(what, 0) + 1
-    for bucket in hours.values():
-        trim(bucket)
+        else:
+            bucket['pages'][page] = bucket['pages'].get(page, 0) + 1
+            if group == 'people':  # where a crawler says it came from is no use to anyone
+                kind, what = referrer_of((headers.get('Referer') or [''])[0], host)
+                if kind:
+                    bucket[kind][what] = bucket[kind].get(what, 0) + 1
+        if max(len(bucket[name]) for name in KEEP) > BIG:
+            trim(bucket)
+
+    take.newest = newest
+    return take
 
 
 def window(hours, back):
-    """The last `back` hours, added up."""
+    """The last `back` hours, added up, and how far back it actually reaches: `since` is the oldest
+    hour counted in it, `hours` how many hours hold anything, and `full` whether the count goes all
+    the way back. Without those, a window with an hour of history in it reads exactly like a quiet
+    week (Justin, #performance, 22 Nov: "I'm not seeing a difference when I click the timeframes")."""
     first = hour_of(time.time() - back * 3600)
     req, visits, status = dict.fromkeys(WHO, 0), dict.fromkeys(WHO, 0), defaultdict(int)
     lists = {name: defaultdict(int) for name in MOST}
-    size = 0
+    size, held = 0, []
     for hour, bucket in hours.items():
         if hour < first:
             continue
+        if any(bucket['req'].values()):
+            held.append(hour)
         size += bucket.get('bytes', 0)
         for group in WHO:
             req[group] += bucket['req'].get(group, 0)
@@ -266,7 +378,9 @@ def window(hours, back):
         for name in lists:
             for what, n in bucket.get(name, {}).items():
                 lists[name][what] += n
-    out = {'requests': req, 'visits': visits, 'bytes': size, 'status': dict(sorted(status.items()))}
+    out = {'requests': req, 'visits': visits, 'bytes': size, 'status': dict(sorted(status.items())),
+           'since': (min(held) + ':00:00+00:00') if held else None,
+           'hours': len(held), 'full': bool(held) and min(held) <= first}
     for name, rows in lists.items():
         out[name] = [{'what': what, 'n': n} for what, n in sorted(rows.items(), key=lambda kv: -kv[1])[:MOST[name]]]
     return out
@@ -288,25 +402,39 @@ def main():
         kept = {}
     hours = kept.get('hours') or {}
     seen = kept.get('seen') or {}
+    old_seen = kept.get('old_seen') or {}
     state = kept.get('log') or {}
+    host = args.host or args.site
 
-    lines, state = read_lines(args.log, state)
-    count(lines, hours, seen, args.state, args.host or args.site)
+    read, state = catch_up(args.log, state,
+                           counter(hours, seen, args.state, host),
+                           counter(hours, old_seen, args.state, host),
+                           lambda after: counter(hours, seen, args.state, host, after=after))
+    for bucket in hours.values():
+        trim(bucket)
 
     oldest = hour_of(time.time() - HOURS_KEPT * 3600)
     hours = {h: b for h, b in sorted(hours.items()) if h >= oldest}
     stale = time.time() - VISIT_GAP * 2
     seen = {who: when for who, when in seen.items() if when > stale}
+    left = len(state.get('old') or ())
+    if not left:                    # the backfill is done; its visitors are nobody's business now
+        old_seen = {}
+    elif old_seen:                  # only the last hour of it is needed to carry visits across a file
+        edge = max(old_seen.values()) - VISIT_GAP * 2
+        old_seen = {who: when for who, when in old_seen.items() if when > edge}
 
-    write(store, {'hours': hours, 'seen': seen, 'log': state}, private=True)
+    write(store, {'hours': hours, 'seen': seen, 'old_seen': old_seen, 'log': state}, private=True)
     write(Path(args.out), {
         'site': args.site,
-        'host': args.host or args.site,
+        'host': host,
         'updated': datetime.now(timezone.utc).isoformat(timespec='seconds'),
-        'read': len(lines),
+        'read': read,
+        'since': (min(hours) + ':00:00+00:00') if hours else None,
+        'catching_up': left,
         'windows': {name: window(hours, back) for name, back in WINDOWS},
     })
-    print(f'{args.site}: {len(lines)} lines, {len(hours)} hours kept')
+    print(f'{args.site}: {read} lines, {len(hours)} hours kept, {left} rolled logs left to read')
 
 
 def write(path, body, private=False):

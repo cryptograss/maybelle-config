@@ -15,6 +15,11 @@ ExecStart=/usr/local/bin/traffic-rollup.py \
     --out {{ goaccess_dir }}/traffic.json \
     --site {{ goaccess_site }} \
     --host {{ goaccess_public_host }}
+# The first runs read the rolled logs beside the live one, oldest first, one a run, so the day and the
+# week are real within minutes rather than filling over a week. That is some seconds of CPU a run until
+# it has caught up, and the site comes first.
+Nice=10
+IOSchedulingClass=idle
 NoNewPrivileges=yes
 ProtectSystem=strict
 ReadWritePaths={{ traffic_state_dir }} {{ goaccess_dir }}
