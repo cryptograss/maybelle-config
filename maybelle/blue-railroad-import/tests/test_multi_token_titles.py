@@ -3,13 +3,29 @@
 from unittest.mock import MagicMock
 from blue_railroad_import.release_page import ensure_release_for_token, _enrich_existing
 from blue_railroad_import.models import Token
+from blue_railroad_import.thumbnail import get_thumbnail_filename
+
+
+class TokenWithCid(Token):
+    """A token that simply has a CID, for tests that aren't about deriving one.
+
+    These tests used to do `type(token).ipfs_cid = property(...)`, which replaces the property on Token
+    itself for the rest of the process: every token made afterwards, in any test file, reported
+    'QmTEST123'. That cost 5 failures in the full run (4 in test_submission.py, 1 here) while each file
+    passed on its own, and it is why the suite has been red (magent, #uploads-and-embeds, 23 Nov 2026).
+    A subclass leaves Token as it is.
+    """
+
+    @property
+    def ipfs_cid(self):
+        return self._cid
 
 
 class TestMultiTokenTitles:
     """Test the multi-token title format."""
 
     def _make_token(self, token_id, song_id='7', cid='QmTEST123'):
-        return Token(
+        token = TokenWithCid(
             token_id=str(token_id),
             source_key='blueRailroadV2s',
             owner='0x123',
@@ -18,6 +34,8 @@ class TestMultiTokenTitles:
             blockheight=12345,
             video_hash=None,
         )
+        token._cid = cid
+        return token
 
     def test_single_token_title(self):
         """Single token should produce 'Song (Exercise) #N' format."""
@@ -25,10 +43,6 @@ class TestMultiTokenTitles:
         wiki.page_exists.return_value = False
 
         token = self._make_token(3, song_id='7')
-        # Manually set ipfs_cid since we're not using video_hash
-        token._test_cid = 'QmTEST123'
-        # Override ipfs_cid property
-        type(token).ipfs_cid = property(lambda self: 'QmTEST123')
 
         ensure_release_for_token(wiki, token, all_token_ids=[3])
 
@@ -43,7 +57,6 @@ class TestMultiTokenTitles:
         wiki.page_exists.return_value = False
 
         token = self._make_token(3, song_id='7')
-        type(token).ipfs_cid = property(lambda self: 'QmTEST123')
 
         ensure_release_for_token(wiki, token, all_token_ids=[3, 4])
 
@@ -76,11 +89,15 @@ class TestMultiTokenTitles:
     def test_enrich_unchanged_when_title_matches(self):
         """Enriching should not update when title already matches."""
         wiki = MagicMock()
+        # Everything the enrichment can add is already here, the thumbnail included: a page that has
+        # it all is left alone. Without the thumbnail line this test asserted 'unchanged' against a
+        # page the bot does enrich, and failed (magent, 23 Nov 2026).
         wiki.get_page_content.return_value = (
             "title: 'Blue Railroad Train (Squats) #3, #4'\n"
             "release_type: blue-railroad\n"
             "file_type: video/webm\n"
             "ipfs_cid: QmTEST\n"
+            f"thumbnail: {get_thumbnail_filename('QmTEST')}\n"
         )
 
         result = _enrich_existing(
