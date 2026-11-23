@@ -230,3 +230,51 @@ def test_nothing_private_reaches_the_served_file(tmp_path, now):
     assert salt and not any(value in served for value in salt.values())
     assert (tmp_path / 'state' / 'salt.json').stat().st_mode & 0o077 == 0
     assert (tmp_path / 'state' / 'hours.json').stat().st_mode & 0o077 == 0
+
+
+def test_a_program_that_doesnt_say_it_is_a_browser_is_not_a_reader(tmp_path, now):
+    """What Justin's million api.php asks turned out to be (#performance, 23 Nov): mwclient, and a
+    node process, and neither is a person. Both were counted as people until this, which on
+    PickiPedia put two million asks a week -- half of everything the box served -- in the readers'
+    column."""
+    (tmp_path / 'access.log').write_text(
+        line(now - 60, '/api.php?action=query', agent='mwclient/0.11.0', ip='10.0.0.4')
+        + line(now - 55, '/api.php?action=query', agent='node', ip='10.0.0.5')
+        + line(now - 50, '/api.php?action=query', agent='', ip='10.0.0.6')
+        + line(now - 45, '/wiki/Doc_Watson'))
+    three = run(tmp_path)['windows']['3h']
+    assert three['requests'] == {'people': 1, 'crawlers': 3, 'ours': 0}
+
+
+def test_the_busiest_clients_are_named_and_the_people_are_not(tmp_path, now):
+    """"What are these million asks" is a question the page can answer on its own, so each window
+    names the programs behind its busiest rows. A person is never named: a browser's user agent next
+    to what it asked for is most of a fingerprint, so every browser is 'a browser'."""
+    (tmp_path / 'access.log').write_text(
+        ''.join(line(now - 100 + i, '/api.php?action=query', agent='mwclient/0.11.0', ip='10.0.0.4')
+                for i in range(5))
+        + line(now - 60, '/wiki/Doc_Watson', agent=CRAWLER, ip='66.249.66.1')
+        + line(now - 50, '/wiki/Doc_Watson')
+        + line(now - 40, '/api.php?action=query', agent=OURS, ip='10.0.0.2'))
+    body = run(tmp_path)
+    clients = {row['what']: row['n'] for row in body['windows']['3h']['clients']}
+    assert clients == {'mwclient': 5, 'Googlebot': 1, 'a browser': 1, 'memory-lane': 1}
+    assert BROWSER not in (tmp_path / 'served' / 'traffic.json').read_text()
+
+
+def test_an_hour_counted_before_the_clients_list_existed_is_still_read(tmp_path, now):
+    """The buckets on each box were written by the version before this one, and they hold no clients
+    list at all. A run that trips over that is a run that stops counting, quietly, on whichever box
+    deployed first."""
+    (tmp_path / 'access.log').write_text(line(now - 7200, '/wiki/Doc_Watson'))
+    run(tmp_path)
+    kept = json.loads((tmp_path / 'state' / 'hours.json').read_text())
+    for bucket in kept['hours'].values():
+        bucket.pop('clients', None)
+    (tmp_path / 'state' / 'hours.json').write_text(json.dumps(kept))
+
+    with (tmp_path / 'access.log').open('a') as log:      # as Caddy writes it: the next line, appended
+        log.write(line(now - 60, '/wiki/Bill_Monroe'))
+    body = run(tmp_path)
+    assert body['windows']['3h']['requests']['people'] == 2
+    assert {row['what'] for row in body['windows']['3h']['clients']} == {'a browser'}

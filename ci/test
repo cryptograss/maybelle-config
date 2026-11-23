@@ -23,10 +23,17 @@ echo '--- the playbooks parse'
 # ansible splits a task's words when it loads the playbook, before anything runs: the first deploy of the
 # branches agent died there on an apostrophe (9 Nov), and nothing above would have seen it. Without the
 # vault, which nothing here can open.
+# Each from its own directory, as the deploy runs it: roles_path lives in that box's ansible.cfg and is
+# written relative to it (./roles:../../shared/ansible/roles), so from here the shared goaccess role isn't
+# found at all. The wiki box was the one this showed on, because a static `roles:` entry is resolved while
+# the playbook is parsed and an include_role is not -- and because from here it reported the missing role
+# rather than the thing being checked (magent, 23 Nov: I ran this from inside the directory, said it
+# parsed, and put it in a check that runs from the root).
 for playbook in maybelle/ansible/maybelle.yml hunter/ansible/playbook.yml delivery-kid/ansible/playbook.yml pickipedia-vps/ansible/playbook.yml; do
-    check=$(mktemp -p "$(dirname "$playbook")" .syntax-XXXXXX.yml)
+    dir=$(dirname "$playbook")
+    check=$(mktemp -p "$dir" .syntax-XXXXXX.yml)
     grep -v 'vault\.yml' "$playbook" > "$check"
-    if ! out=$(ansible-playbook --syntax-check -i localhost, "$check" 2>&1); then
+    if ! out=$(cd "$dir" && ansible-playbook --syntax-check -i localhost, "$(basename "$check")" 2>&1); then
         rm -f "$check"; echo "$playbook doesn't parse:"; echo "$out" | tail -15; exit 1
     fi
     rm -f "$check"; echo "$playbook parses"

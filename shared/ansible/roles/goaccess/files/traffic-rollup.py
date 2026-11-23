@@ -32,6 +32,9 @@ the open):
     code, a token, a search someone typed: dropped before anything is written.
   - A referring URL keeps its host and path, never its query string: that is where a search engine
     puts what was typed.
+  - A program is named (mwclient, Googlebot, curl), because a program's name is the answer to "what
+    are these million asks". A person is never named: every browser is "a browser", since a
+    browser's user agent, kept with what it asked for, is most of a fingerprint.
   - Paths that carry a live secret never reach the log at all (skip_log, in each site's Caddyfile).
 
 Run as the caddy user, once a minute, by the timer beside this.  Usage:
@@ -57,8 +60,8 @@ from urllib.parse import parse_qsl, urlsplit
 HOURS_KEPT = 24 * 9           # buckets kept: a week's window, with a day or two of slack
 WINDOWS = (('3h', 3), ('24h', 24), ('7d', 24 * 7))
 VISIT_GAP = 30 * 60           # seconds of quiet that make the next request a new visit
-MOST = {'pages': 25, 'from': 15, 'followed': 12, 'missing': 6}   # rows a window shows, per list
-KEEP = {'pages': 300, 'from': 120, 'followed': 120, 'missing': 40}  # rows an hour keeps, per list
+MOST = {'pages': 25, 'from': 15, 'followed': 12, 'missing': 6, 'clients': 12}  # rows a window shows
+KEEP = {'pages': 300, 'from': 120, 'followed': 120, 'missing': 40, 'clients': 60}  # rows an hour keeps
 BIG = 20 * max(KEEP.values())  # rows an hour holds mid-run before it keeps only its busiest: a crawler
                                # walking a wiki would otherwise fill memory with one-ask paths
 MAX_LINES = 400_000           # lines read from the live log in one run: a minute's worth is ~400
@@ -84,6 +87,23 @@ CRAWLERS = re.compile(r'bot\b|bot/|spider|crawler|crawling|slurp|facebookexterna
                       r'applebot|gptbot|claudebot|claude-web|ccbot|perplexity|amazonbot|bytespider|'
                       r'headlesschrome|phantomjs|scrapy|python-httpx|archive\.org_bot|ia_archiver|'
                       r'wpbot|zgrab|masscan|censys|internet-?measurement', re.I)
+
+# A browser says it is one. Every browser in use begins its user agent "Mozilla/5.0 " or
+# "Mozilla/5.0(" -- Chrome, Safari, Firefox, Edge and Opera all do, for reasons going back to
+# Netscape's -- and the few that don't say "Opera/9.80" or "Dalvik/". A program says something else,
+# or says nothing at all. Until 23 Nov anything unrecognised fell through to 'people', and that put
+# two million mwclient asks in the readers' column on PickiPedia: half of everything that box serves
+# (Justin, #performance, 23 Nov, asking what the million api.php asks were). A scraper that sends a
+# browser's user agent is still counted as a person, and nothing here can tell the difference -- but
+# it shows up by name in the clients list, which is the point of that list.
+BROWSER = re.compile(r'^Mozilla/5\.0[ (]|^Opera/9\.80|^Dalvik/')
+
+# Words a user agent carries that do not name the program asking: Netscape's prefix, the engines
+# every browser lists, and the platform underneath.
+NOT_A_NAME = {'mozilla', 'applewebkit', 'khtml', 'gecko', 'safari', 'version', 'like', 'compatible',
+              'windows', 'macintosh', 'linux', 'android', 'iphone', 'ipad', 'x11', 'intel', 'mac',
+              'win64', 'wow64', 'cros', 'ubuntu', 'debian', 'fedora', 'mobile', 'build', 'nt', 'os',
+              'rv', 'http', 'https', 'www', 'x86_64', 'i686', 'amd64', 'arm64', 'aarch64'}
 
 WHO = ('people', 'crawlers', 'ours')
 
@@ -122,7 +142,29 @@ def who_is_it(agent):
         return 'ours'
     if CRAWLERS.search(agent):
         return 'crawlers'
-    return 'people'
+    return 'people' if BROWSER.match(agent) else 'crawlers'   # a program, whoever's it is
+
+
+def client_of(agent, group):
+    """The name a program gives itself, without its version: 'mwclient/0.11.0' is 'mwclient'. People
+    are not named one at a time -- a browser's user agent is a fingerprint, and not keeping one is
+    the whole care of this file -- so every browser is 'a browser'."""
+    if group == 'people':
+        return 'a browser'
+    if not agent:
+        return 'no name given'
+    # A crawler that gives its name does it inside a browser's user agent -- "Mozilla/5.0
+    # (compatible; Googlebot/2.1; ...)" -- so the word CRAWLERS matched inside is the name, and the
+    # rest of that line is Netscape dressing.
+    known = CRAWLERS.search(agent) if group == 'crawlers' else None
+    for word in re.finditer(r'[A-Za-z][A-Za-z0-9_.+-]*', agent):
+        if known is not None:
+            if word.start() <= known.start() < word.end():
+                return word.group(0)[:40]
+            continue
+        if len(word.group(0)) > 2 and word.group(0).lower() not in NOT_A_NAME:
+            return word.group(0)[:40]
+    return agent.split()[0][:40]
 
 
 def page_of(uri):
@@ -155,14 +197,14 @@ def referrer_of(url, host):
 
 def empty_hour():
     return {'req': dict.fromkeys(WHO, 0), 'visits': dict.fromkeys(WHO, 0), 'bytes': 0,
-            'status': {}, 'pages': {}, 'from': {}, 'followed': {}, 'missing': {}}
+            'status': {}, 'pages': {}, 'from': {}, 'followed': {}, 'missing': {}, 'clients': {}}
 
 
 def trim(bucket):
     """An hour keeps only its busiest rows: a crawler walking a wiki would otherwise write a list as
-    long as the wiki."""
+    long as the wiki. An hour saved before one of these lists existed simply doesn't hold it."""
     for name, keep in KEEP.items():
-        rows = bucket[name]
+        rows = bucket.get(name) or {}
         if len(rows) > keep:
             bucket[name] = dict(sorted(rows.items(), key=lambda kv: -kv[1])[:keep])
 
@@ -325,6 +367,10 @@ def counter(hours, seen, state_dir, host, after=0):
         group = who_is_it(agent)
         bucket = hours.setdefault(hour_of(ts), empty_hour())
         bucket['req'][group] += 1
+        # Every ask, the furniture of a page included: the question this answers is who is asking,
+        # and a program that pulls a thousand images is as much of a load as one that pulls pages.
+        client = client_of(agent, group)
+        bucket['clients'][client] = bucket['clients'].get(client, 0) + 1
         bucket['bytes'] += int(row.get('size') or 0)
         status = str(row.get('status') or 0)
         bucket['status'][status[0] + 'xx'] = bucket['status'].get(status[0] + 'xx', 0) + 1
@@ -348,7 +394,7 @@ def counter(hours, seen, state_dir, host, after=0):
                 kind, what = referrer_of((headers.get('Referer') or [''])[0], host)
                 if kind:
                     bucket[kind][what] = bucket[kind].get(what, 0) + 1
-        if max(len(bucket[name]) for name in KEEP) > BIG:
+        if max(len(bucket.get(name) or {}) for name in KEEP) > BIG:
             trim(bucket)
 
     take.newest = newest
