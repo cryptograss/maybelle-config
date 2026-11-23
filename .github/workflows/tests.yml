@@ -19,6 +19,7 @@ on:
       - 'scripts/**'
       - 'delivery-kid/pinning-service/**'
       - 'maybelle/scripts/**'
+      - 'maybelle/blue-railroad-import/**'
       - '.github/workflows/tests.yml'
   pull_request:
     paths:
@@ -28,6 +29,7 @@ on:
       - 'scripts/**'
       - 'delivery-kid/pinning-service/**'
       - 'maybelle/scripts/**'
+      - 'maybelle/blue-railroad-import/**'
       - '.github/workflows/tests.yml'
 
 jobs:
@@ -83,6 +85,34 @@ jobs:
 
       - name: Run tests
         run: pytest -v maybelle/scripts/tests
+
+  # The Blue Railroad import bot, which Jenkins runs every 2 minutes to turn finalized ReleaseDrafts
+  # into Release pages. It lived in a repository of its own, which had no CI at all: its suite was red
+  # for 5 tests and nobody knew (magent, #uploads-and-embeds, 23 Nov 2026). It runs on maybelle in the
+  # Jenkins image's venv, which is Debian bookworm's Python 3.11.
+  blue-railroad-import:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: maybelle/blue-railroad-import
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e '.[dev]'
+
+      # The importer tests reach our IPFS gateways to ask whether a CID is pinned, and pass either
+      # way: a gateway that can't be reached reads as not pinned. So a red run here is the bot, not
+      # the weather.
+      - name: Run tests
+        run: pytest -v
 
   # recovery-gate decides what Pi may do on hunter's host as the `recovery`
   # user: deny the calls that crashed dockerd, anything that deletes

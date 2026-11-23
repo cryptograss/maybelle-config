@@ -1,5 +1,11 @@
 # Blue Railroad Import Bot
 
+*This was its own repository, cryptograss/blue-railroad-import, cloned from GitHub at every deploy.
+It moved here on 23 November 2026 (Justin, #uploads-and-embeds), with its history, so that what
+Jenkins runs comes from githouse like everything else and a change to the bot and to the job that
+runs it is one branch. maybelle/ansible/maybelle.yml installs it; maybelle/jobs/pickipedia-import-bluerailroad.groovy
+runs it every 2 minutes; .github/workflows/tests.yml runs its tests.*
+
 Python bot that imports Blue Railroad NFT token data from chain data into [PickiPedia](https://pickipedia.xyz).
 
 ## Overview
