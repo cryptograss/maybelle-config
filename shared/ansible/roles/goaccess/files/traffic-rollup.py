@@ -454,6 +454,12 @@ def main():
     except (OSError, ValueError):
         kept = {}
     hours = kept.get('hours') or {}
+    for bucket in hours.values():
+        # An hour saved by an older version of this script holds none of the lists that version
+        # didn't have. Fill them in here, once, rather than guard every place that counts into one:
+        # the hour a new version first runs in was written by the old one, so that is the usual path.
+        for name, blank in empty_hour().items():
+            bucket.setdefault(name, blank)
     seen = kept.get('seen') or {}
     old_seen = kept.get('old_seen') or {}
     state = kept.get('log') or {}

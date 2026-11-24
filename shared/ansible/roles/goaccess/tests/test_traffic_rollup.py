@@ -278,3 +278,27 @@ def test_an_hour_counted_before_the_clients_list_existed_is_still_read(tmp_path,
     body = run(tmp_path)
     assert body['windows']['3h']['requests']['people'] == 2
     assert {row['what'] for row in body['windows']['3h']['clients']} == {'a browser'}
+
+
+def test_a_line_landing_in_an_hour_counted_before_the_clients_list_is_still_counted(tmp_path, now):
+    """re's reproduction (#performance, 23 Nov 22:58Z), and the path a deploy actually takes: the old
+    version wrote the hour we are still in, and the new version's first line lands in that same
+    bucket. Counting into a list the bucket doesn't hold killed the run before it saved anything, so
+    the state stayed old-format and every run after it died the same way, for good. The served file
+    freezes at deploy time, which reads exactly like a site nobody is visiting."""
+    hour = (now - 3600) // 3600 * 3600      # an hour wholly past, so both lines share one bucket
+    (tmp_path / 'access.log').write_text(line(hour + 10, '/wiki/Doc_Watson'))
+    run(tmp_path)
+    kept = json.loads((tmp_path / 'state' / 'hours.json').read_text())
+    assert len(kept['hours']) == 1
+    for bucket in kept['hours'].values():
+        bucket.pop('clients', None)
+    (tmp_path / 'state' / 'hours.json').write_text(json.dumps(kept))
+
+    with (tmp_path / 'access.log').open('a') as log:
+        log.write(line(hour + 20, '/wiki/Bill_Monroe'))
+    body = run(tmp_path)
+    assert body['windows']['3h']['requests']['people'] == 2
+    assert {row['what']: row['n'] for row in body['windows']['3h']['clients']} == {'a browser': 1}
+    # and the run saved its state, so the next one carries on rather than dying the same way
+    assert 'clients' in next(iter(json.loads((tmp_path / 'state' / 'hours.json').read_text())['hours'].values()))
