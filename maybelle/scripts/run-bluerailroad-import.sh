@@ -13,9 +13,11 @@ PYTHON="/opt/blue-railroad-import/bin/python"
 
 echo "=== Blue Railroad Import ==="
 
-# Show commit from source checkout
-echo -n "blue-railroad-import: "
-docker exec jenkins bash -c "cd /opt/blue-railroad-import-src && git log --oneline -1" 2>/dev/null || echo "unknown"
+# What's installed is this repository's maybelle/blue-railroad-import/, as of the last deploy: the
+# bot had a repository and a checkout of its own until 23 Nov 2026, and `git log` in the container
+# was how you saw which commit was running. This checkout, on maybelle, is where it comes from now.
+echo -n "blue-railroad-import (maybelle-config): "
+git -C /mnt/persist/maybelle-config log --oneline -1 -- maybelle/blue-railroad-import 2>/dev/null || echo "unknown"
 echo ""
 
 # Check chain data exists

@@ -154,6 +154,25 @@
         dest: "{{ jenkins_home }}/docker-build/"
         mode: '0644'
 
+    # The Blue Railroad import bot's source, into the image's build context. It lived in its own
+    # repository (cryptograss/blue-railroad-import) and was cloned from GitHub at every deploy, so
+    # what Jenkins ran came from outside githouse: a push to GitHub's production changed it without
+    # passing the ramp. It is maybelle/blue-railroad-import/ here now (Justin, #uploads-and-embeds,
+    # 23 Nov 2026), and this is the one copy of it on the server. The Dockerfile installs it into the
+    # venv; the running container reaches the same directory through the jenkins_home mount, which is
+    # what the install below uses, so a deploy doesn't wait for the container to be made again.
+    # `copy` never deletes, so a module deleted from the repository would linger: cleared first.
+    - name: Clear the last deploy's copy of the import bot
+      file:
+        path: "{{ jenkins_home }}/docker-build/blue-railroad-import"
+        state: absent
+
+    - name: Copy the Blue Railroad import bot into the build context
+      copy:
+        src: "{{ playbook_dir }}/../blue-railroad-import/"
+        dest: "{{ jenkins_home }}/docker-build/blue-railroad-import/"
+        mode: '0644'
+
     - name: Create blank .bashrc
       file:
         path: "{{ jenkins_home }}/.bashrc"
@@ -586,19 +605,12 @@
       shell: docker exec -i jenkins-branches python3 - < /mnt/persist/jenkins-branches/build/isolation_check.py
       changed_when: false
 
-    - name: Clone or update blue-railroad-import source
+    # The image already holds this build's bot, so this is for a container that wasn't made again
+    # when the image changed. --no-deps: the dependencies came with the image, from the same source.
+    - name: Install the Blue Railroad import bot into the running Jenkins
       command: >
-        docker exec -u root jenkins bash -c '
-          git config --global --add safe.directory /opt/blue-railroad-import-src 2>/dev/null;
-          if [ -d /opt/blue-railroad-import-src/.git ]; then
-            cd /opt/blue-railroad-import-src && git fetch origin && git reset --hard origin/production
-          else
-            git clone --branch production https://github.com/cryptograss/blue-railroad-import.git /opt/blue-railroad-import-src
-          fi
-        '
-
-    - name: Install blue-railroad-import from local checkout
-      command: docker exec -u root jenkins /opt/blue-railroad-import/bin/pip install --no-cache-dir --no-deps --force-reinstall /opt/blue-railroad-import-src
+        docker exec -u root jenkins /opt/blue-railroad-import/bin/pip install --no-cache-dir --no-deps
+        --force-reinstall /var/jenkins_home/docker-build/blue-railroad-import
 
     - name: Fix blue-railroad-cache permissions
       command: docker exec -u root jenkins chown -R jenkins:jenkins /mnt/persist/blue-railroad-cache

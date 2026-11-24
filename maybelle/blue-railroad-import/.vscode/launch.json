@@ -1,0 +1,84 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Dry Run Import",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "blue_railroad_import.cli",
+            "args": [
+                "--chain-data", "${workspaceFolder}/../arthel/output/_prebuild_chain_data/chainData.json",
+                "--dry-run",
+                "-v"
+            ],
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+        {
+            "name": "Dry Run Import (Custom Chain Data)",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "blue_railroad_import.cli",
+            "args": [
+                "--chain-data", "${input:chainDataPath}",
+                "--dry-run",
+                "-v"
+            ],
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+        {
+            "name": "Live Import (with auth)",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "blue_railroad_import.cli",
+            "args": [
+                "--chain-data", "${workspaceFolder}/../arthel/output/_prebuild_chain_data/chainData.json",
+                "--wiki-url", "https://pickipedia.xyz",
+                "--username", "${env:BLUERAILROAD_BOT_USERNAME}",
+                "--password", "${env:BLUERAILROAD_BOT_PASSWORD}",
+                "-v"
+            ],
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+        {
+            "name": "Run Tests",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "pytest",
+            "args": [
+                "tests/",
+                "-v"
+            ],
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "justMyCode": false
+        },
+        {
+            "name": "Debug Current Test File",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "pytest",
+            "args": [
+                "${file}",
+                "-v",
+                "-s"
+            ],
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "justMyCode": false
+        }
+    ],
+    "inputs": [
+        {
+            "id": "chainDataPath",
+            "type": "promptString",
+            "description": "Path to chainData.json file",
+            "default": "/home/magent/workspace/arthel/output/_prebuild_chain_data/chainData.json"
+        }
+    ]
+}

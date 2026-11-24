@@ -31,10 +31,12 @@ RUN apt-get update && apt-get install -y \
     ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Blue Railroad import bot
+# The Blue Railroad import bot, from this repository: maybelle/blue-railroad-import/, which
+# maybelle.yml copies into this build context. It used to be installed from GitHub, which meant
+# Jenkins ran code that never passed githouse (Justin, #uploads-and-embeds, 23 Nov 2026).
+COPY blue-railroad-import /opt/blue-railroad-import-src
 RUN python3 -m venv /opt/blue-railroad-import && \
-    /opt/blue-railroad-import/bin/pip install --no-cache-dir \
-    git+https://github.com/cryptograss/blue-railroad-import.git
+    /opt/blue-railroad-import/bin/pip install --no-cache-dir /opt/blue-railroad-import-src
 
 # Install Composer
 RUN curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
