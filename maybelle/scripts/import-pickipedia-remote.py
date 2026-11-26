@@ -18,6 +18,16 @@ Prerequisites:
 import subprocess
 import sys
 
+# The deploy on maybelle runs for ten minutes or more with nothing to say (hunter's image
+# build logs to a file on hunter, so the SSH channel carries no output at all), and a TCP
+# connection that quiet gets dropped by a NAT or a venue's Wi-Fi. ssh then waits for a
+# reply that never comes: maybelle finishes the deploy and posts its log, while the laptop
+# hangs until Ctrl-C (Justin, #ops, 25 Nov 2026). These put a keepalive on the connection
+# every 15 seconds, which also keeps the NAT mapping, and give up after 20 unanswered
+# ones (5 minutes), so a connection that really died ends in an error, not a hang.
+SSH_ALIVE = ['-o', 'ServerAliveInterval=15', '-o', 'ServerAliveCountMax=20',
+             '-o', 'ConnectTimeout=15']
+
 
 def main():
     print("=" * 60)
@@ -44,7 +54,7 @@ def main():
     import_script = '/mnt/persist/maybelle-config/maybelle/scripts/import-pickipedia.sh'
 
     result = subprocess.run(
-        ['ssh', '-t', maybelle, import_script],
+        ['ssh', '-t', *SSH_ALIVE, maybelle, import_script],
         text=True
     )
 
