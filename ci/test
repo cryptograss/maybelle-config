@@ -13,6 +13,8 @@ echo '--- maybelle scripts'
 python -m pytest -q maybelle/scripts/tests
 echo '--- hunter'
 python -m pytest -q hunter/test_container_startup.py hunter/scripts
+echo '--- the traffic rollup'
+python -m pytest -q shared/ansible/roles/goaccess/tests
 echo '--- render_diff, its own tests'
 python -m pytest -q scripts/tests
 echo '--- recovery gate'

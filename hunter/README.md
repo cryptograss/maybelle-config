@@ -50,6 +50,10 @@ Caddy (roles/mood-previews; `mood-previews.py`, installed as
 `hunter-mood-previews` on a one-minute timer). Certificates are
 issued on demand, only for listed hostnames.
 
+A Mood may have one of its ten served by a container of its own instead of
+by a dev server in workbench, which every deploy kills: inventory
+`mood_servers`, in CONTAINERS.md.
+
 ## Files
 
 - `Dockerfile` - the base container image (joins the `moods` group, git

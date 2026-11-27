@@ -96,9 +96,9 @@ pickipedia-vps/
 
 Backups are pulled from maybelle:
 - **Database**: `/mnt/persist/pickipedia/backups/pickipedia_YYYYMMDD.sql.gz`
-- **Images**: `/mnt/persist/pickipedia/backups/images/`
+- **Images**: `/mnt/persist/pickipedia/backups/images/` (files changed in the last 7 days); all of them at `/mnt/persist/pickipedia/files/`
 
-Daily backups run at 3:30 AM via the `backup-pickipedia` Jenkins job.
+maybelle's root cron pulls the database at 03:30 UTC (`maybelle/scripts/backup-pickipedia.sh`), and at 05:00 `offsite-backup.sh` mirrors all the files and sends both off maybelle (top-level README, "The offsite backup"). The `cron-health` Jenkins job checks both.
 
 ## Monitoring
 

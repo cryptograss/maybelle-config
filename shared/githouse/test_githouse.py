@@ -1114,5 +1114,31 @@ class MergeTest(Repos):
     def test_not_an_order(self):
         self.assertEqual(self.merge('merge everything please', 'x')['why'], 'not a merge order')
 
+
+class LimitsTest(unittest.TestCase):
+
+    def test_ssh_command_carries_connect_and_alive_timeouts(self):
+        cmd = githouse.ssh_with(Path('/srv/git/.deploy_key'))
+        for flag in ('ConnectTimeout=15', 'ServerAliveInterval=15', 'ServerAliveCountMax=2'):
+            self.assertIn(flag, cmd)
+
+    def test_hung_git_and_push_time_out_cleanly(self):
+        expired = subprocess.TimeoutExpired(cmd=['git'], timeout=1)
+        with unittest.mock.patch.object(subprocess, 'run', side_effect=expired):
+            self.assertIsNone(githouse.git(Path('/tmp/none.git'), 'ls-remote', 'github', check=False, timeout=1))
+            with self.assertRaisesRegex(RuntimeError, 'timed out after 1s'):
+                githouse.git(Path('/tmp/none.git'), 'ls-remote', 'github', timeout=1)
+            self.assertEqual(githouse._push_github(Path('/tmp/none.git'), 'HEAD:refs/heads/main', timeout=1),
+                             (False, 'timed out after 1s'))
+
+    def test_mirror_init_updates_existing_remote_in_place(self):
+        with tempfile.TemporaryDirectory() as td:
+            with unittest.mock.patch.object(githouse, 'ROOT', Path(td)):
+                githouse.mirror_init(['cryptograss/magenta'], 'ssh://git@10.0.0.2:2222')
+                githouse.mirror_init(['cryptograss/magenta'], 'ssh://git@10.0.0.2:2223')
+                url = githouse.git(Path(td) / 'magenta.git', 'remote', 'get-url', 'maybelle').strip()
+                self.assertEqual(url, 'ssh://git@10.0.0.2:2223/magenta.git')
+
+
 if __name__ == '__main__':
     unittest.main()

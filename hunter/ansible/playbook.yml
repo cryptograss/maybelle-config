@@ -156,10 +156,21 @@
       vars:
         user: "{{ (people | selectattr('name', 'equalto', entry.name) | first | default({})) | combine(entry) }}"
 
+    # Now that every container runs the new magenta:latest, the previous magenta image is untagged (<none>):
+    # prune dangling images only (no -a, so named locally-built images stay untouched) to free ~10.7GB.
+    - name: Reclaim superseded dangling images after recreating containers
+      command: docker image prune -f
+      register: post_deploy_prune
+      changed_when: "'Total reclaimed space: 0B' not in post_deploy_prune.stdout"
+
     # After workbench is up: each Mood's previews by its name, from workbench.
     - name: Include mood-previews role (each Mood's <slug>0-9 hostnames)
       include_role:
         name: mood-previews
+
+    - name: Include mood-folders role (each Mood's folder as a gallery, folders.<domain>)
+      include_role:
+        name: mood-folders
 
     - name: Display deployment summary
       debug:

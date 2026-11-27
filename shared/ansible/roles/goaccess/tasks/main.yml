@@ -59,3 +59,41 @@
     daemon_reload: "{{ goaccess_unit.changed }}"
     state: "{{ 'restarted' if goaccess_unit.changed else 'started' }}"
     enabled: yes
+
+# The rollup: the same log, counted by the hour, so the stats page in magenta can be asked for the
+# last three hours, day or week, and can say how much of it is people (#performance, 22 Nov).
+- name: The rollup's state directory, which nothing serves
+  ansible.builtin.file:
+    path: "{{ traffic_state_dir }}"
+    state: directory
+    owner: "{{ goaccess_user }}"
+    group: "{{ goaccess_user }}"
+    mode: '0700'
+
+- name: The rollup script
+  ansible.builtin.copy:
+    src: traffic-rollup.py
+    dest: /usr/local/bin/traffic-rollup.py
+    mode: '0755'
+  register: rollup_script
+
+- name: The rollup as a service, and its timer
+  ansible.builtin.template:
+    src: "traffic-rollup.{{ item }}.j2"
+    dest: "/etc/systemd/system/traffic-rollup-{{ goaccess_site }}.{{ item }}"
+    mode: '0644'
+  loop: [service, timer]
+  register: rollup_units
+
+- name: The rollup runs once a minute
+  ansible.builtin.systemd:
+    name: "traffic-rollup-{{ goaccess_site }}.timer"
+    daemon_reload: "{{ rollup_units.changed }}"
+    state: "{{ 'restarted' if rollup_units.changed else 'started' }}"
+    enabled: yes
+
+# Once now, so traffic.json is there before anyone opens the stats page (and so a bad change fails
+# the deploy here, rather than quietly in a timer nobody watches).
+- name: The rollup's first run
+  ansible.builtin.command: "systemctl start traffic-rollup-{{ goaccess_site }}.service"
+  changed_when: rollup_script.changed or rollup_units.changed

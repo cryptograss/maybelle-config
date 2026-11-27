@@ -1,0 +1,10 @@
+[Unit]
+Description=Traffic rollup for {{ goaccess_site }}, once a minute
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1min
+AccuracySec=10s
+
+[Install]
+WantedBy=timers.target

@@ -1,4 +1,5 @@
-FROM jenkins/jenkins:lts-jdk17
+# jenkins/jenkins:lts-jdk17 froze at 2.541.3 on 18 Mar 2026 when Jenkins LTS moved to Java 21 (re, #security, 15 Nov).
+FROM jenkins/jenkins:lts-jdk21
 
 USER root
 
@@ -30,17 +31,19 @@ RUN apt-get update && apt-get install -y \
     ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Blue Railroad import bot
+# The Blue Railroad import bot, from this repository: maybelle/blue-railroad-import/, which
+# maybelle.yml copies into this build context. It used to be installed from GitHub, which meant
+# Jenkins ran code that never passed githouse (Justin, #uploads-and-embeds, 23 Nov 2026).
+COPY blue-railroad-import /opt/blue-railroad-import-src
 RUN python3 -m venv /opt/blue-railroad-import && \
-    /opt/blue-railroad-import/bin/pip install --no-cache-dir \
-    git+https://github.com/cryptograss/blue-railroad-import.git
+    /opt/blue-railroad-import/bin/pip install --no-cache-dir /opt/blue-railroad-import-src
 
 # Install Composer
 RUN curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
 
 USER jenkins
 
-# Install required plugins (mcp-server installed separately from custom build)
+# Install required plugins
 RUN jenkins-plugin-cli --plugins \
     configuration-as-code \
     workflow-aggregator \
@@ -60,13 +63,13 @@ RUN jenkins-plugin-cli --plugins \
     build-name-setter \
     pipeline-github
 
-# Install custom mcp-server plugin with reduced response sizes
-# See: https://github.com/jenkinsci/mcp-server-plugin/pull/113
-# Downloaded from magent-cryptograss fork until PR is merged upstream
-ADD --chown=jenkins:jenkins https://github.com/magent-cryptograss/mcp-server-plugin/releases/download/v0.87-reduced-context/mcp-server.hpi /usr/share/jenkins/ref/plugins/mcp-server.hpi
-
 # Create directory for Configuration as Code
-RUN mkdir -p /var/jenkins_home/casc_configs
+RUN mkdir -p /var/jenkins_home/casc_configs \
+    && java -XshowSettings:properties -version 2>&1 | awk -F'= ' '/java\.specification\.version =/{print "java:", $2; ok=($2+0 >= 21)} END{exit !ok}' \
+    && ver=$(java -jar /usr/share/jenkins/jenkins.war --version) && echo "jenkins: $ver" \
+    && awk -v v="$ver" 'BEGIN{split(v, a, "."); exit !(a[1] > 2 || (a[1] == 2 && a[2] >= 580))}'
 
-# Skip initial setup wizard
-ENV JAVA_OPTS -Djenkins.install.runSetupWizard=false
+# Skip initial setup wizard, and upgrade bundled .jpi plugins in JENKINS_HOME when a rebuild brings newer ones
+ENV JAVA_OPTS="-Djenkins.install.runSetupWizard=false" \
+    PLUGINS_FORCE_UPGRADE=true \
+    TRY_UPGRADE_IF_NO_MARKER=true

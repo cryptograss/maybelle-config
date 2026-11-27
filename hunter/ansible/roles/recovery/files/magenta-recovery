@@ -17,6 +17,12 @@
 set -euo pipefail
 cd "$HOME"
 KEYS="$HOME/.config/magenta"
+# Keep tmux's socket and temp files in /dev/shm (RAM tmpfs), not /tmp on /, so
+# `magenta.sh recovery` still opens when hunter's root disk is 100% full (17 Nov).
+export TMPDIR="/dev/shm/recovery-tmp-$(id -u)"
+export TMUX_TMPDIR="$TMPDIR"
+install -d -m 700 "$TMPDIR"
+FREE_KB=$(df -Pk / 2>/dev/null | awk 'NR==2 {print $4}')
 
 if [ "${1:-}" = "--session" ]; then
     # Inside tmux. A credential goes into this process's environment only,
@@ -36,7 +42,13 @@ if [ "${1:-}" = "--session" ]; then
             export OPENROUTER_API_KEY
             # Pi and its own Node; its rules, memory and gate are in ~/.pi/agent.
             export PATH="$HOME/.local/node/bin:$HOME/.local/pi/bin:$PATH"
-            exec "$HOME/.local/pi/bin/pi" --model openrouter/anthropic/claude-opus-5.5
+            pi_extra=()
+            if [ "${FREE_KB:-102400}" -lt 102400 ]; then
+                install -d -m 700 "$TMPDIR/pi-sessions"
+                echo "⚠ / has under 100MB free (${FREE_KB:-0} KB): writing Pi session in RAM ($TMPDIR/pi-sessions) for audit shipping" >&2
+                pi_extra=(--session-dir "$TMPDIR/pi-sessions" --offline)
+            fi
+            exec "$HOME/.local/pi/bin/pi" "${pi_extra[@]}" --model openrouter/anthropic/claude-opus-5.5
             ;;
         subscription)
             # Without the token, Claude Code asks for /login: still the subscription.
@@ -64,13 +76,20 @@ fi
 fresh=no
 route=""
 read -ra words <<< "${SSH_ORIGINAL_COMMAND:-}"
+# `magenta.sh rescue-disk`: hunter's disk is full. Free Docker's space and
+# leave, with no agent and no tmux, since both need a disk they can write to
+# (17 Nov 2026). The alert still goes, so the team hears someone was here.
+if [ "${words[*]:-}" = "rescue-disk" ]; then
+    setsid /usr/local/bin/recovery-alert "$who" rescue-disk no </dev/null >/dev/null 2>&1 &
+    exec /usr/local/bin/hunter-rescue-disk
+fi
 for word in "${words[@]}"; do
     case "$word" in
         fresh) fresh=yes ;;
         openrouter|subscription) route="$word" ;;
         *)
             echo "magenta-recovery: this login only opens the recovery session" \
-                 "(words: fresh, openrouter, subscription)." >&2
+                 "(words: fresh, openrouter, subscription), or frees disk (rescue-disk, alone)." >&2
             exit 2
             ;;
     esac

@@ -50,6 +50,22 @@ faces.{{ base_domain }} {
     reverse_proxy localhost:8090
 }
 
+# Each Mood's folder as a gallery: pictures, video, sound and PDFs, hard-linked into
+# /var/lib/mood-folders each minute by hunter-mood-folders. Only that directory is
+# served, never /opt/magenta/moods itself. Public, as the Moods are. An SVG there runs
+# no script and loads nothing from elsewhere.
+folders.{{ base_domain }} {
+    root * /var/lib/mood-folders
+    header {
+        Content-Security-Policy "default-src 'none'; img-src 'self'; media-src 'self'; style-src 'unsafe-inline'; frame-ancestors 'none'"
+        X-Content-Type-Options nosniff
+    }
+    file_server
+    handle_errors {
+        respond "No such file in a Mood's folder. Every Mood's: https://folders.{{ base_domain }}/" 404
+    }
+}
+
 # Each Mood's previews, <slug>0-9.{{ base_domain }}, in workbench (Cryptograss:Moods
 # as Directories): written each minute by hunter-mood-previews.
 import /etc/caddy/moods.caddy

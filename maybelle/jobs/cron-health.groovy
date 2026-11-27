@@ -200,6 +200,51 @@ pipelineJob('cron-health') {
                             }
                         }
 
+                        // hunter's root filesystem (150GB): above 85% (~22GB free), an uncached 10.7GB magenta
+                        // image build + BuildKit cache risks hitting ENOSPC mid-deploy (17 Nov).
+                        stage('hunter disk') {
+                            steps {
+                                catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
+                                    sh """
+                                        mkdir -p "\\$WORKSPACE/.alarm"; trap 'echo \\$? > "\\$WORKSPACE/.alarm/hunter disk"' EXIT
+                                        LOG="/var/log/hunter-disk.log"
+                                        STALE_MINUTES=15
+                                        ALARM=85
+
+                                        echo "=== hunter disk ==="
+                                        LAST=\\$(tail -1 "\\$LOG" 2>/dev/null || true)
+                                        if [ -z "\\$LAST" ]; then
+                                            echo "FAIL: nothing in \\$LOG: check-hunter-disk.sh has never run"
+                                            exit 1
+                                        fi
+                                        LAST_EPOCH=\\$(date -d "\\$(echo "\\$LAST" | cut -d' ' -f1)" +%s 2>/dev/null || echo 0)
+                                        AGE=\\$(( (\\$(date +%s) - LAST_EPOCH) / 60 ))
+                                        echo "Last check: \\$LAST (\\$AGE min ago)"
+                                        if [ "\\$AGE" -gt "\\$STALE_MINUTES" ]; then
+                                            echo "FAIL: check-hunter-disk.sh hasn't run for \\$AGE min"
+                                            exit 1
+                                        fi
+                                        case "\\$LAST" in
+                                            *" UNREACHABLE "*)
+                                                echo "FAIL: hunter unreachable from maybelle"
+                                                exit 1 ;;
+                                        esac
+                                        PCT=\\$(for w in \\$LAST; do case "\\$w" in pct=*) echo "\\${w#pct=}" ;; esac; done)
+                                        case "\\$PCT" in
+                                            ''|*[!0-9]*)
+                                                echo "FAIL: malformed hunter disk line: \\$LAST"
+                                                exit 1 ;;
+                                        esac
+                                        if [ "\\$PCT" -ge "\\$ALARM" ]; then
+                                            echo "FAIL: hunter / at \\${PCT}% (alarm at \\${ALARM}%)"
+                                            exit 1
+                                        fi
+                                        echo "OK"
+                                    """
+                                }
+                            }
+                        }
+
                         stage('memory-lane backup') {
                             steps {
                                 catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
@@ -323,15 +368,95 @@ pipelineJob('cron-health') {
                                             exit 1
                                         fi
 
-                                        # ISO times sort as text. The week's log and the one before it, so a rotation can't hide one.
+                                        # ISO times sort as text. The sweep trims this log itself and keeps about two weeks.
                                         SINCE=\\$(date -u -d '24 hours ago' +%Y-%m-%dT%H:%M:%SZ)
-                                        FOUND=\\$(cat "\\$LOG.1" "\\$LOG" 2>/dev/null | awk -v since="\\$SINCE" '\\$2 ~ /^REMOVE/ && \\$1 >= since')
+                                        FOUND=\\$(awk -v since="\\$SINCE" '\\$2 ~ /^REMOVE/ && \\$1 >= since' "\\$LOG")
                                         if [ -n "\\$FOUND" ]; then
                                             echo "FAIL: the vault password was on maybelle's volume outside a deploy, and the sweep removed it:"
                                             echo "\\$FOUND"
                                             exit 1
                                         fi
                                         echo "OK"
+                                    """
+                                }
+                            }
+                        }
+
+                        // The offsite backup (offsite-backup.sh, 05:00 UTC): everything a cold start needs, in one
+                        // restic repository off maybelle. Each run ends with a RESULT line: OK, DEGRADED (sent,
+                        // but a part was stale or missing) or FAILED. Red on anything but OK, or no run in 26 hours.
+                        stage('offsite backup') {
+                            steps {
+                                catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
+                                    sh """
+                                        mkdir -p "\\$WORKSPACE/.alarm"; trap 'echo \\$? > "\\$WORKSPACE/.alarm/offsite backup"' EXIT
+                                        LOG="/var/log/offsite-backup.log"
+                                        STALE_HOURS=26
+
+                                        echo "=== offsite backup ==="
+                                        LAST=\\$(grep ' RESULT ' "\\$LOG" 2>/dev/null | tail -1 || true)
+                                        if [ -z "\\$LAST" ]; then
+                                            echo "FAIL: no result in \\$LOG: the offsite backup has never run"
+                                            exit 1
+                                        fi
+                                        LAST_EPOCH=\\$(date -d "\\$(echo "\\$LAST" | cut -d' ' -f1)" +%s 2>/dev/null || echo 0)
+                                        AGE=\\$(( (\\$(date +%s) - LAST_EPOCH) / 3600 ))
+                                        STATE=\\$(echo "\\$LAST" | cut -d' ' -f3)
+                                        echo "Last run: \\$LAST (\\$AGE hours ago)"
+                                        if [ "\\$AGE" -gt "\\$STALE_HOURS" ]; then
+                                            echo "FAIL: no run for \\$AGE hours"
+                                            exit 1
+                                        fi
+                                        if [ "\\$STATE" != "OK" ] && [ "\\$STATE" != "PENDING" ]; then
+                                            echo "FAIL: the last run was \\$STATE"
+                                            grep ' problem: ' "\\$LOG" | tail -8
+                                            exit 1
+                                        fi
+                                        echo "OK"
+                                    """
+                                }
+                            }
+                        }
+
+                        // githouse on maybelle (16 Nov: wedged for 35+ min on "Cannot fork" / "Connection reset"
+                        // after PID 1 failed to reap orphans; the banner still printed before KEX failed). Both
+                        // its loop (branches.json rewritten every ~10s) and sshd past KEX ("Permission denied")
+                        // must answer.
+                        stage('githouse') {
+                            steps {
+                                catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
+                                    sh """
+                                        mkdir -p "\\$WORKSPACE/.alarm"; trap 'echo \\$? > "\\$WORKSPACE/.alarm/githouse"' EXIT
+                                        BRANCHES="/srv/git/branches.json"
+                                        LOG="/srv/git/githouse.log"
+                                        GITHOUSE_HOST="10.0.0.2"
+                                        GITHOUSE_PORT="2222"
+                                        STALE_MINUTES=5
+
+                                        echo "=== githouse ==="
+                                        if [ ! -f "\\$BRANCHES" ]; then
+                                            echo "FAIL: \\$BRANCHES missing"
+                                            exit 1
+                                        fi
+                                        AGE=\\$(( (\\$(date +%s) - \\$(stat -c%Y "\\$BRANCHES")) / 60 ))
+                                        echo "branches.json age: \\$AGE min"
+                                        if [ "\\$AGE" -gt "\\$STALE_MINUTES" ]; then
+                                            echo "FAIL: githouse loop stale (>\\$STALE_MINUTES min)"
+                                            tail -15 "\\$LOG" 2>/dev/null || true
+                                            exit 1
+                                        fi
+
+                                        SSH_OUT=\\$(ssh -T -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -p "\\$GITHOUSE_PORT" "git@\\$GITHOUSE_HOST" 2>&1 || true)
+                                        case "\\$SSH_OUT" in
+                                            *"Permission denied"*)
+                                                echo "sshd KEX + auth reachable"
+                                                echo "OK" ;;
+                                            *)
+                                                echo "FAIL: sshd on \\$GITHOUSE_HOST:\\$GITHOUSE_PORT did not reach auth:"
+                                                echo "\\$SSH_OUT"
+                                                tail -15 "\\$LOG" 2>/dev/null || true
+                                                exit 1 ;;
+                                        esac
                                     """
                                 }
                             }

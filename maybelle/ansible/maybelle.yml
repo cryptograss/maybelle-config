@@ -19,6 +19,12 @@
     # Cryptograss:Moods/ramp/Plan, section 3). Reached by hunter's containers on the
     # private network, and by people on the public address too (githouse_public, below).
     githouse_dir: /mnt/persist/githouse
+    # The offsite backup (maybelle/scripts/offsite-backup.sh): a restic repository. For now the Hetzner
+    # Storage Box, reached through delivery-kid, which mounts it (Justin, #backups, 13 Nov 2026): off
+    # maybelle, not off Hetzner. A store outside Hetzner is a new offsite_repo, an empty offsite_box,
+    # and that store's keys from the vault in /etc/offsite-backup.env.
+    offsite_box: "root@delivery-kid.cryptograss.live:/mnt/storage-box"
+    offsite_repo: "sftp:root@delivery-kid.cryptograss.live:/mnt/storage-box/offsite/restic"
     githouse_bind: "10.0.0.2"
     githouse_port: 2222
     # On maybelle's public address too, so people push from their own machines without a jump host (Justin,
@@ -48,7 +54,7 @@
     # Where merge orders wait to be fetched: memory-lane carries them, githouse checks each.
     githouse_orders_url: "http://10.0.0.2:3000/api/merge-orders/pending/"
     # After a push reaches GitHub, githouse asks Jenkins' branch-tests job to test it, as the reporter (Plan,
-    # section 11). Jenkins publishes 8080 on the host, which githouse reaches as hunter does.
+    # section 11). Jenkins publishes 8080 on localhost and the private address, where githouse reaches it.
     githouse_jenkins_url: "http://10.0.0.2:8080/"
     # memory-lane's merge key, public half: the merge button signs with it, for whoever pressed (Plan, section
     # 10). Made by Justin on 8 Nov, the private half in the vault as memory_lane_merge_key. githouse lists it as
@@ -115,6 +121,8 @@
           - jq
           # Needed by the delivery-kid audit cron's python3 -m venv call
           - python3-venv
+          # The offsite backup (offsite-backup.sh)
+          - restic
         state: present
         update_cache: yes
 
@@ -146,6 +154,25 @@
         dest: "{{ jenkins_home }}/docker-build/"
         mode: '0644'
 
+    # The Blue Railroad import bot's source, into the image's build context. It lived in its own
+    # repository (cryptograss/blue-railroad-import) and was cloned from GitHub at every deploy, so
+    # what Jenkins ran came from outside githouse: a push to GitHub's production changed it without
+    # passing the ramp. It is maybelle/blue-railroad-import/ here now (Justin, #uploads-and-embeds,
+    # 23 Nov 2026), and this is the one copy of it on the server. The Dockerfile installs it into the
+    # venv; the running container reaches the same directory through the jenkins_home mount, which is
+    # what the install below uses, so a deploy doesn't wait for the container to be made again.
+    # `copy` never deletes, so a module deleted from the repository would linger: cleared first.
+    - name: Clear the last deploy's copy of the import bot
+      file:
+        path: "{{ jenkins_home }}/docker-build/blue-railroad-import"
+        state: absent
+
+    - name: Copy the Blue Railroad import bot into the build context
+      copy:
+        src: "{{ playbook_dir }}/../blue-railroad-import/"
+        dest: "{{ jenkins_home }}/docker-build/blue-railroad-import/"
+        mode: '0644'
+
     - name: Create blank .bashrc
       file:
         path: "{{ jenkins_home }}/.bashrc"
@@ -170,6 +197,20 @@
         mode: '0755'
         owner: 1000
         group: 1000
+
+    # Jenkins MCP was retired from container startup on 2 Jan 2026 (260e5f1c); remove any leftover
+    # copy of the custom 0.87 .hpi from JENKINS_HOME/plugins so a dead plugin never sits on disk.
+    - name: Remove retired mcp-server plugin from Jenkins home
+      file:
+        path: "{{ jenkins_home }}/plugins/{{ item }}"
+        state: absent
+      loop:
+        - mcp-server.hpi
+        - mcp-server.hpi.pinned
+        - mcp-server.hpi.version_from_image
+        - mcp-server.jpi
+        - mcp-server
+      notify: Restart Jenkins container
 
     - name: Create Jenkins Docker network
       docker_network:
@@ -322,6 +363,8 @@
         - /var/log/pickipedia-backup.log
         - /var/log/pickipedia-deploy.log
         - /var/log/vault-password-sweep.log
+        - /var/log/offsite-backup.log
+        - /var/log/hunter-disk.log
 
     - name: Remove log paths if they are directories
       file:
@@ -341,6 +384,8 @@
         - /var/log/pickipedia-backup.log
         - /var/log/pickipedia-deploy.log
         - /var/log/vault-password-sweep.log
+        - /var/log/offsite-backup.log
+        - /var/log/hunter-disk.log
 
     # Jenkins' git trusts githouse's repositories: a system config file, mounted read-only at /etc/gitconfig
     # (the image has none). githouse's git user owns /srv/git, and git won't read another user's repository
@@ -384,6 +429,8 @@
           - "/var/log/pickipedia-deploy.log:/var/log/pickipedia-deploy.log:ro"
           - "/var/log/delivery-kid-audit.log:/var/log/delivery-kid-audit.log:ro"
           - "/var/log/vault-password-sweep.log:/var/log/vault-password-sweep.log:ro"
+          - "/var/log/offsite-backup.log:/var/log/offsite-backup.log:ro"
+          - "/var/log/hunter-disk.log:/var/log/hunter-disk.log:ro"
           # githouse's repositories, read-only: the trusted jobs (pickipedia, arthel) build from them, not from
           # GitHub (the flip, Cryptograss:Moods/ramp/Plan, section 6). memory-lane mounts them the same way.
           - "{{ githouse_dir }}/git:/srv/git:ro"
@@ -404,11 +451,23 @@
           GITHUB_REPO_URL: "{{ github_repo_url }}"
           BLUERAILROAD_BOT_USERNAME: "{{ BLUERAILROAD_BOT_USERNAME }}"
           BLUERAILROAD_BOT_PASSWORD: "{{ BLUERAILROAD_BOT_PASSWORD }}"
+          # The connectome walk's own login for PickiPedia (pickipedia tools/connectome_walk.py, run by
+          # pickipedia-build): a bot password with "Edit existing pages" and "High-volume (bot) access". With it
+          # the walk does one thing to the wiki: where a site has several artists of a picker's name, it puts a
+          # {{Which picker|status=proposed}} box at the top of that picker's page. Not in the vault: both are
+          # empty, the walk edits nothing, and its question waits in walked.json (Justin, #connectome, 20 Nov 2026).
+          CONNECTOME_WALK_BOT_USER: "{{ connectome_walk_bot_user | default('') }}"
+          CONNECTOME_WALK_BOT_PASSWORD: "{{ connectome_walk_bot_password | default('') }}"
           DELIVERY_KID_API_KEY: "{{ delivery_kid_api_key }}"
           # report-alarm.sh posts a red or green check to #ops with this; it can do nothing else.
           MOOD_ALARM_KEY: "{{ memory_lane_alarm_key | default('') }}"
+        # Not on the public address: there it was Jenkins in plain HTTP, its login form and every API, around
+        # Caddy's TLS (magent's sweep, #security, 14 Nov). Docker's published ports skip ufw. Caddy and the deploy
+        # scripts come in on localhost; githouse on the private network (githouse_jenkins_url), as memory-lane's
+        # 3000 is published.
         ports:
-          - "8080:8080"
+          - "127.0.0.1:8080:8080"
+          - "10.0.0.2:8080:8080"
         networks:
           - name: jenkins-network
           - name: branches-net
@@ -546,19 +605,12 @@
       shell: docker exec -i jenkins-branches python3 - < /mnt/persist/jenkins-branches/build/isolation_check.py
       changed_when: false
 
-    - name: Clone or update blue-railroad-import source
+    # The image already holds this build's bot, so this is for a container that wasn't made again
+    # when the image changed. --no-deps: the dependencies came with the image, from the same source.
+    - name: Install the Blue Railroad import bot into the running Jenkins
       command: >
-        docker exec -u root jenkins bash -c '
-          git config --global --add safe.directory /opt/blue-railroad-import-src 2>/dev/null;
-          if [ -d /opt/blue-railroad-import-src/.git ]; then
-            cd /opt/blue-railroad-import-src && git fetch origin && git reset --hard origin/production
-          else
-            git clone --branch production https://github.com/cryptograss/blue-railroad-import.git /opt/blue-railroad-import-src
-          fi
-        '
-
-    - name: Install blue-railroad-import from local checkout
-      command: docker exec -u root jenkins /opt/blue-railroad-import/bin/pip install --no-cache-dir --no-deps --force-reinstall /opt/blue-railroad-import-src
+        docker exec -u root jenkins /opt/blue-railroad-import/bin/pip install --no-cache-dir --no-deps
+        --force-reinstall /var/jenkins_home/docker-build/blue-railroad-import
 
     - name: Fix blue-railroad-cache permissions
       command: docker exec -u root jenkins chown -R jenkins:jenkins /mnt/persist/blue-railroad-cache
@@ -1179,6 +1231,10 @@
           MOOD_ALLOWED_SIGNERS=/etc/magenta/allowed_signers
           MAGENTA_COMMIT={{ (memory_lane_source.after | default(''))[:12] }}
           MAGENTA_BACKUP_DIR=/mnt/persist/magenta/backups
+          {% if ALCHEMY_API_KEY | default('') %}
+          # The chain head's second node (chain-head, below): asked when the public one doesn't answer.
+          ETH_RPC_FALLBACK_URL=https://eth-mainnet.g.alchemy.com/v2/{{ ALCHEMY_API_KEY }}
+          {% endif %}
           # Each person's PickiPedia name, shown in magenta (memory-lane wiki_auth.py).
           MOOD_WIKI_NAMES=/etc/magenta/wiki_names
           # Who may kick, ban, scram (magenta.sh AZ5) and lift, with their SSH
@@ -1409,6 +1465,22 @@
               stdin_open: true
               tty: true
               command: python manage.py run_mcp_server_v2 --port 8000
+
+            # The chain's head as each block lands (memory-lane conversations/services/chain_head.py; Justin,
+            # 17 Nov, #interfaces): a newHeads subscription on a public node, polling every 12 s when that drops.
+            # magenta's pages, the narrator's "15 blocks in" and /api/block/ (PickiPedia's too) read what it keeps.
+            chain-head:
+              build:
+                context: .
+                dockerfile: Dockerfile.services
+              container_name: chain-head
+              env_file: .env
+              environment:
+                - DJANGO_SETTINGS_MODULE=memory_viewer.settings
+              networks:
+                - memory-lane-net
+              restart: unless-stopped
+              command: python manage.py watch_head
 
             scrubber:
               build:
@@ -1867,6 +1939,49 @@
         minute: "30"
         job: "/usr/local/bin/backup-pickipedia.sh"
 
+    # ----- The offsite backup (host cron) -----
+    # Everything a cold start needs, in one restic repository off maybelle: the newest magenta and
+    # PickiPedia dumps, PickiPedia's uploads, GlitchTip, githouse, hunter's unpushed work. What and why:
+    # the script's header, and Cryptograss:Backups. 05:00, after the day's dumps (03:00, 03:30).
+    # The NearlyFreeSpeech mirror of the magenta dumps above stays until this goes somewhere outside
+    # Hetzner: it is the only copy that is.
+    - name: Deploy the offsite backup script
+      copy:
+        src: "{{ playbook_dir }}/../scripts/offsite-backup.sh"
+        dest: /usr/local/bin/offsite-backup.sh
+        mode: '0750'
+
+    - name: Where the offsite backup goes
+      copy:
+        dest: /etc/offsite-backup.env
+        mode: '0600'
+        content: |
+          OFFSITE_REPO="{{ offsite_repo }}"
+          OFFSITE_BOX="{{ offsite_box }}"
+
+    # From the vault, put there by a person. Without it the backup fails and says so, every day,
+    # and cron-health's "offsite backup" stage is red: nothing here makes one up.
+    - name: The offsite backup's restic password, from the vault
+      copy:
+        dest: /root/.offsite-restic-password
+        mode: '0600'
+        content: "{{ offsite_restic_password }}\n"
+      no_log: true
+      when: offsite_restic_password is defined
+
+    # So cron-health has a line to read before the first 05:00: green for a day, red after if no run followed.
+    - name: Note the offsite backup as installed, until its first run
+      shell: |
+        grep -q ' RESULT ' /var/log/offsite-backup.log || echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) RESULT PENDING installed; the first run is at 05:00 UTC" >> /var/log/offsite-backup.log
+      changed_when: false
+
+    - name: Schedule the offsite backup
+      ansible.builtin.cron:
+        name: "offsite backup"
+        hour: "5"
+        minute: "0"
+        job: "flock -n /tmp/offsite-backup.lock timeout 6h /usr/local/bin/offsite-backup.sh"
+
     - name: Remove old NFS backup cron
       ansible.builtin.cron:
         name: "pickipedia backup from nfs"
@@ -1896,12 +2011,13 @@
         path: /mnt/persist/.vault-password
         state: absent
 
-    # The vault password is on the volume only while a deploy runs (maybelle-chapter-1.sh copies it,
-    # and removes it when it exits). Every 10 minutes this looks, and if it's there with no deploy
-    # running, removes it and says so in its log; cron-health's "vault password sweep" stage turns
-    # red on that for a day, which posts to #ops (Justin, #backups, 12 Nov 2026).
-    # Left alone while ansible-playbook runs maybelle.yml, or for 30 minutes after it was copied
-    # (chapter 1 copies it a minute or two before ansible starts); never longer than 3 hours.
+    # The vault password and extracted scrubber secrets are on maybelle only while a deploy runs
+    # (maybelle-chapter-1.sh copies them, and removes them when it exits). Every 10 minutes this looks,
+    # and if either is there with no deploy running, removes both and says so in its log; cron-health's
+    # "vault password sweep" stage turns red on that for a day, which posts to #ops (Justin, #backups,
+    # 12 Nov 2026; /tmp/scrubber-secrets.json added 19 Nov after an interrupted mosh left both).
+    # Left alone while ansible-playbook runs maybelle.yml, or for 30 minutes after they were copied
+    # (chapter 1 copies them a minute or two before ansible starts); never longer than 3 hours.
     - name: Vault password sweep script
       copy:
         dest: /usr/local/bin/vault-password-sweep.sh
@@ -1909,13 +2025,22 @@
         content: |
           #!/bin/bash
           F=/mnt/persist/.vault-password
+          S=/tmp/scrubber-secrets.json
           LOG=/var/log/vault-password-sweep.log
           NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-          if [ ! -e "$F" ]; then
+          # Trims itself, in place: Jenkins is given this one file, so cron-health can't read a rotated
+          # copy, and a logrotate truncation left it nothing to read until the next run.
+          if [ -f "$LOG" ] && [ "$(wc -l < "$LOG")" -gt 3000 ]; then
+              tail -n 2000 "$LOG" > "$LOG.tmp" && cat "$LOG.tmp" > "$LOG"
+              rm -f "$LOG.tmp"
+          fi
+          if [ ! -e "$F" ] && [ ! -e "$S" ]; then
               echo "$NOW absent" >> "$LOG"
               exit 0
           fi
-          AGE=$(( ($(date +%s) - $(stat -c %Y "$F")) / 60 ))
+          TARGET="$F"
+          [ -e "$F" ] || TARGET="$S"
+          AGE=$(( ($(date +%s) - $(stat -c %Y "$TARGET")) / 60 ))
           if [ "$AGE" -ge 180 ]; then
               WHY="over 3 hours, deploy or not"
           elif [ "$AGE" -lt 30 ]; then
@@ -1927,8 +2052,8 @@
           else
               WHY="no deploy running"
           fi
-          rm -f "$F"
-          if [ -e "$F" ]; then
+          rm -f "$F" "$S"
+          if [ -e "$F" ] || [ -e "$S" ]; then
               echo "$NOW REMOVE-FAILED: present ${AGE} min, $WHY, and rm left it" >> "$LOG"
               exit 1
           fi
@@ -1940,20 +2065,45 @@
         minute: "*/10"
         job: "/usr/local/bin/vault-password-sweep.sh"
 
-    - name: Rotate the vault password sweep log
+    # The sweep trims its own log now (see the script).
+    - name: Remove the vault password sweep's logrotate rule
+      file:
+        path: /etc/logrotate.d/vault-password-sweep
+        state: absent
+
+    # hunter's disk, watched from here so #ops hears before a deploy fills it (17 Nov: hunter-disk-report
+    # wrote only to hunter's journal and MOTD, so nobody saw 87% -> 100%). Writes nothing on hunter, so a
+    # 100%-full hunter still reports 100% rather than failing to write its own status file.
+    - name: Hunter disk check script
       copy:
-        dest: /etc/logrotate.d/vault-password-sweep
-        mode: '0644'
+        dest: /usr/local/bin/check-hunter-disk.sh
+        mode: '0750'
         content: |
-          /var/log/vault-password-sweep.log {
-              weekly
-              rotate 4
-              compress
-              delaycompress
-              missingok
-              notifempty
-              copytruncate
-          }
+          #!/bin/bash
+          LOG=/var/log/hunter-disk.log
+          NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          if [ -f "$LOG" ] && [ "$(wc -l < "$LOG")" -gt 3000 ]; then
+              tail -n 2000 "$LOG" > "$LOG.tmp" && cat "$LOG.tmp" > "$LOG"
+              rm -f "$LOG.tmp"
+          fi
+          if RAW=$(ssh -o BatchMode=yes -o ConnectTimeout=10 root@hunter.cryptograss.live 'df -Ph /' 2>&1) \
+              && LINE=$(printf '%s\n' "$RAW" | awk 'NR==2 {gsub("%","",$5); printf "pct=%s used=%s avail=%s size=%s", $5, $3, $4, $2}') \
+              && [ -n "$LINE" ]; then
+              echo "$NOW OK $LINE" >> "$LOG"
+          else
+              echo "$NOW UNREACHABLE $(printf '%s' "$RAW" | tr '\r\n' '  ')" >> "$LOG"
+          fi
+
+    - name: Cronjob to check hunter's disk
+      ansible.builtin.cron:
+        name: "check hunter disk"
+        minute: "*/5"
+        job: "/usr/local/bin/check-hunter-disk.sh"
+
+    - name: Run hunter disk check once now so cron-health has a reading
+      command: /usr/local/bin/check-hunter-disk.sh
+      changed_when: false
+      failed_when: false
 
     - name: Clean up old scrubber secrets directory if exists
       file:

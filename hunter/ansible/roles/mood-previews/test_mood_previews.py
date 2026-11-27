@@ -4,6 +4,7 @@
 """
 
 import importlib.util
+import json
 from pathlib import Path
 
 import pytest
@@ -107,7 +108,7 @@ def test_no_workbench_changes_nothing(dirs, monkeypatch):
     mood(base, 'chartifacts')
     mp.run(base, caddy, DOMAIN, address='172.19.0.9')
     before = (caddy / 'moods.caddy').read_text()
-    monkeypatch.setattr(mp, 'workbench_address', lambda: None)
+    monkeypatch.setattr(mp, 'address_of', lambda container: None)
     mp.run(base, caddy, DOMAIN)
     assert (caddy / 'moods.caddy').read_text() == before
 
@@ -118,3 +119,85 @@ def test_only_plain_slugs(dirs):
     (base / 'moods' / '.hidden').mkdir()
     (base / 'moods' / 'Upper').mkdir()
     assert list(mp.run(base, caddy, DOMAIN, address='172.19.0.9')) == ['chartifacts']
+
+
+# A Mood's own preview server (inventory mood_servers): a container of its own for one of its ten.
+
+@pytest.fixture
+def told(tmp_path):
+    """A mood-servers.json, as the inventory writes it."""
+    def write(entries):
+        path = tmp_path / 'mood-servers.json'
+        path.write_text(json.dumps(entries))
+        return path
+    return write
+
+
+def a_server(**over):
+    return dict({'mood': 'connectome', 'name': 'connectome-graph', 'index': 0,
+                 'dir': 'graph', 'command': ['python3', 'serve.py', '{port}']}, **over)
+
+
+def test_a_moods_own_server_gets_a_compose_file_and_its_hostname(dirs, told, monkeypatch):
+    base, caddy = dirs
+    (mood(base, 'connectome') / 'graph').mkdir()
+    monkeypatch.setattr(mp, 'running', lambda name: False)
+    ups = []
+    mp.run(base, caddy, DOMAIN, address='172.19.0.9', servers=told([a_server()]),
+           up=ups.append, where=lambda name: '172.19.0.31')
+    wrote = (base / 'mood-servers/connectome-graph/docker-compose.yml').read_text()
+    assert 'container_name: connectome-graph' in wrote
+    assert f'{base}/moods/connectome/graph:/serve:ro' in wrote
+    assert 'restart: unless-stopped' in wrote
+    # The command gets the Mood's own port, not one written twice.
+    assert '["python3", "serve.py", "15000"]' in wrote
+    assert len(ups) == 1
+    site = (caddy / 'moods.caddy').read_text()
+    assert 'reverse_proxy 172.19.0.31:15000' in site        # connectome0: its own container
+    assert 'reverse_proxy 172.19.0.9:15001' in site         # connectome1: workbench, as before
+
+
+def test_a_server_already_up_with_the_same_compose_file_is_left_alone(dirs, told, monkeypatch):
+    base, caddy = dirs
+    (mood(base, 'connectome') / 'graph').mkdir()
+    monkeypatch.setattr(mp, 'running', lambda name: True)
+    ups, servers = [], told([a_server()])
+    mp.run(base, caddy, DOMAIN, address='172.19.0.9', servers=servers, up=ups.append, where=lambda n: '172.19.0.31')
+    assert len(ups) == 1        # the compose file was new
+    mp.run(base, caddy, DOMAIN, address='172.19.0.9', servers=servers, up=ups.append, where=lambda n: '172.19.0.31')
+    assert len(ups) == 1
+    # Down, though, and it is brought back: this is what survives a deploy recreating everything.
+    monkeypatch.setattr(mp, 'running', lambda name: False)
+    mp.run(base, caddy, DOMAIN, address='172.19.0.9', servers=servers, up=ups.append, where=lambda n: '172.19.0.31')
+    assert len(ups) == 2
+
+
+def test_a_server_with_no_address_leaves_its_hostname_at_workbench(dirs, told, monkeypatch):
+    base, caddy = dirs
+    (mood(base, 'connectome') / 'graph').mkdir()
+    monkeypatch.setattr(mp, 'running', lambda name: True)
+    mp.run(base, caddy, DOMAIN, address='172.19.0.9', servers=told([a_server()]),
+           up=lambda path: None, where=lambda name: None)
+    assert 'reverse_proxy 172.19.0.9:15000' in (caddy / 'moods.caddy').read_text()
+
+
+def test_only_servers_the_inventory_declares_properly(told):
+    assert mp.declared(told([a_server()])) == [dict(a_server(), image=mp.IMAGE)]
+    assert mp.declared(told([a_server(name='../../etc')])) == []
+    assert mp.declared(told([a_server(mood='Nope')])) == []
+    assert mp.declared(told([a_server(index=10)])) == []
+    assert mp.declared(told([a_server(index='0')])) == []
+    assert mp.declared(told([a_server(command='python3 serve.py')])) == []
+    assert mp.declared(told([a_server(command=[])])) == []
+    assert mp.declared('/no/such/file') == []
+
+
+def test_a_server_for_a_mood_with_no_directory_is_left_down(dirs, told, monkeypatch):
+    base, caddy = dirs
+    mood(base, 'chartifacts')
+    monkeypatch.setattr(mp, 'running', lambda name: False)
+    ups = []
+    mp.run(base, caddy, DOMAIN, address='172.19.0.9', servers=told([a_server()]),
+           up=ups.append, where=lambda name: '172.19.0.31')
+    assert ups == []
+    assert not (base / 'mood-servers').exists()

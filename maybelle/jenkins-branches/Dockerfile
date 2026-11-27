@@ -12,8 +12,9 @@
 # ci/test: its PHP lint and verification-gate checks (re, 9 Nov). Both come in when the image is built on
 # maybelle, not through the agent's proxy.
 FROM node:22-bookworm-slim AS node
-FROM jenkins/inbound-agent:latest-jdk17
+FROM jenkins/inbound-agent:latest-jdk21
 USER root
+RUN java -XshowSettings:properties -version 2>&1 | awk -F'= ' '/java\.specification\.version =/{print "java:", $2; ok=($2+0 >= 21)} END{exit !ok}'
 COPY --from=node /usr/local/bin/node /usr/local/bin/node
 COPY --from=node /usr/local/lib/node_modules /usr/local/lib/node_modules
 RUN ln -sf ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \

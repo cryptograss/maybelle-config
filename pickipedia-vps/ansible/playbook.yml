@@ -45,10 +45,40 @@
         path: /etc/apt/sources.list.d/caddy-stable.list
         state: absent
 
+    # ondrej/php's PPA, left from the php-fpm role, which the playbook no longer runs (PHP is in the
+    # wiki's container now). On 20 Nov 2026 the PPA relabelled itself "PPA for PHP (deprecated)", and apt
+    # refuses a changed Label until it's accepted: every apt update failed. The first try used find's
+    # `contains`, which matches from a line's start, so 'deb http://…/ondrej/php/…' never matched (deploy
+    # log 26458169; the file was sources.list.d/ppa_ondrej_php_noble.list). grep -R searches anywhere in
+    # a line, following links: a file in sources.list.d is removed, and a line in sources.list itself. Nothing installs from it; packages it gave stay until removed on purpose.
+    - name: Find every apt source that names ondrej/php
+      # sources.list only when it's there (Ubuntu 24.04 may have ubuntu.sources alone): grep exits 2
+      # for a path that's missing, even when it matches elsewhere.
+      shell: >-
+        grep -RlE 'ondrej/php' /etc/apt/sources.list.d
+        $([ -f /etc/apt/sources.list ] && echo /etc/apt/sources.list)
+      register: ondrej_sources
+      changed_when: false
+      failed_when: ondrej_sources.rc > 1
+
+    - name: Drop ondrej/php's lines from sources.list
+      lineinfile:
+        path: /etc/apt/sources.list
+        regexp: 'ondrej/php'
+        state: absent
+      when: "'/etc/apt/sources.list' in ondrej_sources.stdout_lines"
+
+    - name: Drop ondrej/php's files from sources.list.d
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop: "{{ ondrej_sources.stdout_lines | reject('equalto', '/etc/apt/sources.list') | list }}"
+
+    # cache_valid_time let the first try's update pass on an old cache, so the failure surfaced later, at
+    # docker-wiki's install. Every update now runs, so a bad source stops the deploy here, by name.
     - name: Update apt cache
       apt:
         update_cache: yes
-        cache_valid_time: 3600
 
     - name: Install system packages
       apt:

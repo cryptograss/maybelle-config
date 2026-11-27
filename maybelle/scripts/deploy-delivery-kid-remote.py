@@ -22,6 +22,16 @@ import sys
 import os
 import getpass
 
+# The deploy on maybelle runs for ten minutes or more with nothing to say (hunter's image
+# build logs to a file on hunter, so the SSH channel carries no output at all), and a TCP
+# connection that quiet gets dropped by a NAT or a venue's Wi-Fi. ssh then waits for a
+# reply that never comes: maybelle finishes the deploy and posts its log, while the laptop
+# hangs until Ctrl-C (Justin, #ops, 25 Nov 2026). These put a keepalive on the connection
+# every 15 seconds, which also keeps the NAT mapping, and give up after 20 unanswered
+# ones (5 minutes), so a connection that really died ends in an error, not a hang.
+SSH_ALIVE = ['-o', 'ServerAliveInterval=15', '-o', 'ServerAliveCountMax=20',
+             '-o', 'ConnectTimeout=15']
+
 
 def get_vault_password():
     """Get vault password from environment or file"""
@@ -97,7 +107,7 @@ def main():
         script_args += ' --rebuild'
 
     result = subprocess.run(
-        ['ssh', '-t', maybelle, script_args],
+        ['ssh', '-t', *SSH_ALIVE, maybelle, script_args],
         input=vault_password + '\n',
         text=True
     )

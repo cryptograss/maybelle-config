@@ -10,14 +10,21 @@ changed from hunter. What hasn't yet (maybelle down, the network gone) waits
 here, and a session with root can change it before it goes: the log says
 when each line arrived, so a late one reads as what it is.
 """
+import glob
 import json
 import os
+import stat
 import subprocess
 import sys
 import time
 
 HOME = '/home/recovery'
-SOURCES = [f'{HOME}/.claude/projects', f'{HOME}/.pi/agent', '/var/lib/magenta-recovery']
+SOURCES = [
+    f'{HOME}/.claude/projects',
+    f'{HOME}/.pi/agent',
+    '/var/lib/magenta-recovery',
+    '/dev/shm/recovery-tmp-*/pi-sessions',
+]
 STATE = '/var/lib/magenta-recovery-ship/offsets.json'
 KEY = '/etc/magenta/recovery-log-key'
 KNOWN = '/var/lib/magenta-recovery-ship/known_hosts'
@@ -26,11 +33,17 @@ PAUSE = 2.0
 
 
 def transcripts():
-    for root in SOURCES:
-        for directory, _, files in os.walk(root):
-            for name in files:
-                if name.endswith('.jsonl'):
-                    yield os.path.join(directory, name)
+    for pattern in SOURCES:
+        for root in (glob.glob(pattern) if '*' in pattern else [pattern]):
+            try:
+                if stat.S_ISLNK(os.lstat(root).st_mode):
+                    continue
+            except OSError:
+                continue
+            for directory, _, files in os.walk(root):
+                for name in files:
+                    if name.endswith('.jsonl'):
+                        yield os.path.join(directory, name)
 
 
 def load():
@@ -43,9 +56,12 @@ def load():
 
 def save(offsets):
     tmp = STATE + '.tmp'
-    with open(tmp, 'w') as f:
-        json.dump(offsets, f)
-    os.replace(tmp, STATE)
+    try:
+        with open(tmp, 'w') as f:
+            json.dump(offsets, f)
+        os.replace(tmp, STATE)
+    except OSError:
+        pass  # / is full: offsets stay current in RAM and persist once space returns
 
 
 def send(batch):
