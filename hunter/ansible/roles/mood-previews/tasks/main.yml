@@ -10,6 +10,22 @@
     dest: /usr/local/sbin/hunter-mood-previews
     mode: "0755"
 
+# A dev server started by hand in workbench dies when its container is recreated, which every
+# deploy does. A Mood may instead have one of its ten previews served by a container of its own,
+# declared here (inventory `mood_servers`) and so merged by a person: nothing inside a Mood's
+# directory can ask for a container. The script keeps each one up and points that hostname at it.
+- name: Where hunter keeps what it is told
+  file:
+    path: /etc/magenta
+    state: directory
+    mode: "0755"
+
+- name: The Mood servers the inventory declares
+  copy:
+    dest: /etc/magenta/mood-servers.json
+    mode: "0644"
+    content: "{{ mood_servers | default([]) | to_nice_json }}\n"
+
 - name: Mood previews service
   copy:
     dest: /etc/systemd/system/hunter-mood-previews.service
@@ -20,7 +36,7 @@
 
       [Service]
       Type=oneshot
-      ExecStart=/usr/local/sbin/hunter-mood-previews --base-dir {{ base_dir }} --domain {{ base_domain }}
+      ExecStart=/usr/local/sbin/hunter-mood-previews --base-dir {{ base_dir }} --domain {{ base_domain }} --servers /etc/magenta/mood-servers.json
       TimeoutStartSec=5min
 
 - name: Mood previews timer
@@ -44,3 +60,12 @@
     enabled: yes
     state: started
     daemon_reload: yes
+
+# Run it now rather than wait up to a minute, so a deploy leaves each Mood's own
+# server up and its hostname pointing at it.
+- name: Each Mood's previews and its own servers, now
+  systemd:
+    name: hunter-mood-previews.service
+    state: started
+    daemon_reload: yes
+  changed_when: false

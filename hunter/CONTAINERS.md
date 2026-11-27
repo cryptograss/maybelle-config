@@ -200,6 +200,32 @@ them). A dev server started in workbench on one of them, bound to
 - A Mood named like a container that still has its own `<name>0-9`
   (uploads-and-embeds, docs-tests-qa) waits until that container retires.
 
+### One of the ten from a container of its own: `mood_servers`
+
+A dev server started by hand in workbench dies whenever workbench is
+recreated, which every deploy does, and no restart policy brings back a
+process started with `docker exec`. So a Mood may have one of its ten
+served by a container of its own, declared in the inventory
+(`mood_servers`) and so merged by a person: nothing inside a Mood's
+directory can ask for a container.
+
+```yaml
+mood_servers:
+  - mood: connectome
+    name: connectome-graph
+    index: 0                # connectome0: the Mood's own port, its block + 0
+    dir: graph              # under the Mood's directory, mounted read-only at /serve
+    command: [python3, serve.py, "{port}"]   # {port} is the port above
+```
+
+`hunter-mood-previews`, each minute, writes
+`/opt/magenta/mood-servers/<name>/docker-compose.yml`, brings it up if that
+file changed or the container isn't running, and points `<slug><index>` at
+it instead of at workbench. The container gets the Mood's directory
+read-only, `python:3.13-slim`, a read-only root, and nobody's uid in the
+group `moods`: no docker.sock, no secrets, no published ports. While it has
+no address on magenta-net its hostname stays pointed at workbench.
+
 ## Step 5: the Mood containers fold into /moods
 
 uploads-and-embeds (delivery-kid before 1 Nov) and docs-tests-qa are

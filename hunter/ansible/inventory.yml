@@ -103,6 +103,22 @@ all:
       - mood: docs-tests-qa
         from: [docs-tests-qa]
 
+    # A Mood's own preview server: one of its ten hostnames (<slug><index>) served by a
+    # container of its own instead of by a dev server in workbench, which dies whenever
+    # workbench is recreated — every deploy. The Mood's directory, or `dir` under it, is
+    # mounted read-only at /serve and `command` runs there, as nobody in the group moods:
+    # no docker.sock, no secrets, nothing else. The port is the Mood's own (its .previews
+    # block plus index), so there is still one place that says which port is which.
+    # Kept up each minute by roles/mood-previews. Here, so a person merges each one.
+    mood_servers:
+      # connectome0: blu's Bacon graph previews (#connectome, 27 Nov 2026). Standard
+      # library only, and it fetches pickipedia.xyz anonymously (graph/serve.py).
+      - mood: connectome
+        name: connectome-graph
+        index: 0
+        dir: graph
+        command: [python3, serve.py, "{port}"]
+
     # Containers (the user-instance role, one each).
     users:
       # workbench: the people's box (Cryptograss:Moods as Directories, Justin,
