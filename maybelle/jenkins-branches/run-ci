@@ -34,10 +34,21 @@ trap 'cleanup; exit 143' HUP INT TERM
 # builder may pass through the agent's home to the workspace, never list it (0711).
 chmod 0711 /home/jenkins /home/jenkins/agent "$WORKSPACE_ROOT" 2>/dev/null
 chown -R -h builder:builder "$ws"
+# The proxy: one address under both spellings, and never one of a pair set while its twin is empty. The
+# container is given all six names (maybelle.yml), and a build arrives here with one of each pair: Jenkins
+# keeps a build's variables in a map that ignores case, and which spelling it keeps is its own affair. Handed
+# on as they came, the missing twin went through set and empty, and Python takes an empty https_proxy to mean
+# "no proxy" whatever HTTPS_PROXY says; npm does the same. So pip and npm went straight out, found no DNS, and
+# no branch's tests ran from 22 Nov at the latest to 28 Nov, while git, which reads either, cloned through the
+# proxy in the same build (re; branch-tests #632 printed what ci/test was handed, and #633 ran pip, npm and
+# git through the proxy once both spellings held the address).
+http=${http_proxy:-${HTTP_PROXY:-}}
+https=${https_proxy:-${HTTPS_PROXY:-}}
+no=${no_proxy:-${NO_PROXY:-}}
 runuser -u builder -- env -i \
     HOME=/home/builder PATH=/usr/local/bin:/usr/bin:/bin LANG=C.UTF-8 \
-    http_proxy="${http_proxy:-}" https_proxy="${https_proxy:-}" HTTP_PROXY="${HTTP_PROXY:-}" \
-    HTTPS_PROXY="${HTTPS_PROXY:-}" no_proxy="${no_proxy:-}" NO_PROXY="${NO_PROXY:-}" \
+    http_proxy="$http" https_proxy="$https" HTTP_PROXY="$http" HTTPS_PROXY="$https" \
+    no_proxy="$no" NO_PROXY="$no" \
     sh -c 'cd "$1" && chmod u+x ci/test && exec ./ci/test' run-ci "$ws" </dev/null &
 wait $!
 status=$?
