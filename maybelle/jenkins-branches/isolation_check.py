@@ -5,10 +5,16 @@ does carry that (Cryptograss:Moods/ramp/Plan, section 11). Exits 1, failing the 
 A file, not a heredoc in the task: ansible splits a shell task's words before running it, and an apostrophe
 in a comment there broke the first deploy (9 Nov).
 
-Both halves, because only refusals were ever checked: a proxy that refuses everything passed every line of
-this file, and the agent went from 22 Nov to 28 Nov unable to install a package while each deploy read green
-(re found the outage, docs-tests-qa, 28 Nov 2026; magent added the half that would have caught it). What the
-agent cannot work without is the registries: a branch's ci/test opens with pip and npm.
+Both halves, because only refusals were ever checked: a proxy that turned every request away passed every
+other line of this file, and no deploy would have said so. What the agent cannot work without is the
+registries -- a branch's ci/test opens with pip and npm.
+
+This half would NOT have caught the outage of 22 to 28 Nov, when 53 runs failed at pip or npm. The proxy
+was answering throughout; run-ci handed each build one spelling of each proxy variable and the other empty,
+and an empty https_proxy means "no proxy" to python and npm (re, docs-tests-qa, 28 Nov 2026, proven on the
+agent in branch-tests #632 and #633; mended in re/run-ci-proxy-both-spellings). What catches that is a watch
+on results: red when every recent run stopped before reaching a test. This catches the other case, the day
+the proxy itself dies, which until now was equally silent.
 """
 import socket, sys
 must_not = [('10.0.0.2', p) for p in (22, 2222, 3000, 5432, 8000, 8080)] + [
