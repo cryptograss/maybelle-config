@@ -161,8 +161,11 @@ and every container mounts it at `/moods`:
 - **Git trusts `/moods/*`** (`safe.directory`, system-wide in the image), so
   a clone made by one user isn't "dubious ownership" to another.
 - **A thread** gets a worktree under `/moods/<slug>/threads/<thread>/`.
-- **The hourly backup** (`hunter-vcs-unpushed`) keeps what's only here in
-  each Mood's directory too, as `moods/<slug>/...`.
+- **The hourly backup** (`hunter-vcs-unpushed`) keeps the git work that's only
+  here in each Mood's directory too, as `moods/<slug>/...`: commits on no
+  remote and edits to tracked files, in its checkouts and their worktrees. A
+  file git doesn't track is not kept (one never `git add`ed, or one in a
+  directory that is no checkout): until it's committed it lives only on hunter.
 
 ## workbench: the people's box
 

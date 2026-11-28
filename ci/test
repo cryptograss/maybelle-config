@@ -12,7 +12,9 @@ echo '--- githouse'
 echo '--- maybelle scripts'
 python -m pytest -q maybelle/scripts/tests
 echo '--- hunter'
-python -m pytest -q hunter/test_container_startup.py hunter/scripts
+# hunter/ansible/roles: each role's tests sit beside it (the unpushed-work backup, the ssh router, the
+# previews, the Mood folders, the recovery log). Named as a directory, so the next role's are found too.
+python -m pytest -q hunter/test_container_startup.py hunter/scripts hunter/ansible/roles
 echo '--- the traffic rollup'
 python -m pytest -q shared/ansible/roles/goaccess/tests
 echo '--- render_diff, its own tests'
