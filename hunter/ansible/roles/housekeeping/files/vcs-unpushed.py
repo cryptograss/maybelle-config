@@ -13,6 +13,8 @@ Cryptograss:Moods as Directories), and writes for each checkout that has any:
     <out>/manifest.json                                             what was found, and when
 
 A file git doesn't track is not kept: one never `git add`ed, or one in a directory that is no checkout.
+What this could not read is in the manifest too, never passed over: a worktree under "unread" with the
+reason, a whole checkout under "error".
 
 No git command here runs inside a checkout, or is handed a path inside one that it could write. This runs as root, and a checkout is written by whoever
 works in it, from containers that are meant to have no way to hunter itself (CONTAINERS.md). git runs
@@ -236,19 +238,36 @@ def commit_at(ours, head):
     return at if OBJECT_NAME.fullmatch(at) else None
 
 
-def index_of(meta, ours, scratch):
-    """A copy of a worktree's index for git to read, or None if it has none we can read.
+class Unread(Exception):
+    """Why a worktree's edits can't be compared, in words for the manifest."""
+
+
+def index_of(tree, meta, ours, scratch):
+    """A copy of a worktree's index for git to read; None if nothing is checked out there, so that it
+    has nothing of its own to compare. Unread, saying why, if it has files and no index this will read:
+    its edits are then not kept, and that is said, not passed over (magent's review, 28 Nov 2026: a
+    checkout whose index was a symlink dropped out of the manifest with its edits).
 
     A copy, in a place of ours: git saves an index it has refreshed (it does whenever a file's time
     changed and its content didn't, which is also how it knows not to call that file edited), through
     a lock beside wherever the path leads, and a checkout can make its index a symlink to anywhere. The
     copy keeps the file's time, which is how git tells an entry written in the index's own second from
     one that is settled."""
+    theirs = meta / 'index'
+    if not os.path.lexists(theirs):
+        try:
+            empty = all(name == '.git' for name in os.listdir(tree))
+        except OSError as e:
+            raise Unread(f'its directory could not be listed ({e.strerror}), so its edits are not kept')
+        if empty:
+            return None
+        raise Unread('it has files and no index, so its edits are not kept')
     fd, name = tempfile.mkstemp(prefix='index-', dir=scratch)
     os.close(fd)
     index = Path(name)
-    if not copy(meta / 'index', index, INDEX):
-        return None
+    if not copy(theirs, index, INDEX):
+        raise Unread(f'its index is not a plain file of at most {INDEX // 2**20} MB (a symlink, or '
+                     'something else put there), so its edits are not kept')
     for shared in meta.glob('sharedindex.*'):  # a split index keeps most of itself beside it
         copy(shared, ours / shared.name, INDEX)
     return index
@@ -274,9 +293,15 @@ def keep(repo, dest, inside, scratch):
             else {'error': made.stderr.strip()[-300:]}
     for tree, meta in worktrees(repo, inside):
         at = commit_at(ours, meta / 'HEAD')
-        index = index_of(meta, ours, scratch) if at else None
+        if at is None:
+            continue  # no commit yet: nothing to compare with
+        try:
+            index = index_of(tree, meta, ours, scratch)
+        except Unread as why:
+            summary.setdefault('unread', []).append(f'{tree}: {why}')
+            continue
         if index is None:
-            continue  # no commit yet, or nothing checked out: nothing of its own to compare
+            continue
         dirty = diff(ours, tree, index, at, '--quiet')
         if dirty.returncode == 1:
             dest.mkdir(parents=True, exist_ok=True)
@@ -288,7 +313,7 @@ def keep(repo, dest, inside, scratch):
             summary.setdefault('dirty', []).append(str(tree))
         elif dirty.returncode != 0:
             # Said, not skipped: a worktree git couldn't compare is one whose edits aren't kept.
-            summary.setdefault('unread', []).append(f'{tree}: {(dirty.stderr or "").strip()[-200:]}')
+            summary.setdefault('unread', []).append(f'{tree}: git could not compare it: {(dirty.stderr or "").strip()[-200:]}')
     return summary or None
 
 

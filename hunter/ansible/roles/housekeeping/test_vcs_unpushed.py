@@ -293,6 +293,35 @@ def test_an_index_that_is_a_symlink_leads_nowhere(base, tmp_path):
     assert (precious.read_bytes(), precious.stat().st_mtime_ns, precious.stat().st_ino) == before
 
 
+def test_edits_this_cannot_compare_are_said_not_passed_over(base, tmp_path):
+    """magent's review of this file (28 Nov 2026): with its index a symlink, a checkout with an edit in it
+    dropped out of the manifest, and nothing said its edit wasn't kept."""
+    by_symlink = base / 'emergent-re/agents/re/workspace/red'
+    (by_symlink / 'a.txt').write_text('one, edited\n')
+    (by_symlink / '.git/index').rename(tmp_path / 'the-index')
+    (by_symlink / '.git/index').symlink_to(tmp_path / 'the-index')
+    without = base / 'justin/home/workspace/arthel'
+    (without / 'a.txt').write_text('one, edited\n')
+    (without / '.git/index').unlink()
+    out = base / 'vcs-backup'
+    found = vcs.run(base, out)
+    assert sorted(found) == ['emergent-re/re/workspace/red', 'justin/magent/workspace/arthel']
+    (said,) = found['emergent-re/re/workspace/red']['unread']
+    assert said.startswith(f'{by_symlink}: its index is not a plain file')
+    assert found['justin/magent/workspace/arthel'] == {
+        'unread': [f'{without}: it has files and no index, so its edits are not kept']}
+    assert sorted(p.name for p in out.iterdir()) == ['manifest.json']   # said in the manifest; nothing of theirs kept
+
+
+def test_a_clone_with_nothing_checked_out_is_passed_over(base, tmp_path):
+    repo = base / 'emergent-re/agents/re/workspace/not-checked-out'
+    sh(tmp_path, 'clone', '--no-checkout', '-b', 'arthel', str(tmp_path / 'origin.git'), str(repo))
+    # At a commit, with no index and no files: there is nothing here that could be an edit.
+    assert subprocess.run(['git', 'rev-parse', '--verify', '-q', 'HEAD'], cwd=repo, capture_output=True).returncode == 0
+    assert not (repo / '.git/index').exists() and [p.name for p in repo.iterdir()] == ['.git']
+    assert vcs.run(base, base / 'vcs-backup') == {}
+
+
 def test_a_split_index_is_read_whole(base):
     repo = base / 'emergent-re/agents/re/workspace/red'
     sh(repo, 'update-index', '--split-index')
