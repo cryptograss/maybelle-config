@@ -3,7 +3,8 @@ FROM jenkins/jenkins:lts-jdk21
 
 USER root
 
-# Install Node.js dependencies and other required packages
+# The libraries a node build wants (cairo, pango, librsvg), and the rest the builds need.
+# Node itself comes below: the distro's is too old, as it is for rabbithole on the VPS.
 RUN apt-get update && apt-get install -y \
     build-essential \
     libcairo2-dev \
@@ -30,6 +31,18 @@ RUN apt-get update && apt-get install -y \
     git \
     ffmpeg \
     && rm -rf /var/lib/apt/lists/*
+
+# Node (magent, #interfaces, 28 Nov 2026). This image never had it, under a comment that said it
+# did: pickipedia's build skipped its JavaScript check ("node not installed; skipping
+# check-verify-js.mjs"), and from 28 Nov wrote an empty assets/connectome/card-titles.json, so a
+# shared /bacon link to a show said "The Oracle of Bluegrass Bacon" and not the show's own name.
+# NodeSource 22, the version the VPS builds rabbithole with.
+RUN curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key -o /usr/share/keyrings/nodesource.asc && \
+    echo "deb [signed-by=/usr/share/keyrings/nodesource.asc] https://deb.nodesource.com/node_22.x nodistro main" \
+        > /etc/apt/sources.list.d/nodesource.list && \
+    apt-get update && apt-get install -y nodejs && \
+    rm -rf /var/lib/apt/lists/* && \
+    node --version
 
 # The Blue Railroad import bot, from this repository: maybelle/blue-railroad-import/, which
 # maybelle.yml copies into this build context. It used to be installed from GitHub, which meant
